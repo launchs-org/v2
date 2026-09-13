@@ -1,0 +1,9 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      target: Develop
+    tty: true
+    volumes:
+      - ./backend/src:/app/src
+  
