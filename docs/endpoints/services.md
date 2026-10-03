@@ -1,0 +1,141 @@
+[← エンドポイント一覧](README.md)
+
+## サービス関連 (/deploy/:deployId/service)
+### サービス作成 (ポート公開)
+- Post: /deploy/:deployId/service
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{
+  "ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "metrics", "port": 9090, "protocol": "tcp"}
+  ]
+}
+```
+- Response (200)
+```json
+{
+  "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "metrics", "port": 9090, "protocol": "tcp"}
+  ],
+  "pending_ports": null,
+  "status": "pending",
+  "dnsName": null,
+  "clusterIP": null
+}
+```
+- Note: service は deploy に1つだけ属する(1 deploy = 1 service)。既にserviceが存在するdeployに対して再度呼び出すと 409 を返す
+- Note: service はコンテナ内の複数ポートを、クラスタ内(および必要ならingressのpath ruleから参照されて外部)へ公開する単位。ports配列の各要素でport番号ごとにprotocol("tcp"|"udp")を選べる
+- Note: HTTPという制約はここには無い(TCP/UDPどちらのポートも登録できる)。「HTTPのみ対応」の制約は[イングレス](ingresses.md)側にあり、ingressのpath ruleはprotocol "tcp" のポートのみ参照できる
+- Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName("<name>.svc.cluster.local" 形式、nameはdeployごとに割り当てられるサービス名)と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
+
+### サービス取得
+- Get: /deploy/:deployId/service
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "metrics", "port": 9090, "protocol": "tcp"}
+  ],
+  "pending_ports": null,
+  "status": "active",
+  "dnsName": "web.svc.cluster.local",
+  "clusterIP": "10.43.12.7"
+}
+```
+- Response (200、pending が存在する場合)
+```json
+{
+  "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "metrics", "port": 9090, "protocol": "tcp"}
+  ],
+  "pending_ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "game", "port": 27015, "protocol": "udp"}
+  ],
+  "status": "active",
+  "dnsName": "web.svc.cluster.local",
+  "clusterIP": "10.43.12.7"
+}
+```
+- Note: ports は現在反映されている内容。pending_ports は更新リクエスト後まだ apply されていない変更内容(変更が無ければ null)
+- Note: サービスが未作成のdeployに対して呼び出すと 404 を返す
+
+### サービス更新 (一括置き換え、pendingとして保存)
+- Patch: /deploy/:deployId/service
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{
+  "ports": [
+    {"name": "web", "port": 8080, "protocol": "tcp"},
+    {"name": "game", "port": 27015, "protocol": "udp"}
+  ]
+}
+```
+- Response (200)
+```json
+{}
+```
+- Note: ports は個別要素単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)。ポートの追加・削除・変更は全てこのエンドポイントで配列ごと送る
+- Note: この時点ではまだ反映されない。pending_ports として保存され、サービスの apply を呼ぶまで ports(現在反映されている値)は変わらない
+- Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はserviceに対する変更・apply・discardを排他制御する)
+
+### サービス 適用
+- Post: /deploy/:deployId/service/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_ports の内容を ports に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ ports は更新されていない。pending_ports が null の場合は 409 を返す
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 service の pending_ports はまだ消費されず、適用しようとしている内容を保持したままとなる。再起動の結果が確定した時点(成功・失敗いずれの場合も)で service の ports が pending_ports の内容に更新され、pending_ports は null に戻る。成功すれば deploy の status は "active" に、失敗すれば "failed" になる(service の ports の内容自体は失敗時も新しい値で上書きされる)([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
+- Note: 既に deploy の status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
+- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に deploy の status を "failed" に遷移させる
+
+### サービス 破棄
+- Post: /deploy/:deployId/service/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_ports の内容を適用せずに破棄する(ports には影響しない)。pending_ports が null の場合は 409 を返す
+- Note: deploy の status が "applying" の間は 409 を返す
+
+### サービス削除
+- Delete: /deploy/:deployId/service
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 呼び出すと即座に応答し、service の status は直ちに "deleting" になる。実体(k8s Service等)の削除処理は非同期に開始され、完了するとレコード自体が削除される([サービス取得](#サービス取得)は 404 を返すようになる)
+- Note: 当該 service の各ポートを参照している ingress の path rule は、呼び出し時点(status: "deleting" になった時点)で連鎖して削除される
+- Note: 既に status が "deleting" の間に再度削除を呼び出した場合は 409 を返す(削除処理中の多重実行不可)
