@@ -11,3 +11,6 @@
 - [サービス関連](services.md) (/deploy/:deployId/service)
 - [イングレス関連](ingresses.md) (/projects/:projectId/ingresses)
 - [ボリューム関連](volumes.md) (/projects/:projectId/volumes, /deploy/:deployId/mounts)
+
+## 関連
+- [Issues 一覧](../issues/README.md) — 各エンドポイントの詳細設計レビュー用Issue
