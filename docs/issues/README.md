@@ -3,7 +3,7 @@
 グループごとにフォルダを分けて管理する。各グループの詳細は以下を参照。
 
 - [認証関連](auth/README.md) (/auth/)
-- プロジェクト関連 (/projects) — 未作成
+- [プロジェクト関連](projects/README.md) (/projects)
 - ビルド関連 (/upload, /build) — 未作成
 - デプロイ・起動設定関連 (/deploy) — 未作成
 - サービス関連 (/deploy/:deployId/service) — 未作成
@@ -13,7 +13,7 @@
 ## レビュー進捗
 
 - [x] 認証関連 (/auth/) — レビュー完了
-- [ ] プロジェクト関連 (/projects)
+- [x] プロジェクト関連 (/projects) — レビュー完了
 - [ ] ビルド関連 (/upload, /build)
 - [ ] デプロイ・起動設定関連 (/deploy)
 - [ ] サービス関連 (/deploy/:deployId/service)
