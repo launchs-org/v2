@@ -87,6 +87,7 @@
 {}
 ```
 - Note: 配下の path rule(rules/pending_rules) も全て連鎖して削除される
+- Note: ingress の status が "applying" の間は 409 を返す(進行中のapplyと排他制御する)
 
 ### イングレス更新 (rules 一括置き換え、pendingとして保存)
 - Put: /projects/:projectId/ingresses/:ingressId
@@ -124,10 +125,11 @@
 {}
 ```
 - Note: pending_rules の内容を rules に反映するため、ルーティング設定の書き換えを開始する。呼び出し自体は即座に応答するが、この時点ではまだ rules は更新されていない。pending_rules が null の場合は 409 を返す
-- Note: 呼び出し直後、ingress の status は "applying" になる。この間 pending_rules はまだ消費されず、適用しようとしている内容を保持したままとなる。反映の結果が確定した時点(成功・失敗いずれの場合も)で rules が pending_rules の内容に更新され、pending_rules は null に戻る。成功すれば status は "active" に、失敗すれば "failed" になる(rules の内容自体は失敗時も新しい値で上書きされる)
+- Note: 呼び出し直後、ingress の status は "applying" になる。この間 pending_rules はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_rules の値を使って先にルーティング設定への反映を試み、その結果(成功・失敗)が確定した時点で初めて rules を pending_rules の内容に更新し、pending_rules は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる(rules の内容自体は失敗時も新しい値で上書きされる)
 - Note: ingressの反映はdeployのコンテナ再起動を伴わないルーティング設定の書き換えのみのため、config/volumes/serviceのapplyより短時間で完了する想定だが、確認手順(status のポーリング)は同様
 - Note: 既に ingress の status が "applying" の場合は 409 を返す(多重apply不可)
 - Note: applying には 60秒 のタイムアウトを設ける。この時間内に反映完了が確認できない場合、強制的に status を "failed" に遷移させる
+- Note: pending_rules に含まれる serviceId/port の妥当性(同一project内のserviceであること、対象serviceのportsに存在するport番号であること、protocolが"tcp"であること)は、イングレス更新時点だけでなくapply実行時にも改めて検証する。更新から適用までの間にservice側のポート構成が変更される可能性があるため
 
 ### イングレス 破棄
 - Post: /projects/:projectId/ingresses/:ingressId/discard
