@@ -129,7 +129,7 @@
 ```json
 {}
 ```
-- Note: 削除前に replicas を 0 にスケールしてから削除する(停止という概念はない)
+- Note: replicas や status に関わらず、稼働中の deploy に対してもそのまま削除を受け付ける。事前にスケーリングで replicas を 0 にする必要はなく、削除処理の内部でコンテナの停止まで行う
 
 ### デプロイ 起動設定取得 (環境変数・起動コマンド・引数)
 - Get: /deploy/:deployId/config
@@ -207,7 +207,7 @@
 {}
 ```
 - Note: pending_env/pending_command/pending_args の内容を env/command/args に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ env/command/args は更新されていない。pending_env/pending_command/pending_args が全て null(何も更新していない)の場合は 409 を返す
-- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_env/pending_command/pending_args はまだ消費されず、適用しようとしている内容を保持したままとなる。再起動の結果が確定した時点(成功・失敗いずれの場合も)で env/command/args が pending_env/pending_command/pending_args の内容に更新され、pending_env/pending_command/pending_args は null に戻る。成功すれば status は "active" に、失敗すれば status は "failed" になる(env/command/args の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_env/pending_command/pending_args はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_* の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて env/command/args を pending_* の内容に更新し、pending_env/pending_command/pending_args は null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる(env/command/args の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
 - Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)
 
