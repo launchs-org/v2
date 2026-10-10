@@ -9,21 +9,19 @@
 ```
 - Body
 ```json
-{"name": "db-data", "sizeMB": 10240}
+{"name": "db-data", "sizeMB": 5120}
 ```
 - Response (200)
 ```json
 {
   "volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "name": "db-data",
-  "pending_name": null,
-  "sizeMB": 10240,
   "pending_sizeMB": null,
-  "status": "active"
+  "sizeMB": 5120
 }
 ```
 - Note: volume は project に属する永続ストレージ。deploy を削除してもデータは残り、別の deploy から再マウントできる
-- Note: 作成直後は name/sizeMB が指定値で既に反映済み(status: "active")。作成時点ではpendingは発生しない
+- Note: sizeMB にはアカウントごとの上限(デフォルト 5GB = 5120MB)があり、超過した場合はエラーになる。上限はアカウントごとに個別設定可能で、デフォルトを超える上限が必要な場合は申請して引き上げる(申請の手段・承認フローは別途、アカウント管理側で設計する)
 
 ### ボリューム一覧
 - Get: /projects/:projectId/volumes
@@ -38,10 +36,8 @@
     {
       "volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "name": "db-data",
-      "pending_name": null,
-      "sizeMB": 10240,
       "pending_sizeMB": null,
-      "status": "active"
+      "sizeMB": 5120
     }
   ]
 }
@@ -53,34 +49,19 @@
 ```json
 {"Authorization": "Bearer <accessToken>"}
 ```
-- Response (200、pending が無い場合)
+- Response (200)
 ```json
 {
   "volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "name": "db-data",
-  "pending_name": null,
-  "sizeMB": 10240,
   "pending_sizeMB": null,
-  "status": "active",
+  "sizeMB": 5120,
   "mountedBy": ["deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"]
 }
 ```
-- Response (200、pending が存在する場合)
-```json
-{
-  "volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "name": "db-data",
-  "pending_name": null,
-  "sizeMB": 10240,
-  "pending_sizeMB": 20480,
-  "status": "active",
-  "mountedBy": ["deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"]
-}
-```
-- Note: name/sizeMB は現在有効な内容。pending_name/pending_sizeMB は[ボリューム更新](#ボリューム更新-一括置き換えpendingとして保存)後まだ[適用](#ボリューム-適用)されていない変更内容(変更が無ければ null)
-- Note: status は "applying" | "active" | "failed" のいずれか。applyを呼ぶと反映が完了するまで "applying" になる
+- Note: sizeMB は現在有効な内容。pending_sizeMB は[ボリューム拡張](#ボリューム拡張-一括置き換えpendingとして保存)後まだ[適用](#ボリューム-適用)されていない変更内容(変更が無ければ null)
 
-### ボリューム更新 (一括置き換え、pendingとして保存)
+### ボリューム名前変更
 - Patch: /projects/:projectId/volumes/:volumeId
 - Header
 ```json
@@ -88,15 +69,31 @@
 ```
 - Body
 ```json
-{"name": "db-data", "sizeMB": 20480}
+{"name": "db-data-renamed"}
 ```
 - Response (200)
 ```json
 {}
 ```
-- Note: name/sizeMB は個別key単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)
-- Note: この時点ではまだ反映されない。pending_name/pending_sizeMB として保存され、[ボリューム適用](#ボリューム-適用) を呼ぶまで name/sizeMB(現在有効な値)は変わらない
+- Note: name のみ変更可能(sizeMBはこのエンドポイントでは変更できない。拡張は[ボリューム拡張](#ボリューム拡張-一括置き換えpendingとして保存)を使う)。pending_*→apply/discardモデルは使わず、呼び出し直後に即時反映される(ストレージ側の実体には影響しないメタデータの変更のため)
+
+### ボリューム拡張 (一括置き換え、pendingとして保存)
+- Patch: /projects/:projectId/volumes/:volumeId/size
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{"sizeMB": 10240}
+```
+- Response (200)
+```json
+{}
+```
 - Note: sizeMB は拡大のみ許可し、縮小(現在のsizeMBを下回る値)を指定した場合はエラーを返す(永続ボリュームの一般的な制約に合わせる)
+- Note: この時点ではまだ反映されない。pending_sizeMB として保存され、[ボリューム適用](#ボリューム-適用) を呼ぶまで sizeMB(現在有効な値)は変わらない
+- Note: アカウントごとの上限(デフォルト 5120MB)を超える sizeMB を指定した場合はエラーを返す
 - Note: volume の status が "applying" の間はこの操作を受け付けず 409 を返す
 
 ### ボリューム 適用
@@ -109,8 +106,8 @@
 ```json
 {}
 ```
-- Note: pending_name/pending_sizeMB の内容を name/sizeMB に反映する処理(ストレージのリサイズ等)を開始する。呼び出し自体は即座に応答するが、この時点ではまだ name/sizeMB は更新されていない。pending_name/pending_sizeMB が両方 null の場合は 409 を返す
-- Note: 呼び出し直後、volume の status は "applying" になる。この間 pending_name/pending_sizeMB はまだ消費されず、適用しようとしている内容を保持したままとなる。反映の結果が確定した時点(成功・失敗いずれの場合も)で name/sizeMB が pending_name/pending_sizeMB の内容に更新され、pending_name/pending_sizeMB は null に戻る。成功すれば status は "active" に、失敗すれば "failed" になる
+- Note: pending_sizeMB の内容を sizeMB に反映する処理(ストレージのリサイズ)を開始する。呼び出し自体は即座に応答するが、この時点ではまだ sizeMB は更新されていない。pending_sizeMB が null の場合は 409 を返す
+- Note: 呼び出し直後、volume の status は "applying" になる。この間 pending_sizeMB はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_sizeMB の値を使って先にストレージ側への反映を試み、その結果(成功・失敗)が確定した時点で初めて sizeMB を pending_sizeMB の内容に更新し、pending_sizeMB は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる
 - Note: このapplyは volume をマウントしている deploy のコンテナ再起動を伴わない(ストレージ側の変更のみ)
 - Note: 既に volume の status が "applying" の場合は 409 を返す(多重apply不可)
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に反映完了が確認できない場合、強制的に status を "failed" に遷移させる
@@ -125,7 +122,7 @@
 ```json
 {}
 ```
-- Note: pending_name/pending_sizeMB の内容を適用せずに破棄する(name/sizeMB には影響しない)。両方 null の場合は 409 を返す
+- Note: pending_sizeMB の内容を適用せずに破棄する(sizeMB には影響しない)。pending_sizeMB が null の場合は 409 を返す
 - Note: volume の status が "applying" の間は 409 を返す
 
 ### ボリューム削除
@@ -139,6 +136,7 @@
 {}
 ```
 - Note: いずれかの deploy にマウント中の場合は 409 を返す(マウント解除してから削除する)
+- Note: volume の status が "applying" の間は 409 を返す(進行中の拡張applyと排他制御する)
 
 ### デプロイ ボリュームマウント取得
 - Get: /deploy/:deployId/mounts
@@ -194,7 +192,8 @@
 {}
 ```
 - Note: pending_mounts の内容を mounts に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ mounts は更新されていない。pending_mounts が無い場合は 409 を返す
-- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_mounts はまだ消費されず、適用しようとしている内容を保持したままとなる。再起動の結果が確定した時点(成功・失敗いずれの場合も)で mounts が pending_mounts の内容に更新され、pending_mounts は null に戻る。成功すれば status は "active" に、失敗すれば status は "failed" になる(mounts の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_mounts はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_mounts の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて mounts を pending_mounts の内容に更新し、pending_mounts は null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる(mounts の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
+- Note: pending_mounts に含まれる volumeId の妥当性(同一project内のvolumeであること)は、apply実行時にも改めて検証する。マウント設定から適用までの間にvolume側の状態が変更される可能性があるため
 - Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる
 

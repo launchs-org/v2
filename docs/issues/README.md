@@ -8,7 +8,7 @@
 - [デプロイ・起動設定関連](deploys/README.md) (/deploy)
 - [サービス関連](services/README.md) (/deploy/:deployId/service)
 - [イングレス関連](ingresses/README.md) (/projects/:projectId/ingresses)
-- ボリューム関連 (/projects/:projectId/volumes, /deploy/:deployId/mounts) — 未作成
+- [ボリューム関連](volumes/README.md) (/projects/:projectId/volumes, /deploy/:deployId/mounts)
 
 ## レビュー進捗
 
@@ -18,4 +18,6 @@
 - [x] デプロイ・起動設定関連 (/deploy) — レビュー完了
 - [x] サービス関連 (/deploy/:deployId/service) — レビュー完了
 - [x] イングレス関連 (/projects/:projectId/ingresses) — レビュー完了
-- [ ] ボリューム関連 (/projects/:projectId/volumes, /deploy/:deployId/mounts)
+- [x] ボリューム関連 (/projects/:projectId/volumes, /deploy/:deployId/mounts) — レビュー完了
+
+全グループのレビューが完了。
