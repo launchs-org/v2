@@ -10,3 +10,4 @@
 - [デプロイ 起動設定更新](006-put-deploy-deployid-config.md) `Put /deploy/:deployId/config`
 - [デプロイ 起動設定 適用](007-post-deploy-deployid-config-apply.md) `Post /deploy/:deployId/config/apply`
 - [デプロイ 起動設定 破棄](008-post-deploy-deployid-config-discard.md) `Post /deploy/:deployId/config/discard`
+- [デプロイ ログ取得](009-get-deploy-deployid-logs.md) `Get /deploy/:deployId/logs`

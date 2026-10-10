@@ -8,3 +8,4 @@ Claude とのやり取りの中で決まった重要な決定事項・経緯を�
 ## 一覧
 
 - [2026-10-04 Issues再構築・エンドポイント分割](2026-10-04-issues-rebuild.md)
+- [2026-10-10 技術調査: Temporal採用検討 / デプロイログ取得の追加](2026-10-10-temporal-and-deploy-logs.md)
