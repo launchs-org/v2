@@ -9,5 +9,14 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # 開発用の自己署名の証明書を作る。1回だけ実行して終わる(すでにあれば何もしない)。
+  nginx-certificate:
+    image: alpine/openssl:3.5.9
+    entrypoint: ["/bin/sh", "/dev-nginx/generate-certificate.sh"]
+    volumes:
+      - ./dev/nginx:/dev-nginx:ro
+      - nginx-certificates:/certs
+
 volumes:
   go-module-cache:
+  nginx-certificates:
