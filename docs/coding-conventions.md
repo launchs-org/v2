@@ -61,7 +61,7 @@ docker-compose.yaml
 - 機械的に検出するため、`golangci-lint` の `varnamelen` を有効にする(設定は実装時に調整)。
 
 **採用案:**
-- パッケージ名は小文字・単数・短くする(`controller`、`service`、`repository`)。ファイル名は `snake_case`。
+- パッケージ名は小文字・単数・短くする(`controller`、`service`、`repository`)。例外として、Echo の `middleware` パッケージと名前が重なる `middlewares` だけは複数形にする。ファイル名は `snake_case`。
 - 識別子は英語。略語は大文字にそろえる(`ProjectID`、`URL`、`JSON`)。
 - interface は使う側のパッケージで定義し、小さくする。モックは手書きの fake にする(モックのライブラリは入れない)。
 - 依存はコンストラクタで渡す。グローバル変数と `init()` は使わない。
@@ -173,7 +173,9 @@ docker-compose.yaml
 - `docker-compose.yaml` の各サービスは、ビルドコンテキストをリポジトリルートにし、リポジトリ全体をバインドマウントする。
 - Taskfile のタスクは、全て `docker compose` を呼び、コンテナの中で実行する。案: `task up`、`task down`、`task logs`、`task migrate`、`task test`、`task lint`、`task fmt`、`task build`。
 
-**注意:** `task` コマンドは、このサーバーにまだ入っていない。入れる必要がある。
+**注意:** `task` コマンドは、インストール済み(go-task)。
+
+**開発環境の入り口:** バックエンドはホストに公開せず、nginx が自己署名の証明書で HTTPS を終端して、コンテナネットワークの中でプロキシする(`https://localhost:18443`)。
 
 ---
 
