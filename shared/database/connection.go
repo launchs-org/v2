@@ -30,6 +30,8 @@ const connectionCheckTimeout = 5 * time.Second
 func Open(databaseURL string) (*gorm.DB, error) {
 	gormDatabase, openError := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		Logger: gormlogger.Discard,
+		// 一意制約などの違反を、gorm.ErrDuplicatedKey などの共通のエラーに変換する。
+		TranslateError: true,
 	})
 	if openError != nil {
 		return nil, fmt.Errorf("データベースに接続できなかった: %w", openError)
