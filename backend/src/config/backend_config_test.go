@@ -32,38 +32,43 @@ func TestLoadBackendConfig(testingT *testing.T) {
 		expectedErrorPieces []string
 	}{
 		{
-			name:           "何も設定しなければ、既定値になる",
-			environment:    map[string]string{},
-			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo},
+			name:           "DATABASE_URL だけ設定すれば、他は既定値になる",
+			environment:    map[string]string{"DATABASE_URL": "postgres://db"},
+			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db"},
 		},
 		{
 			name:           "全て設定すると、その値になる",
-			environment:    map[string]string{"HTTP_PORT": "9090", "LOG_LEVEL": "debug"},
-			expectedConfig: BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug},
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "9090", "LOG_LEVEL": "debug"},
+			expectedConfig: BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db"},
+		},
+		{
+			name:                "DATABASE_URL が無いとエラー",
+			environment:         map[string]string{},
+			expectedErrorPieces: []string{"DATABASE_URL"},
 		},
 		{
 			name:                "ポート番号が整数でないとエラー",
-			environment:         map[string]string{"HTTP_PORT": "abc"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "abc"},
 			expectedErrorPieces: []string{"HTTP_PORT"},
 		},
 		{
 			name:                "ポート番号が0だとエラー",
-			environment:         map[string]string{"HTTP_PORT": "0"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "0"},
 			expectedErrorPieces: []string{"HTTP_PORT"},
 		},
 		{
 			name:                "ポート番号が65536だとエラー",
-			environment:         map[string]string{"HTTP_PORT": "65536"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "65536"},
 			expectedErrorPieces: []string{"HTTP_PORT"},
 		},
 		{
 			name:                "ログレベルが未知だとエラー",
-			environment:         map[string]string{"LOG_LEVEL": "verbose"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "LOG_LEVEL": "verbose"},
 			expectedErrorPieces: []string{"LOG_LEVEL"},
 		},
 		{
 			name:                "問題が複数あると、全てまとめて報告する",
-			environment:         map[string]string{"HTTP_PORT": "99999", "LOG_LEVEL": "verbose"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "99999", "LOG_LEVEL": "verbose"},
 			expectedErrorPieces: []string{"HTTP_PORT", "LOG_LEVEL"},
 		},
 	}

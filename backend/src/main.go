@@ -37,7 +37,7 @@ func main() {
 func run() error {
 	backendConfig, configError := config.LoadBackendConfig(sharedconfig.NewProcessEnvironmentReader())
 	if configError != nil {
-		return fmt.Errorf("設定を読み込めなかった: %w", configError)
+		return fmt.Errorf("設定を読み込めませんでした: %w", configError)
 	}
 
 	appLogger := logger.New(os.Stdout, "backend", backendConfig.LogLevel)
