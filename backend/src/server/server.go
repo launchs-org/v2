@@ -1,3 +1,6 @@
+// Package server は、バックエンドの Echo のサーバーを組み立てる。
+//
+// ミドルウェアとエラーハンドラー(middlewares パッケージ)を登録し、ルーティングを登録する。
 package server
 
 import (
@@ -5,6 +8,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+
+	"launchs/backend/src/middlewares"
 )
 
 // New は、バックエンドの Echo のサーバーを組み立てる。
@@ -24,11 +29,11 @@ import (
 func New(appLogger *slog.Logger) *echo.Echo {
 	echoServer := echo.NewWithConfig(echo.Config{
 		Logger:           appLogger,
-		HTTPErrorHandler: NewErrorHandler(appLogger),
+		HTTPErrorHandler: middlewares.NewErrorHandler(appLogger),
 	})
 
 	echoServer.Use(middleware.RequestID())
-	echoServer.Use(NewAccessLogMiddleware(appLogger))
+	echoServer.Use(middlewares.NewAccessLogMiddleware(appLogger))
 	echoServer.Use(middleware.Recover())
 
 	registerRoutes(echoServer)

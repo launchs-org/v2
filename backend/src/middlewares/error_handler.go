@@ -1,8 +1,9 @@
-// Package server は、バックエンドの Echo のサーバーを組み立てる。
+// Package middlewares は、バックエンドの HTTP の共通の処理(ミドルウェアとエラーハンドラー)を提供する。
 //
-// ミドルウェア(リクエスト ID、アクセスログ、パニックからの復帰)、エラーの変換、
-// ルーティングの登録を担当する。
-package server
+// リクエスト全体にかかわる処理(アクセスログ、エラーの変換)をここに置き、
+// どのエンドポイントからも、同じ振る舞いで使えるようにする。
+// 組み立てて Echo に登録するのは、server パッケージの役目。
+package middlewares
 
 import (
 	"errors"
@@ -14,8 +15,9 @@ import (
 	"launchs/shared/apperror"
 )
 
-// requestIDHeaderName は、リクエストを識別する ID を入れる HTTP ヘッダの名前。
-const requestIDHeaderName = "X-Request-Id"
+// RequestIDHeaderName は、リクエストを識別する ID を入れる HTTP ヘッダの名前。
+// リクエスト ID のミドルウェア、アクセスログ、エラーのログが、同じヘッダを見る。
+const RequestIDHeaderName = "X-Request-Id"
 
 // defaultMessagesByKind は、アプリケーションのエラーではなく Echo が返すエラー
 // (存在しないパスなど)を変換するときに使う、利用者向けのメッセージ。
@@ -52,7 +54,7 @@ func NewErrorHandler(appLogger *slog.Logger) echo.HTTPErrorHandler {
 
 		if statusCode >= http.StatusInternalServerError {
 			appLogger.Error("リクエストの処理に失敗した",
-				"request_id", echoContext.Response().Header().Get(requestIDHeaderName),
+				"request_id", echoContext.Response().Header().Get(RequestIDHeaderName),
 				"method", echoContext.Request().Method,
 				"path", echoContext.Request().URL.Path,
 				"error", handledError,

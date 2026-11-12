@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"launchs/backend/src/middlewares"
 	"launchs/shared/apperror"
 	"launchs/shared/logger"
 )
@@ -28,7 +29,7 @@ func TestServerHealthCheck(testingT *testing.T) {
 	if strings.TrimSpace(recorder.Body.String()) != `{"status":"ok"}` {
 		testingT.Errorf("ボディが違う: %s", recorder.Body.String())
 	}
-	if recorder.Header().Get(requestIDHeaderName) == "" {
+	if recorder.Header().Get(middlewares.RequestIDHeaderName) == "" {
 		testingT.Errorf("レスポンスにリクエスト ID が付いていない")
 	}
 }
@@ -40,11 +41,11 @@ func TestServerKeepsIncomingRequestID(testingT *testing.T) {
 	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo))
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	request.Header.Set(requestIDHeaderName, "request-from-client")
+	request.Header.Set(middlewares.RequestIDHeaderName, "request-from-client")
 	recorder := httptest.NewRecorder()
 	echoServer.ServeHTTP(recorder, request)
 
-	if actualRequestID := recorder.Header().Get(requestIDHeaderName); actualRequestID != "request-from-client" {
+	if actualRequestID := recorder.Header().Get(middlewares.RequestIDHeaderName); actualRequestID != "request-from-client" {
 		testingT.Errorf("リクエスト ID が引き継がれていない: %q", actualRequestID)
 	}
 	if !strings.Contains(logOutput.String(), `"request_id":"request-from-client"`) {

@@ -1,4 +1,4 @@
-package server
+package middlewares
 
 import (
 	"bytes"
@@ -78,7 +78,7 @@ func TestAccessLogMiddlewareLogsOneLinePerRequest(testingT *testing.T) {
 			echoServer := newServerWithAccessLog(logger.New(&logOutput, "backend", slog.LevelInfo))
 
 			request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
-			request.Header.Set(requestIDHeaderName, "request-abc")
+			request.Header.Set(RequestIDHeaderName, "request-abc")
 			echoServer.ServeHTTP(httptest.NewRecorder(), request)
 
 			logLine := parseSingleLogLine(subTest, &logOutput)
