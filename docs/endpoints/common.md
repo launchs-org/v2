@@ -65,3 +65,7 @@ GET /projects?limit=20&cursor=...
 ```json
 {"projects": [{"projectId": "project-...", "name": "my-app"}], "nextCursor": "..."}
 ```
+
+## 運用のためのエンドポイント
+- `GET /healthz`: サーバーが動いているかを返す。認証は不要で、`/api/v1` の外にある。200 と `{"status": "ok"}` を返す。
+- k8s の死活監視(liveness / readiness probe)などの、運用のために使う。データベースなどの外部には問い合わせず、サーバーのプロセスがリクエストを受けられるかだけを返す。
