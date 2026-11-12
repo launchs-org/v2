@@ -13,22 +13,34 @@ launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエ
 ## ディレクトリ構成
 
 ```
-backend/        バックエンド(Golang/Echo)のソース一式
+backend/        バックエンド(Golang/Echo)。dockerfile と src/(コード)を持つ
+auth/ worker/ registry/ logcollector/   同じ形のコンテナ用フォルダ(これから作る)
+shared/         バックエンドとワーカーで共有するコード
+migrations/     DB のマイグレーション(up のみ)
 docs/
   endpoints/    確定したエンドポイント仕様(実装のソースオブトゥルース)
   issues/       エンドポイントごとの詳細設計レビュー用Issue
   talks/        作業の経緯・設計判断の記録(会話ログ)
   pre-implementation-checklist.md  実装着手前に決める確認項目(回答欄付き)
+  coding-conventions.md  コードの書き方とファイルのルール
 docker-compose.yaml  開発環境用
+Taskfile.yml    開発のコマンド(これから作る)
 ```
 
 ## 実装方針(確定分)
 
 実装前に決めた技術方針は [docs/pre-implementation-checklist.md](docs/pre-implementation-checklist.md) に回答と決定を残している。実装時はまずそちらを確認すること。主な点は以下。
 
-- 構成: 認証・バックエンド(API)・ワーカー(Temporal Worker)・レジストリ(自作)・ログ収集は別コンテナ。プロジェクトルート直下にそれぞれフォルダを分け、各フォルダに `main.go` を置く。
-- バックエンドとワーカーで共有するコード(DBのモデル、Workflow/Activity の名前と入出力の型)は共有フォルダに置く。
-- Go モジュールはルートに `go.mod` を1つ置き、docker のビルドコンテキストはリポジトリルートにする(コンテナごとに Dockerfile で使うフォルダを選ぶ)。
+- 構成: 認証・バックエンド(API)・ワーカー(Temporal Worker)・レジストリ(自作)・ログ収集は別コンテナ。プロジェクトルート直下にそれぞれフォルダを分け、フォルダの直下に `dockerfile`、その下の `src/` にコード(`src/main.go` など)を置く。
+- バックエンドとワーカーで共有するコード(DBのモデル、Workflow/Activity の名前と入出力の型)は `shared/` に置く(`src/` は挟まない)。
+- Go モジュールはルートに `go.mod` を1つ置き、モジュール名は `launchs`。docker のビルドコンテキストはリポジトリルートにする(コンテナごとに Dockerfile で使うフォルダを選ぶ)。
+- ビルド・テスト・実行は、全てコンテナの中で行う(ホストの Go は `go.mod` より古い)。開発のコマンドは `Taskfile.yml`(go-task)にまとめる。
+- コードを書くときのルールは [docs/coding-conventions.md](docs/coding-conventions.md) に従う。特に次を守る。
+  - **一文字の変数名は禁止**(ループの添字、レシーバーも含む)。
+  - **ファイル名は役割が分かる名前にする**(`project_controller.go` のように層の名前を付ける)。
+  - **全ての関数・メソッドに、詳細な日本語のコメントを書く**(処理の流れ、引数、戻り値、エラー、副作用)。
+  - マイグレーションは up だけ書く。
+- Git の運用: `develop` から `feature/<短い説明>` のブランチを切り、細かい単位で作業し、プルリクエストで `develop` に入れる。マージは本人が行う。Claude は、依頼がない限り push やプルリクエストの作成をせず、マージもしない。
 - コンテナ名は `backend`(または `app`)、`worker` など。コンテナの名前と、コンテナ内部のコード構成は別の話として扱う。
 - コンテナ内部のコード構成は `controller / service / repository / model` の層でファイルを分ける。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
