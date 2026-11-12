@@ -24,7 +24,7 @@ docs/
   pre-implementation-checklist.md  実装着手前に決める確認項目(回答欄付き)
   coding-conventions.md  コードの書き方とファイルのルール
 docker-compose.yaml  開発環境用
-Taskfile.yml    開発のコマンド(これから作る)
+Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実行する)
 ```
 
 ## 実装方針(確定分)
