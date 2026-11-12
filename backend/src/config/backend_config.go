@@ -35,12 +35,17 @@ type BackendConfig struct {
 
 	// DatabaseURL は、app データベースの接続先(環境変数 DATABASE_URL)。パスワードを含むので、ログに出さない。
 	DatabaseURL string
+
+	// DevUserID は、認証のコンテナができるまで、全てのリクエストのユーザーとして扱う ID(環境変数 DEV_USER_ID)。
+	// 省略すると空になり、全ての API が 401 になる。認証のコンテナを作るときに、この設定は無くす。
+	DevUserID string
 }
 
 // LoadBackendConfig は、環境変数からバックエンドの設定を読む。
 //
 // 読む環境変数:
 //   - DATABASE_URL: app データベースの接続先(必須)。
+//   - DEV_USER_ID: 開発用の仮の認証で使うユーザー ID。省略すると、全ての API が 401 になる。
 //   - HTTP_PORT: 待ち受けるポート番号(1〜65535)。省略すると 8080。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
@@ -54,6 +59,7 @@ type BackendConfig struct {
 //   - エラー。問題があったとき、全ての問題の説明を含む。
 func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, error) {
 	databaseURL := reader.RequiredString("DATABASE_URL")
+	devUserID := reader.OptionalString("DEV_USER_ID", "")
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
 
@@ -72,5 +78,5 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	if loadError != nil {
 		return BackendConfig{}, loadError
 	}
-	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL}, nil
+	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID}, nil
 }

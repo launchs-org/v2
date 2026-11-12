@@ -42,6 +42,11 @@ func TestLoadBackendConfig(testingT *testing.T) {
 			expectedConfig: BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db"},
 		},
 		{
+			name:           "DEV_USER_ID を設定すると、その値になる",
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev"},
+			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", DevUserID: "user-dev"},
+		},
+		{
 			name:                "DATABASE_URL が無いとエラー",
 			environment:         map[string]string{},
 			expectedErrorPieces: []string{"DATABASE_URL"},
