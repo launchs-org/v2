@@ -70,6 +70,20 @@ services:
       - "127.0.0.1:8233:8080"
 
 
+  # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
+  migrate-app:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/app?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations/app:/migrations:ro
+
   # 開発用の自己署名の証明書を作る。1回だけ実行して終わる(すでにあれば何もしない)。
   nginx-certificate:
     image: alpine/openssl:3.5.9

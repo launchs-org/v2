@@ -23,6 +23,11 @@ tasks:
     cmds:
       - docker compose down --volumes
 
+  migrate:
+    desc: app データベースのマイグレーションを流す
+    cmds:
+      - docker compose --profile tools run --rm migrate-app
+
   logs:
     desc: バックエンドのログを表示する
     cmds:
