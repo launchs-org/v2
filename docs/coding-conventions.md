@@ -120,7 +120,7 @@ Go では、慣習として `func TestSignup(t *testing.T)` の `t` や、レシ
 
 **採用案:**
 - 設定は環境変数だけ。`shared/config` に構造体と `Load()` を置く。必須の値が無ければ、起動時に失敗させる。
-- 変数名は `UPPER_SNAKE_CASE`。例: `DATABASE_URL`、`TEMPORAL_ADDRESS`、`TEMPORAL_NAMESPACE`、`STORAGE_CLASS`。
+- 変数名は `UPPER_SNAKE_CASE`。例: `DATABASE_URL`、`TEMPORAL_ADDRESS`、`TEMPORAL_NAMESPACE`、`STORAGE_CLASS`、`RUNTIME_CLASS`。
 - シークレットも環境変数で渡す(本番は k8s の Secret から)。ログに出さない。
 
 ---
