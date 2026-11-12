@@ -14,6 +14,7 @@ import (
 	"launchs/backend/src/config"
 	"launchs/backend/src/server"
 	sharedconfig "launchs/shared/config"
+	"launchs/shared/database"
 	"launchs/shared/logger"
 )
 
@@ -41,7 +42,14 @@ func run() error {
 	}
 
 	appLogger := logger.New(os.Stdout, "backend", backendConfig.LogLevel)
-	echoServer := server.New(appLogger)
+
+	appDatabase, databaseError := database.Open(backendConfig.DatabaseURL)
+	if databaseError != nil {
+		return databaseError
+	}
+	defer func() { _ = database.Close(appDatabase) }()
+
+	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, DevUserID: backendConfig.DevUserID})
 
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopListening()

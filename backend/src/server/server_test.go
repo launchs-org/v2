@@ -18,7 +18,7 @@ import (
 // レスポンスにリクエスト ID が付くことを確認する。
 func TestServerHealthCheck(testingT *testing.T) {
 	var logOutput bytes.Buffer
-	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo))
+	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo), Dependencies{})
 
 	recorder := httptest.NewRecorder()
 	echoServer.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -38,7 +38,7 @@ func TestServerHealthCheck(testingT *testing.T) {
 // その値がレスポンスとアクセスログに使われ、付いていないときは作られることを確認する。
 func TestServerKeepsIncomingRequestID(testingT *testing.T) {
 	var logOutput bytes.Buffer
-	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo))
+	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo), Dependencies{})
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	request.Header.Set(middlewares.RequestIDHeaderName, "request-from-client")
@@ -57,7 +57,7 @@ func TestServerKeepsIncomingRequestID(testingT *testing.T) {
 // not_found のボディを返すことを確認する。
 func TestServerReturnsErrorForUnknownPath(testingT *testing.T) {
 	var logOutput bytes.Buffer
-	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo))
+	echoServer := New(logger.New(&logOutput, "backend", slog.LevelInfo), Dependencies{})
 
 	recorder := httptest.NewRecorder()
 	echoServer.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/no-such-path", nil))
