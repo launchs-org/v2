@@ -1,10 +1,9 @@
-# コーディング規約(下書き)
+# コーディング規約
 
-実装に入る前に、コードの書き方とファイルの置き方を決める。状態は下書きで、残りの「決めたいこと」が決まったら「下書き」を外す。
+コードの書き方とファイルの置き方。実装はこの規約に従う。変えるときは、このファイルを直す。
 
 - **決定**: 回答をもらって決まったもの
-- **採用案**: 異論がなければこのまま採用する案(まだ指摘は無い)
-- **決めたいこと**: まだ決まっていないもの。「回答」欄を埋めてほしい
+- **採用案**: 指摘が無かったので、そのまま採用した案
 - 前提とする決定は [実装前の確認項目](pre-implementation-checklist.md) と [共通ルール](endpoints/common.md)
 
 ---
@@ -31,6 +30,7 @@ logcollector/        ログ収集コンテナ
 shared/              バックエンドとワーカーで共有するコード(src/ は挟まない)
 migrations/          DB のマイグレーション(app/ と auth/ に分ける)
 k8s/                 本番の k8s マニフェスト
+dev/                 開発環境だけで使う設定(PostgreSQL の初期化など)
 requests/            API の動作確認用のファイル(.http)
 docs/
 Taskfile.yml
@@ -56,6 +56,7 @@ docker-compose.yaml
 - モジュール名は、ローカルのままの短い名前 `launchs`(GitHub のパスは使わない)。
 - ビルド・テスト・実行は、全てコンテナの中で行う(ホストの Go は 1.24.4 で、`go.mod` の 1.27.1 より古いため)。
 - **一文字の変数名は禁止**。ループの添字、レシーバー、エラーも含めて、意味の分かる名前にする(`index`、`projectService`、`err` など)。
+  - 例外は作らない。`*testing.T` も `testingT` のように書く(ルールが単純で、`varnamelen` でそのまま検出できるため)。
 - **ファイル名は、役割が分かる名前にする**。層の名前を付けて、`project_controller.go`、`project_service.go`、`project_repository.go`、`project_model.go` のようにする。テストは `project_service_test.go`。
 - 機械的に検出するため、`golangci-lint` の `varnamelen` を有効にする(設定は実装時に調整)。
 
@@ -66,15 +67,6 @@ docker-compose.yaml
 - 依存はコンストラクタで渡す。グローバル変数と `init()` は使わない。
 - I/O をする関数は、第1引数に `ctx context.Context` を取る。
 - `gofmt` と `goimports` をかける。import は「標準ライブラリ」「外部」「このモジュール」の3つに分ける。
-
-**決めたいこと:**
-
-### 2-1. 一文字変数の禁止の例外
-Go では、慣習として `func TestSignup(t *testing.T)` の `t` や、レシーバーの短い名前(`func (s *Service)`)を使う。
-- 案A: 例外なし。`testing.T` は `testingT`、レシーバーは `projectService` のように書く(おすすめ。ルールが単純で、`varnamelen` もそのまま使える)
-- 案B: `t *testing.T` だけは例外にする
-
-**回答:**
 
 ---
 
@@ -153,14 +145,7 @@ Go では、慣習として `func TestSignup(t *testing.T)` の `t` や、レシ
 - 日時は、共通のヘルパーで JST に変換して返す。
 - ページングは、共通のヘルパーで `limit` と `cursor` を扱う。`cursor` は、作成日時と ID を base64url にしたもの。
 
-**決めたいこと:**
-
-### 8-1. リクエストの入力値のチェック(バリデーション)
-前回の「検証」の回答は、API の動作確認(curl や REST Client)のことだったように読めたので、別の質問として改めて聞く。ここで聞いているのは、`name` が英数字とハイフンだけか、`limit` が1〜100か、といった入力値のチェックを、何で書くか。
-- 案A: `go-playground/validator`(構造体のタグで書ける。Echo の公式ドキュメントでも使われている)
-- 案B: ライブラリなしで、手書きの検証関数にする
-
-**回答:**
+**決定:** リクエストの入力値のチェックは `go-playground/validator` で書く(構造体のタグで書けて、Echo の公式ドキュメントでも使われているため)。API の動作確認(curl や REST Client)とは別の話。
 
 ---
 

@@ -22,7 +22,7 @@ docs/
   issues/       エンドポイントごとの詳細設計レビュー用Issue
   talks/        作業の経緯・設計判断の記録(会話ログ)
   pre-implementation-checklist.md  実装着手前に決める確認項目(回答欄付き)
-  coding-conventions.md  コードの書き方とファイルのルール(下書き)
+  coding-conventions.md  コードの書き方とファイルのルール
 docker-compose.yaml  開発環境用
 Taskfile.yml    開発のコマンド(これから作る)
 ```
