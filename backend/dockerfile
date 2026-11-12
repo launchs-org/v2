@@ -1,4 +1,4 @@
-FROM golang:1.27 as Develop
+FROM golang:1.27 AS Develop
 
 # 各種ツールをインストール
 RUN apt update && apt install -y curl git wget
@@ -6,8 +6,8 @@ RUN apt update && apt install -y curl git wget
 # curl でインストール
 RUN curl -sSfL https://raw.githubusercontent.com/air-verse/air/master/install.sh | sh -s
 
-# ワーキングディレクトリ設定
-WORKDIR /app/src
+# ワーキングディレクトリ設定(リポジトリルートをマウントする場所)
+WORKDIR /app
 
-# air を実行する
-CMD [ "air","-c","./.air.toml" ]
+# air を実行する(shared/ の変更でもリビルドされるよう、リポジトリルートから実行する)
+CMD [ "air","-c","backend/.air.toml" ]
