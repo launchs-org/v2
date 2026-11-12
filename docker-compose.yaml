@@ -50,6 +50,15 @@ services:
     volumes:
       - ./dev/temporal:/dev-temporal:ro
 
+  # Temporal に default の namespace を作る。1回だけ実行して終わる。
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      - temporal
+    entrypoint: ["/bin/sh", "/dev-temporal/create-namespace.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
 volumes:
   go-module-cache:
   postgres-data:
