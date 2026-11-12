@@ -411,6 +411,14 @@ StorageClass(オンプレ。例: local-path / Longhorn / NFS)。拡張(リサイ
 
 **決定:** StorageClass は環境変数で選べるようにする。リサイズに対応しているものを使う。
 
+### G-6. RuntimeClass
+k8s の RuntimeClass(Pod を動かすランタイムの種類。例: gVisor、Kata Containers)を、どう指定するか。
+
+**回答:** あと runtimeclass も環境変数で設定できるようにして
+
+**決定:** RuntimeClass は、StorageClass と同じく、環境変数で設定できるようにする。変数名は `RUNTIME_CLASS`(仮)。設定されていないときは、Pod に `runtimeClassName` を指定せず、クラスタの既定のランタイムを使う(仮)。
+**未決:** どの Pod に適用するか。ユーザーのコンテナを動かす Pod(deploy の Pod)に適用するのは自然。ビルドの Job にも適用するかは、BuildKit がそのランタイムで動くとは限らないので、別に決める。
+
 ---
 
 ## H. ビルド
