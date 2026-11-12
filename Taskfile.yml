@@ -1,0 +1,48 @@
+version: '3'
+
+# 開発のコマンド。全てコンテナの中で実行する(ホストの Go は go.mod より古いため)。
+
+tasks:
+  image:
+    desc: 開発用のイメージをビルドする(dockerfile を変えたあとに反映される)
+    cmds:
+      - docker compose build backend
+
+  up:
+    desc: 開発環境を起動する(バックグラウンド)
+    cmds:
+      - docker compose up -d --build
+
+  down:
+    desc: 開発環境を停止する
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: バックエンドのログを表示する
+    cmds:
+      - docker compose logs -f backend
+
+  build:
+    desc: 全てのパッケージがビルドできるか確認する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go build -o /dev/null ./...
+
+  test:
+    desc: 全てのテストを実行する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go test ./...
+
+  vet:
+    desc: go vet で問題を検出する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go vet ./...
+
+  fmt:
+    desc: コードを整形する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go fmt ./...
