@@ -1,9 +1,13 @@
 services:
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/dockerfile
       target: Develop
     tty: true
     volumes:
-      - ./backend/src:/app/src
-  
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+volumes:
+  go-module-cache:
