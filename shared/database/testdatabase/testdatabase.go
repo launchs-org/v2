@@ -44,21 +44,21 @@ func New(testingT *testing.T) *gorm.DB {
 
 	adminDatabase, adminError := database.Open(adminURL)
 	if adminError != nil {
-		testingT.Fatalf("管理用の接続を開けなかった: %v", adminError)
+		testingT.Fatalf("管理用の接続を開けませんでした: %v", adminError)
 	}
 
 	databaseName := "test_" + uuid.NewString()[:8]
 	if createError := adminDatabase.Exec("CREATE DATABASE " + databaseName).Error; createError != nil {
-		testingT.Fatalf("テスト用のデータベースを作れなかった: %v", createError)
+		testingT.Fatalf("テスト用のデータベースを作れませんでした: %v", createError)
 	}
 
 	testURL, urlError := replaceDatabaseName(adminURL, databaseName)
 	if urlError != nil {
-		testingT.Fatalf("接続先を作れなかった: %v", urlError)
+		testingT.Fatalf("接続先を作れませんでした: %v", urlError)
 	}
 	testDatabase, openError := database.Open(testURL)
 	if openError != nil {
-		testingT.Fatalf("テスト用のデータベースに接続できなかった: %v", openError)
+		testingT.Fatalf("テスト用のデータベースに接続できませんでした: %v", openError)
 	}
 
 	testingT.Cleanup(func() {
@@ -84,7 +84,7 @@ func New(testingT *testing.T) *gorm.DB {
 func replaceDatabaseName(rawURL string, databaseName string) (string, error) {
 	parsedURL, parseError := url.Parse(rawURL)
 	if parseError != nil {
-		return "", fmt.Errorf("接続先を解釈できなかった: %w", parseError)
+		return "", fmt.Errorf("接続先を解釈できませんでした: %w", parseError)
 	}
 	parsedURL.Path = "/" + databaseName
 	return parsedURL.String(), nil
@@ -109,10 +109,10 @@ func applyMigrations(testingT *testing.T, testDatabase *gorm.DB) {
 	for _, migrationFile := range migrationFiles {
 		migrationSQL, readError := os.ReadFile(migrationFile)
 		if readError != nil {
-			testingT.Fatalf("マイグレーションを読めなかった: %v", readError)
+			testingT.Fatalf("マイグレーションを読めませんでした: %v", readError)
 		}
 		if execError := testDatabase.Exec(string(migrationSQL)).Error; execError != nil {
-			testingT.Fatalf("マイグレーション %s を流せなかった: %v", filepath.Base(migrationFile), execError)
+			testingT.Fatalf("マイグレーション %s を流せませんでした: %v", filepath.Base(migrationFile), execError)
 		}
 	}
 }

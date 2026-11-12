@@ -62,7 +62,7 @@ func NewErrorHandler(appLogger *slog.Logger) echo.HTTPErrorHandler {
 		}
 
 		if writeError := echoContext.JSON(statusCode, responseBody); writeError != nil {
-			appLogger.Error("エラーのレスポンスを書き込めなかった", "error", writeError)
+			appLogger.Error("エラーのレスポンスを書き込めませんでした", "error", writeError)
 		}
 	}
 }

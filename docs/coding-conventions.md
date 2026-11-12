@@ -90,6 +90,7 @@ docker-compose.yaml
 - service と repository は、このエラーを返す。controller のエラーハンドラーが、HTTP のステータスと `{"error": {"code": "...", "message": "..."}}` に変換する。
 - 別のライブラリのエラーは `fmt.Errorf("...: %w", err)` で包んで、呼び出し元に返す。判定は `errors.Is` と `errors.As`。
 - Gorm の `ErrRecordNotFound` は、repository の中で `not_found` に変換する。
+- エラーのメッセージは、丁寧な文末にする(「保存できませんでした」。「保存できなかった」は使わない)。
 - 利用者に返すメッセージに、SQL や k8s のエラーなどの内部情報を入れない。500 の詳細は、ログにだけ書く。
 - `panic` は使わない(起動時の設定エラーを除く)。
 

@@ -46,7 +46,7 @@ func (projectRepository *ProjectRepository) Create(requestContext context.Contex
 		return apperror.Wrap(apperror.KindConflict, "同じ名前のプロジェクトがすでにあります", createError)
 	}
 	if createError != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを保存できなかった", createError)
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを保存できませんでした", createError)
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func (projectRepository *ProjectRepository) FindByID(requestContext context.Cont
 		return model.Project{}, apperror.Wrap(apperror.KindNotFound, "プロジェクトが見つかりません", findError)
 	}
 	if findError != nil {
-		return model.Project{}, apperror.Wrap(apperror.KindInternal, "プロジェクトを取得できなかった", findError)
+		return model.Project{}, apperror.Wrap(apperror.KindInternal, "プロジェクトを取得できませんでした", findError)
 	}
 	return project, nil
 }
@@ -101,7 +101,7 @@ func (projectRepository *ProjectRepository) ListByUser(requestContext context.Co
 
 	var projects []model.Project
 	if findError := query.Find(&projects).Error; findError != nil {
-		return nil, nil, apperror.Wrap(apperror.KindInternal, "プロジェクトの一覧を取得できなかった", findError)
+		return nil, nil, apperror.Wrap(apperror.KindInternal, "プロジェクトの一覧を取得できませんでした", findError)
 	}
 
 	if len(projects) <= limit {
@@ -133,7 +133,7 @@ func (projectRepository *ProjectRepository) Rename(requestContext context.Contex
 		return apperror.Wrap(apperror.KindConflict, "同じ名前のプロジェクトがすでにあります", updateResult.Error)
 	}
 	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトの名前を変更できなかった", updateResult.Error)
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトの名前を変更できませんでした", updateResult.Error)
 	}
 	if updateResult.RowsAffected == 0 {
 		return projectRepository.explainNoUpdate(requestContext, userID, projectID)
@@ -159,7 +159,7 @@ func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.
 		Where("id = ? AND user_id = ? AND status = ?", projectID, userID, model.ProjectStatusActive).
 		Updates(map[string]any{"status": model.ProjectStatusDeleting, "updated_at": gorm.Expr("now()")})
 	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできなかった", updateResult.Error)
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", updateResult.Error)
 	}
 	if updateResult.RowsAffected == 0 {
 		return projectRepository.explainNoUpdate(requestContext, userID, projectID)
