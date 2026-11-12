@@ -220,6 +220,9 @@ func TestProjectRepositoryRename(testingT *testing.T) {
 				if renamedProject.Name != "renamed" {
 					subTest.Errorf("名前が変わっていない: %q", renamedProject.Name)
 				}
+				if !renamedProject.UpdatedAt.After(renamedProject.CreatedAt) {
+					subTest.Errorf("更新日時が自動で更新されていない: 作成 %v、更新 %v", renamedProject.CreatedAt, renamedProject.UpdatedAt)
+				}
 				return
 			}
 			if apperror.KindOf(renameError) != testCase.expectedKind {

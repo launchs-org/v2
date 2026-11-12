@@ -66,7 +66,7 @@ func (projectRepository *ProjectRepository) Create(requestContext context.Contex
 func (projectRepository *ProjectRepository) FindByID(requestContext context.Context, userID string, projectID string) (model.Project, error) {
 	var project model.Project
 	findError := projectRepository.database.WithContext(requestContext).
-		Where("id = ? AND user_id = ?", projectID, userID).
+		Where(&model.Project{ID: projectID, UserID: userID}).
 		Take(&project).Error
 	if errors.Is(findError, gorm.ErrRecordNotFound) {
 		return model.Project{}, apperror.Wrap(apperror.KindNotFound, "プロジェクトが見つかりません", findError)
@@ -91,11 +91,12 @@ func (projectRepository *ProjectRepository) FindByID(requestContext context.Cont
 //   - データベースのエラー。
 func (projectRepository *ProjectRepository) ListByUser(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error) {
 	query := projectRepository.database.WithContext(requestContext).
-		Where("user_id = ?", userID).
+		Where(&model.Project{UserID: userID}).
 		Order("created_at DESC, id DESC").
 		// 次のページがあるかを知るため、1件多く読む。
 		Limit(limit + 1)
 	if after != nil {
+		// 2列の組の比較は、構造体では書けないので、ここだけ SQL の文字列で書く。
 		query = query.Where("(created_at, id) < (?, ?)", after.CreatedAt, after.ID)
 	}
 
@@ -127,8 +128,9 @@ func (projectRepository *ProjectRepository) ListByUser(requestContext context.Co
 func (projectRepository *ProjectRepository) Rename(requestContext context.Context, userID string, projectID string, newName string) error {
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
-		Where("id = ? AND user_id = ? AND status = ?", projectID, userID, model.ProjectStatusActive).
-		Updates(map[string]any{"name": newName, "updated_at": gorm.Expr("now()")})
+		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusActive}).
+		// updated_at は、Gorm が更新日時に自動で入れる。
+		Updates(&model.Project{Name: newName})
 	if errors.Is(updateResult.Error, gorm.ErrDuplicatedKey) {
 		return apperror.Wrap(apperror.KindConflict, "同じ名前のプロジェクトがすでにあります", updateResult.Error)
 	}
@@ -156,8 +158,8 @@ func (projectRepository *ProjectRepository) Rename(requestContext context.Contex
 func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.Context, userID string, projectID string) error {
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
-		Where("id = ? AND user_id = ? AND status = ?", projectID, userID, model.ProjectStatusActive).
-		Updates(map[string]any{"status": model.ProjectStatusDeleting, "updated_at": gorm.Expr("now()")})
+		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusActive}).
+		Updates(&model.Project{Status: model.ProjectStatusDeleting})
 	if updateResult.Error != nil {
 		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", updateResult.Error)
 	}
