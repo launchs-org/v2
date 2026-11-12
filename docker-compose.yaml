@@ -6,9 +6,90 @@ services:
       dockerfile: backend/dockerfile
       target: Develop
     tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # テストが、使い捨てのデータベースを作るための接続先。
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:
       - .:/app
       - go-module-cache:/go/pkg/mod
+
+  # 開発環境の PostgreSQL。1つのサーバーの中に、app、auth、temporal の各データベースを作る。
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./dev/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Temporal のデータベースにスキーマを作る。1回だけ実行して終わる。
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/dev-temporal/setup-schema.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  temporal:
+    image: temporalio/server:1.32.2
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /dev-temporal/config.yaml
+      # 開発環境では認証を使わない。
+      TEMPORAL_ALLOW_NO_AUTH: "true"
+    ports:
+      - "127.0.0.1:7233:7233"
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  # Temporal に default の namespace を作る。1回だけ実行して終わる。
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      - temporal
+    entrypoint: ["/bin/sh", "/dev-temporal/create-namespace.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  temporal-ui:
+    image: temporalio/ui:2.58.1
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8233:8080"
+
+
+  # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
+  migrate-app:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/app?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations/app:/migrations:ro
 
   # 開発用の自己署名の証明書を作る。1回だけ実行して終わる(すでにあれば何もしない)。
   nginx-certificate:
