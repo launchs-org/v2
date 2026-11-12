@@ -7,7 +7,7 @@
 
 ## 説明
 
-アップロード済みの asset または public な git リポジトリをソースに、コンテナイメージをビルドするエンドポイント。ビルドは非同期で実行され、`imageRef` はこの時点で確定・払い出されるが、実際に pull できるのはビルドが成功してから。
+アップロード済みの asset または public な git リポジトリをソースに、コンテナイメージをビルドするエンドポイント。ビルドは非同期で実行され、`imageRef` はこの時点で確定・払い出されるが、実際に pull できるのはビルドが成功してから。ビルドは k8s の Job の中で、clone またはダウンロード+展開 → 準備 → ビルド → レジストリへ push の順に実行される。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -23,7 +23,8 @@
 ### 異常系
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 - 存在しない `projectId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `projectId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `projectId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
+- `status` が `"deleting"` のプロジェクトを `projectId` に指定した場合 409 が返ること
 - `buildMethod` を省略した場合、自動判定されず 400 が返ること
 - `sourceType: "asset"` で期限切れ・不正な `assetsToken` を指定した場合エラーになること
 - `sourceType: "git"` で private リポジトリを指定した場合エラーになること(現時点では public のみ対応)
@@ -70,6 +71,8 @@
 }
 ```
 - Note: build は projectId に属する。指定した projectId 配下の履歴として記録される
+- Note: ビルドは k8s の Job の中で、clone またはダウンロード+展開 → 準備 → ビルド → レジストリへ push の順に実行される(API の挙動は変わらない)
+- Note: deleting 中のプロジェクトを指定した場合は 409 を返す
 - Note: ビルドは非同期で開始される。buildId は状況追跡用。imageRef はこの時点で確定・払い出され以後不変だが、実際にpullしてデプロイに使えるのは status が "success" になってから([ビルド状態取得](003-get-build-buildid.md))
 - Note: imageRef のタグ部分は buildId を使う(例: project-xxxx:build-xxxx)。"latest" のような固定タグは使わず、ビルドごとに一意なタグにすることで、後続のビルドが以前のイメージを上書きしないようにする
 - Note: sourceType が git の場合、現時点では public リポジトリのみ対応(private認証は未対応・将来対応)
@@ -80,3 +83,4 @@
 ## 参照
 
 - [docs/endpoints/builds.md](../../endpoints/builds.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

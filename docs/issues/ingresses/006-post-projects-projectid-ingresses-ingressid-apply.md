@@ -7,9 +7,9 @@
 
 ## 説明
 
-[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md) で保存した `pending_rules` を `rules` に反映し、ルーティング設定の書き換えを開始するエンドポイント。
+[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md) で保存した `pending_rules` を `rules` に反映し、ルーティング設定の書き換えを開始するエンドポイント。ルーティングの反映は Traefik の IngressRoute(CRD)を更新して行う。Traefik までのリクエストの到達、ドメインの管理、TLS はこのシステムの管理外。
 
-処理順序は「`pending_rules` の値を使って先にルーティング設定への反映を試みる → その結果(成功/失敗)が確定してから、`rules` を `pending_rules` の内容で上書きし `pending_rules` を null に戻す」という順(他グループのapplyと同じ方針)。ingress の反映は deploy のコンテナ再起動を伴わない分、config/service/volumeのapplyより短時間で完了する想定。
+処理順序は「`pending_rules` の値を使って先にルーティング設定への反映を試みる → その結果(成功/失敗)が確定してから、`rules` を `pending_rules` の内容で上書きし `pending_rules` を null に戻す」という順(他グループのapplyと同じ方針)。ingress の反映は deploy のコンテナ再起動を伴わない分、config/service/volumeのapplyより短時間で完了する想定。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -21,10 +21,11 @@
 
 ### 異常系
 - 存在しない `ingressId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `projectId`/`ingressId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `projectId`/`ingressId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 - `pending_rules` が `null` の場合 409 が返ること
 - 既に `status` が `"applying"` の場合は 409 が返ること(多重apply不可)
+- `status` が `"deleting"` の間に呼び出した場合 409 が返ること
 - `pending_rules` の `serviceId`/`port` が指す参照先が、[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md) 時点から変化していて、apply時点で不正になっている場合(対象serviceが削除済み、該当portが削除済み、該当portのprotocolが`"udp"`に変更された等)は反映を試みずに `status` が `"failed"` になること(更新時点のバリデーションだけでなく、apply実行時にも同じ検証を行う)
 
 ### 境界値
@@ -41,13 +42,14 @@
 ```json
 {}
 ```
-- Note: pending_rules の内容を rules に反映するため、ルーティング設定の書き換えを開始する。呼び出し自体は即座に応答するが、この時点ではまだ rules は更新されていない。pending_rules が null の場合は 409 を返す
+- Note: pending_rules の内容を rules に反映するため、ルーティング設定の書き換えを開始する。呼び出し自体は即座に応答するが、この時点ではまだ rules は更新されていない。pending_rules が null の場合は 409 を返す。ルーティング設定の書き換えは Traefik の IngressRoute(CRD)を更新して行う。Traefik までのリクエストの到達、ドメインの管理、TLS はこのシステムの管理外
 - Note: 呼び出し直後、ingress の status は "applying" になる。この間 pending_rules はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_rules の値を使って先にルーティング設定への反映を試み、その結果(成功・失敗)が確定した時点で初めて rules を pending_rules の内容に更新し、pending_rules は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる(rules の内容自体は失敗時も新しい値で上書きされる)
 - Note: ingressの反映はdeployのコンテナ再起動を伴わないルーティング設定の書き換えのみのため、config/volumes/serviceのapplyより短時間で完了する想定だが、確認手順(status のポーリング)は同様
-- Note: 既に ingress の status が "applying" の場合は 409 を返す(多重apply不可)
+- Note: 既に ingress の status が "applying" の場合は 409 を返す(多重apply不可)。"deleting" の場合も 409 を返す
 - Note: applying には 60秒 のタイムアウトを設ける。この時間内に反映完了が確認できない場合、強制的に status を "failed" に遷移させる
 - Note: pending_rules に含まれる serviceId/port の妥当性([イングレス更新](005-put-projects-projectid-ingresses-ingressid.md)時点のバリデーションと同じ内容: 同一project内のserviceであること、対象serviceのportsに存在するport番号であること、protocolが"tcp"であること)は、apply実行時にも改めて検証する。[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md)から[適用](006-post-projects-projectid-ingresses-ingressid-apply.md)までの間にservice側のポート構成が変更される可能性があるため
 
 ## 参照
 
 - [docs/endpoints/ingresses.md](../../endpoints/ingresses.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

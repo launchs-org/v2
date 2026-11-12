@@ -1,6 +1,8 @@
 [← エンドポイント一覧](README.md)
 
 ## プロジェクト関連 (/projects)
+
+パス、エラー形式、ID、日時などの共通ルールは [共通ルール](common.md) を参照。このグループのパスは `/api/v1` を省いて書いている(実際の URL は `/api/v1/projects` の形)。
 ### プロジェクト作成
 - Post: /projects
 - Header
@@ -16,6 +18,7 @@
 {"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}
 ```
 - Note: build/deploy は必ずいずれかの projectId に属する。以後の /build /deploy は projectId を伴って呼び出す
+- Note: `name` は英数字とハイフンのみ、1〜64文字(最小長は仮)。違反は 400。同じユーザーの中で重複した場合は 409(仮)
 
 ### プロジェクト一覧
 - Get: /projects
@@ -23,10 +26,16 @@
 ```json
 {"Authorization": "Bearer <accessToken>"}
 ```
+- Query(どちらも任意)
+```json
+{"limit": 20, "cursor": "<前回の nextCursor>"}
+```
 - Response (200)
 ```json
-{"projects": [{"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app"}]}
+{"projects": [{"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app", "status": "active"}], "nextCursor": null}
 ```
+- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態
+- Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
 
 ### プロジェクト取得
 - Get: /projects/:projectId
@@ -36,14 +45,19 @@
 ```
 - Response (200)
 ```json
-{"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app"}
+{"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app", "status": "active"}
 ```
+- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態
 
 ### プロジェクト build 履歴一覧
 - Get: /projects/:projectId/builds
 - Header
 ```json
 {"Authorization": "Bearer <accessToken>"}
+```
+- Query(どちらも任意)
+```json
+{"limit": 20, "cursor": "<前回の nextCursor>"}
 ```
 - Response (200)
 ```json
@@ -53,18 +67,23 @@
       "buildId": "build-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "status": "success",
       "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
-      "createdAt": "2026-09-16T00:00:00Z"
+      "createdAt": "2026-09-16T09:00:00+09:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
-- Note: 作成日時の降順で返す(ページングは未設計・別途)
+- Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
 
 ### プロジェクト deploy 履歴一覧
 - Get: /projects/:projectId/deploys
 - Header
 ```json
 {"Authorization": "Bearer <accessToken>"}
+```
+- Query(どちらも任意)
+```json
+{"limit": 20, "cursor": "<前回の nextCursor>"}
 ```
 - Response (200)
 ```json
@@ -74,12 +93,14 @@
       "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "status": "active",
       "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
-      "createdAt": "2026-09-16T00:00:00Z"
+      "createdAt": "2026-09-16T09:00:00+09:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
-- Note: 作成日時の降順で返す(削除済みdeployを含めるかは未設計・別途)。ページングは未設計・別途
+- Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
+- Note: deploy は削除が完了するとレコードごと消えるため、削除済みの deploy は含まれない。削除中(status が "deleting")のものは含まれる(仮)
 
 ### プロジェクト更新
 - Patch: /projects/:projectId
@@ -95,6 +116,7 @@
 ```json
 {}
 ```
+- Note: `name` の制約と重複の扱いは [プロジェクト作成](#プロジェクト作成) と同じ。プロジェクトの status が "deleting" の間は 409
 
 ### プロジェクト削除
 - Delete: /projects/:projectId
@@ -106,4 +128,6 @@
 ```json
 {}
 ```
-- Note: プロジェクト削除時、配下の build 履歴・イメージ・deploy(稼働中のものを含む)は全て連鎖して削除される
+- Note: プロジェクト削除時、配下の build 履歴・イメージ・deploy(稼働中のものを含む)・ingress・volume(データごと)は全て連鎖して削除される。k8s の namespace(プロジェクトごとに1つ、名前は projectId)ごと削除するので、PVC のデータも消える
+- Note: 呼び出すと即座に応答し、status は直ちに "deleting" になる。実体の削除は Workflow で非同期に行い、完了するとレコード自体が削除される(以後の GET は 404 を返す)
+- Note: deleting の間は、変更系の操作と再度の削除は 409 を返す。GET は status が "deleting" の状態を返す

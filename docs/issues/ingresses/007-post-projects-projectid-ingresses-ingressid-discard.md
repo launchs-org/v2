@@ -7,7 +7,7 @@
 
 ## 説明
 
-[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md) で保存した `pending_rules` を適用せずに破棄するエンドポイント。
+[イングレス更新](005-put-projects-projectid-ingresses-ingressid.md) で保存した `pending_rules` を適用せずに破棄するエンドポイント。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -17,10 +17,11 @@
 
 ### 異常系
 - 存在しない `ingressId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `projectId`/`ingressId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `projectId`/`ingressId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 - `pending_rules` が `null` の場合 409 が返ること
 - `status` が `"applying"` の間に呼び出した場合 409 が返ること
+- `status` が `"deleting"` の間に呼び出した場合 409 が返ること
 
 ### 境界値
 - 特になし
@@ -37,8 +38,9 @@
 {}
 ```
 - Note: pending_rules の内容を適用せずに破棄する(rules には影響しない)。pending_rules が null の場合は 409 を返す
-- Note: ingress の status が "applying" の間は 409 を返す
+- Note: ingress の status が "applying" または "deleting" の間は 409 を返す
 
 ## 参照
 
 - [docs/endpoints/ingresses.md](../../endpoints/ingresses.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

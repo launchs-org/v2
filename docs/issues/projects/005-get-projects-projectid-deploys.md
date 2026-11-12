@@ -7,7 +7,7 @@
 
 ## 説明
 
-指定したプロジェクト配下の deploy 履歴を、作成日時の降順で取得するエンドポイント。
+指定したプロジェクト配下の deploy 履歴を、作成日時の降順で取得するエンドポイント。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -18,12 +18,15 @@
 
 ### 異常系
 - 存在しない `projectId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `projectId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `projectId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 
 ### 境界値
-- 削除済み deploy を一覧に含めるかどうかは仕様未確定のため別途定義する
-- ページングは仕様未確定のため別途定義する
+- 削除が完了した deploy は一覧に含まれないこと。削除中(status が `"deleting"`)の deploy は含まれること(仮)
+- `limit` を指定すると、その件数以内で返り、続きがあれば `nextCursor` が入ること
+- `nextCursor` を `cursor` に渡すと次のページが返り、重複や欠落がないこと
+- 最後のページで `nextCursor` が null になること
+- 範囲外の `limit`・不正な `cursor` は 400 が返ること(仮)
 
 ## 仕様
 
@@ -31,6 +34,10 @@
 - Header
 ```json
 {"Authorization": "Bearer <accessToken>"}
+```
+- Query(どちらも任意)
+```json
+{"limit": 20, "cursor": "<前回の nextCursor>"}
 ```
 - Response (200)
 ```json
@@ -40,13 +47,16 @@
       "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "status": "active",
       "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
-      "createdAt": "2026-09-16T00:00:00Z"
+      "createdAt": "2026-09-16T09:00:00+09:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
-- Note: 作成日時の降順で返す(削除済みdeployを含めるかは未設計・別途)。ページングは未設計・別途
+- Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
+- Note: deploy は削除が完了するとレコードごと消えるため、削除済みの deploy は含まれない。削除中(status が "deleting")のものは含まれる(仮)
 
 ## 参照
 
 - [docs/endpoints/projects.md](../../endpoints/projects.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

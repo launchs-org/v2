@@ -7,13 +7,16 @@
 
 ## 説明
 
-deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起動設定](005-get-deploy-deployid-config.md)・[ボリュームマウント](../volumes/README.md)・[サービス](../services/README.md)の内容を1回のGETでまとめて取得できるエンドポイント。個別に叩かなくても、この1回で全ての `pending_*` を確認できる。
+deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起動設定](005-get-deploy-deployid-config.md)・[ボリュームマウント](../volumes/README.md)・[サービス](../services/README.md)の内容を1回のGETでまとめて取得できるエンドポイント。個別に叩かなくても、この1回で全ての `pending_*` を確認できる。 エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
 ### 正常系
 - 作成直後は `status: "pending"` で、`config`/`volumes` はデフォルト値(`env`空オブジェクト、`command`/`args` null、`mounts`空配列)、`service` は `null` であること
 - `config`/`volumes`/`service` いずれかの apply を呼ぶと `status` が `"applying"` になること
+- 作成時に指定した `spec` が `spec` に返ること
+- 削除を受け付けた直後は `status` が `"deleting"` で返ること(GET は `deleting` の状態を返す)
+- `replicas: 0`(`scaled_zero`)の deploy に apply した場合、成功しても `status` は `"active"` ではなく `"scaled_zero"` に戻ること(失敗は `"failed"`)
 - 再起動が成功すると `status` が `"active"` に、失敗すると `"failed"` に遷移すること
 - `pending_*` が存在する場合、`config`/`volumes`/`service` 配下にそれぞれの `pending_env`/`pending_mounts`/`pending_ports` 等が反映されていること
 - サービス未作成のdeployでは `service` が `null` であること
@@ -23,11 +26,13 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId`(自分が所属していないプロジェクトのdeploy)を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId`(自分が所属していないプロジェクトのdeploy)を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 
 ### 境界値
-- `status` は "pending" | "active" | "applying" | "failed" | "scaled_zero" 以外の値を取らないこと
+- `status` は "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" 以外の値を取らないこと
+- apply 中に変化するのは deploy の `status` だけで、`service.status` は変わらないこと
+- 削除が完了したらレコード自体が消え、GET が 404 になること
 - `applying` が 300秒(5分)を超えても完了しない場合、強制的に `"failed"` に遷移すること
 - `pods` 配列内の各 `status` は "pending" | "running" | "terminating" 以外の値を取らないこと
 
@@ -43,12 +48,13 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
 {
   "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "status": "active",
+  "spec": "small",
   "replicas": 1,
   "pods": [
     {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "status": "running"}
   ],
   "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
-  "createdAt": "2026-09-16T00:00:00Z",
+  "createdAt": "2026-09-16T09:00:00+09:00",
   "config": {
     "env": {"PORT": "8080", "DATABASE_URL": "postgres://..."},
     "pending_env": null,
@@ -106,15 +112,17 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
   }
 }
 ```
-- Note: status は "pending" | "active" | "applying" | "failed" | "scaled_zero" のいずれか。"停止"という状態はなく、replicas を 0 にスケールすることで表現する
+- Note: status は "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" のいずれか。"停止"という状態はなく、replicas を 0 にスケールすることで表現する
 - Note: "起動指示が完了したか"はこの status で確認する(別途ヘルスチェック専用endpointは用意しない)
 - Note: config/volumes/service いずれかの apply を呼ぶと、コンテナの再起動が完了するまで status は "applying" になる。再起動が成功すれば "active" に、失敗すれば "failed" に遷移する(applyの呼び出し自体は即時応答するが、反映の完了はこの status のポーリングで確認する)
 - Note: applying→running/failed の判定は、バックエンドが Kubernetes の Deployment/Pod の conditions(Progressing, Ready など)を監視して行う(実装詳細は別途)
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)
 - Note: config は [起動設定取得](005-get-deploy-deployid-config.md)、volumes は [ボリュームマウント取得](../volumes/README.md)、service は [サービス取得](../services/README.md) と同じ内容をこのレスポンスに埋め込んだもの。個別に叩かなくても、この1回のGETで全ての pending_* を確認できる
+- Note: service の status(pending / active / failed / deleting)は Service 自体の払い出し状態で、deploy の status とは別。config/volumes/service いずれかの apply 中に変化するのは deploy の status だけで、service の status は変わらない
 - Note: service はまだ作成されていない(サービス未作成の)deployでは null になる(1 deploy = 1 service で、作成は任意)
 - Note: pods は現在稼働している Pod の一覧(replicas が希望レプリカ数という数値であるのに対し、pods は実際の Pod 1つ1つの識別子と状態を返す)。[デプロイ ログ取得](009-get-deploy-deployid-logs.md) で特定の Pod のログを取得する際に、ここで取得した podId を指定する。status は "pending" | "running" | "terminating" のいずれか
 
 ## 参照
 
 - [docs/endpoints/deploys.md](../../endpoints/deploys.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

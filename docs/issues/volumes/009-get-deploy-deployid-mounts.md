@@ -7,7 +7,7 @@
 
 ## 説明
 
-deploy のコンテナに現在マウントされているボリューム構成(`mounts`)と、[マウント設定](010-put-deploy-deployid-mounts.md) 後まだ [適用](011-post-deploy-deployid-mounts-apply.md)/[破棄](012-post-deploy-deployid-mounts-discard.md) されていない `pending_mounts` を取得するエンドポイント。
+deploy のコンテナに現在マウントされているボリューム構成(`mounts`)と、[マウント設定](010-put-deploy-deployid-mounts.md) 後まだ [適用](011-post-deploy-deployid-mounts-apply.md)/[破棄](012-post-deploy-deployid-mounts-discard.md) されていない `pending_mounts` を取得するエンドポイント。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -17,7 +17,7 @@ deploy のコンテナに現在マウントされているボリューム構成(
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 
 ### 境界値
@@ -52,3 +52,4 @@ deploy のコンテナに現在マウントされているボリューム構成(
 ## 参照
 
 - [docs/endpoints/volumes.md](../../endpoints/volumes.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

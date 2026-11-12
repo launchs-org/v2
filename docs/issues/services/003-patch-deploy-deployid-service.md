@@ -7,7 +7,7 @@
 
 ## 説明
 
-`ports` を一括で置き換え、`pending_ports` として保存するエンドポイント。[適用](004-post-deploy-deployid-service-apply.md) を呼ぶまで実際には反映されない。ポートの追加・削除・変更は全てこのエンドポイントで配列ごと送る。
+`ports` を一括で置き換え、`pending_ports` として保存するエンドポイント。[適用](004-post-deploy-deployid-service-apply.md) を呼ぶまで実際には反映されない。ポートの追加・削除・変更は全てこのエンドポイントで配列ごと送る。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -17,10 +17,11 @@
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - service が未作成の `deployId` に対して呼び出した場合 404 が返ること
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 - `ports` が未指定、または空配列の場合の扱い(全ポート削除を意味するか、400にするか)は仕様未確定のため別途定義する
+- deploy の `status` が `"deleting"` の間に更新した場合 409 が返ること
 - `status` が `"applying"` の間はこの操作を受け付けず 409 が返ること(applying中はserviceに対する変更・apply・discardを排他制御する)
 
 ### 境界値
@@ -50,7 +51,9 @@
 - Note: ports は個別要素単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)。ポートの追加・削除・変更は全てこのエンドポイントで配列ごと送る
 - Note: この時点ではまだ反映されない。pending_ports として保存され、サービスの apply を呼ぶまで ports(現在反映されている値)は変わらない
 - Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はserviceに対する変更・apply・discardを排他制御する)
+- Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
 
 ## 参照
 
 - [docs/endpoints/services.md](../../endpoints/services.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

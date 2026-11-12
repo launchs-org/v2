@@ -7,7 +7,7 @@
 
 ## 説明
 
-deploy のコンテナが持つポートをクラスタ内(および必要なら ingress から参照されて外部)へ公開するエンドポイント。1 deploy = 1 service で、サービスの作成は任意(全ての deploy が持つわけではない)。
+deploy のコンテナが持つポートをクラスタ内(および必要なら ingress から参照されて外部)へ公開するエンドポイント。1 deploy = 1 service で、サービスの作成は任意(全ての deploy が持つわけではない)。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -19,8 +19,9 @@ deploy のコンテナが持つポートをクラスタ内(および必要なら
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
+- deploy の `status` が `"deleting"` の間に service を作成しようとした場合 409 が返ること
 - 既に service が存在する `deployId` に対して再度呼び出した場合 409 が返ること(1 deploy = 1 service)
 - `ports` が未指定、または空配列の場合 400 が返ること
 - `protocol` に `"tcp"`/`"udp"` 以外の値を指定した場合 400 が返ること
@@ -61,6 +62,7 @@ deploy のコンテナが持つポートをクラスタ内(および必要なら
 }
 ```
 - Note: service は deploy に1つだけ属する(1 deploy = 1 service)。既にserviceが存在するdeployに対して再度呼び出すと 409 を返す
+- Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
 - Note: service はコンテナ内の複数ポートを、クラスタ内(および必要ならingressのpath ruleから参照されて外部)へ公開する単位。ports配列の各要素でport番号ごとにprotocol("tcp"|"udp")を選べる
 - Note: HTTPという制約はここには無い(TCP/UDPどちらのポートも登録できる)。「HTTPのみ対応」の制約は[イングレス](../ingresses/README.md)側にあり、ingressのpath ruleはprotocol "tcp" のポートのみ参照できる
 - Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName("<name>.svc.cluster.local" 形式、nameはdeployごとに割り当てられるサービス名)と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
@@ -68,3 +70,4 @@ deploy のコンテナが持つポートをクラスタ内(および必要なら
 ## 参照
 
 - [docs/endpoints/services.md](../../endpoints/services.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

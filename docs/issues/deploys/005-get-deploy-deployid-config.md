@@ -7,7 +7,7 @@
 
 ## 説明
 
-deploy の環境変数(`env`)・起動コマンド(`command`)・起動引数(`args`)を確認するエンドポイント。現在コンテナに反映されている値と、[起動設定更新](006-put-deploy-deployid-config.md) 後まだ [適用](007-post-deploy-deployid-config-apply.md)/[破棄](008-post-deploy-deployid-config-discard.md) されていない `pending_*` を、同一階層にフラットな形で返す(pending_*→apply/discardモデル)。
+deploy の環境変数(`env`)・起動コマンド(`command`)・起動引数(`args`)を確認するエンドポイント。現在コンテナに反映されている値と、[起動設定更新](006-put-deploy-deployid-config.md) 後まだ [適用](007-post-deploy-deployid-config-apply.md)/[破棄](008-post-deploy-deployid-config-discard.md) されていない `pending_*` を、同一階層にフラットな形で返す(pending_*→apply/discardモデル)。 エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -21,10 +21,11 @@ deploy の環境変数(`env`)・起動コマンド(`command`)・起動引数(`ar
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- アクセス権のない `deployId`(自分が所属していないプロジェクトのdeploy)を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId`(自分が所属していないプロジェクトのdeploy)を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - 認証ヘッダなし、または無効なアクセストークンの場合 401 が返ること
 
 ### 境界値
+- `deploy` が `deleting` の間でも GET は取得でき、`status` は [デプロイ詳細取得](002-get-deploy-deployid.md) で `"deleting"` と確認できること
 - `env` が空オブジェクト、`command`/`args` が未設定の状態でも正しく取得できること
 - `command`/`args` が `null` の場合、コンテナイメージ自身が持つデフォルトの起動コマンド(DockerfileのCMD/ENTRYPOINT等)で起動していること(=`env`だけ指定し`command`/`args`を省略したデプロイでも正常に起動できる)
 - `pending_env`/`pending_command`/`pending_args` は常に3つセットで null になる、または3つセットで値が入る(いずれか1つだけがnullでない、という中途半端な状態にはならないこと)
@@ -76,3 +77,4 @@ deploy の環境変数(`env`)・起動コマンド(`command`)・起動引数(`ar
 ## 参照
 
 - [docs/endpoints/deploys.md](../../endpoints/deploys.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

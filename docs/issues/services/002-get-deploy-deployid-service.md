@@ -7,7 +7,7 @@
 
 ## 説明
 
-deploy に紐づく service の現在の状態を取得するエンドポイント。
+deploy に紐づく service の現在の状態を取得するエンドポイント。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -17,7 +17,7 @@ deploy に紐づく service の現在の状態を取得するエンドポイン�
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - service が未作成の `deployId` に対して呼び出した場合 404 が返ること
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 
@@ -68,3 +68,4 @@ deploy に紐づく service の現在の状態を取得するエンドポイン�
 ## 参照
 
 - [docs/endpoints/services.md](../../endpoints/services.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

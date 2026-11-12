@@ -7,7 +7,7 @@
 
 ## 説明
 
-deploy のレプリカ数を変更するエンドポイント。"停止"/"再開"という別APIは用意せず、`replicas` を 0 にすることで停止相当を表現する。
+deploy のレプリカ数を変更するエンドポイント。"停止"/"再開"という別APIは用意せず、`replicas` を 0 にすることで停止相当を表現する。 エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
@@ -17,13 +17,15 @@ deploy のレプリカ数を変更するエンドポイント。"停止"/"再開
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
-- 他ユーザーが所有する `deployId` を指定した場合アクセスできないこと(403 または 404)
+- 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - `Authorization` ヘッダが無い、または無効なアクセストークンの場合 401 が返ること
 - `replicas` が未指定、または負の値の場合 400 が返ること
+- `status` が `"applying"` の間にスケーリングを呼び出した場合 409 が返ること
+- `status` が `"deleting"` の間はスケーリングを受け付けず 409 が返ること
 
 ### 境界値
 - `replicas` の上限値(仕様未確定のため別途定義する)
-- `status` が `"applying"` の間にスケーリングを呼び出した場合の挙動(他のapply操作と同様に409で排他制御するか、仕様未確定のため別途定義する)
+- `status` が `"applying"` または `"deleting"` の間は、スケーリングが 409 で拒否されること
 
 ## 仕様
 
@@ -41,7 +43,9 @@ deploy のレプリカ数を変更するエンドポイント。"停止"/"再開
 {"deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "replicas": 0}
 ```
 - Note: replicas を 0 にすると status は "scaled_zero" になる。1以上にすると "active" に戻る("停止"/"再開"という別APIは用意しない)
+- Note: deploy の status が "applying" または "deleting" の間は 409 を返す(他の apply 操作と同様に排他制御する)
 
 ## 参照
 
 - [docs/endpoints/deploys.md](../../endpoints/deploys.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)
