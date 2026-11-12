@@ -14,7 +14,7 @@ func TestCursorRoundTrip(testingT *testing.T) {
 	decodedPosition, decodeError := DecodeCursor(EncodeCursor(originalPosition))
 
 	if decodeError != nil {
-		testingT.Fatalf("戻せなかった: %v", decodeError)
+		testingT.Fatalf("戻せませんでした: %v", decodeError)
 	}
 	if !decodedPosition.CreatedAt.Equal(originalPosition.CreatedAt) || decodedPosition.ID != originalPosition.ID {
 		testingT.Errorf("位置が違う: 期待 %+v、実際 %+v", originalPosition, decodedPosition)

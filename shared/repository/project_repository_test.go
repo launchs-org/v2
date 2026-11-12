@@ -43,7 +43,7 @@ func newTestProject(number int, userID string, createdAt time.Time) *model.Proje
 func mustCreate(testingT *testing.T, database *gorm.DB, project *model.Project) {
 	testingT.Helper()
 	if createError := NewProjectRepository(database).Create(context.Background(), project); createError != nil {
-		testingT.Fatalf("保存できなかった: %v", createError)
+		testingT.Fatalf("保存できませんでした: %v", createError)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestProjectRepositoryListByUser(testingT *testing.T) {
 	for {
 		projects, nextPosition, listError := projectRepository.ListByUser(context.Background(), "user-a", 2, cursorPosition)
 		if listError != nil {
-			testingT.Fatalf("一覧を取得できなかった: %v", listError)
+			testingT.Fatalf("一覧を取得できませんでした: %v", listError)
 		}
 		pageCount++
 		for _, project := range projects {

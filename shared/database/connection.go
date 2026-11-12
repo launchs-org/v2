@@ -34,19 +34,19 @@ func Open(databaseURL string) (*gorm.DB, error) {
 		TranslateError: true,
 	})
 	if openError != nil {
-		return nil, fmt.Errorf("データベースに接続できなかった: %w", openError)
+		return nil, fmt.Errorf("データベースに接続できませんでした: %w", openError)
 	}
 
 	sqlDatabase, sqlError := gormDatabase.DB()
 	if sqlError != nil {
-		return nil, fmt.Errorf("データベースの接続を取り出せなかった: %w", sqlError)
+		return nil, fmt.Errorf("データベースの接続を取り出せませんでした: %w", sqlError)
 	}
 
 	checkContext, cancelCheck := context.WithTimeout(context.Background(), connectionCheckTimeout)
 	defer cancelCheck()
 	if pingError := sqlDatabase.PingContext(checkContext); pingError != nil {
 		_ = sqlDatabase.Close()
-		return nil, fmt.Errorf("データベースと通信できなかった: %w", pingError)
+		return nil, fmt.Errorf("データベースと通信できませんでした: %w", pingError)
 	}
 	return gormDatabase, nil
 }
@@ -61,7 +61,7 @@ func Open(databaseURL string) (*gorm.DB, error) {
 func Close(gormDatabase *gorm.DB) error {
 	sqlDatabase, sqlError := gormDatabase.DB()
 	if sqlError != nil {
-		return fmt.Errorf("データベースの接続を取り出せなかった: %w", sqlError)
+		return fmt.Errorf("データベースの接続を取り出せませんでした: %w", sqlError)
 	}
 	return sqlDatabase.Close()
 }
