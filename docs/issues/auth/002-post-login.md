@@ -7,21 +7,28 @@
 
 ## 説明
 
-既存ユーザーの `userName`/パスワードを検証し、認証用トークン(refresh token)を発行するエンドポイント。
+既存ユーザーの `userName`/`password` を検証し、認証用トークン(refresh token)を発行するエンドポイント。ブルートフォース対策として、ユーザー名単位のロックと IP 単位のレート制限を持つ。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
 ### 正常系
-- 登録済みの `userName` と正しいパスワードで呼び出すと 200 が返り、`token`(refresh token)が発行されること
+- 登録済みの `userName` と正しい `password` で呼び出すと 200 が返り、`token`(refresh token)が発行されること
 - 発行された `token` を使って [アクセストークン (取得)](003-post-refresh.md) が呼び出せること
+- ログインに成功すると、そのユーザー名の連続失敗の回数がリセットされること
 
 ### 異常系
-- 存在しない `userName` を指定した場合、401 が返ること(ユーザー存在有無を推測されないよう、パスワード誤りと同じエラーにする)
-- パスワードが誤っている場合、401 が返ること
-- `userName` またはパスワードが未指定の場合 400 が返ること
+- 存在しない `userName` を指定した場合 401 が返ること
+- `password` が誤っている場合 401 が返ること
+- 連続5回失敗したユーザー名は15分間ロックされ、ロック中は正しい `password` でも 401 が返ること
+- 存在しないユーザー、パスワードの誤り、ロック中、BAN 中のいずれも、同じ 401(同じボディ)であること。アカウントの存在や状態をレスポンスから推測できないこと
+- `userName` または `password` が未指定の場合 400 が返ること
+- 同じ IP から1分間に20回を超えてログインを試行した場合 429 が返り、`Retry-After` ヘッダが付くこと
 
 ### 境界値
-- 連続したログイン失敗に対するレート制限・アカウントロックの要否(仕様未確定のため別途定義する)
+- 失敗が4回までは通常の 401 で、5回目の失敗でロックされること
+- ロックから15分が経過したら、再びログインを試行できること
+- 失敗の回数は、間に成功が入ると0に戻ること
+- 回数と時間は仮の値で、設定で変えられること
 
 ## 仕様
 
@@ -32,15 +39,19 @@
 ```
 - Body
 ```json
-{"userName" : "user1","Password1"}
+{"userName": "user1", "password": "Password1234"}
 ```
 - Response (200)
 ```json
-{
-  "token": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJsYXVuY2hzLW9yZyIsInN1YiI6InVzZXJpZC04MGIwYjI5Yy03NTE0LTQwZGQtYTBiNC04ZjIyZjA5MzI5ZDgiLCJuYW1lIjoidXNlcjEiLCJpYXQiOjE1MTYyMzkwMjIsImV4cCI6IjE1MTYyMzkwMjIiLCJqdGkiOiJ0b2tlbmlkLWQ5Y2M2NGFiLTIxNmUtNDYwYy1iNThjLTRiNWNmMzZhODI5NSIsInR5cGUiOiJyZWZyZXNoIn0.J3V-cB-UJx0NHTHif58Jp1yfXW7WEWOjkJU0Y7EFDCx8FTttbEQwtX1G--pkqXWKj1ObztYX4O8HucFkxvtDNw"
-}
+{"token": "<refreshToken>"}
 ```
+- Note: token は refresh token
+- Note: 同じユーザー名で連続5回失敗すると、15分間ロックする。成功したら失敗の回数をリセットする
+- Note: 存在しないユーザー、パスワードの誤り、ロック中、BAN 中は、全て同じ 401 を返す(アカウントの存在や状態を推測されないため)
+- Note: 同じ IP からのログイン試行は1分あたり20回まで。超えたら 429(`Retry-After` 付き)を返す
+- Note: 上の回数と時間は仮の値で、設定で変えられる。ロックと BAN は認証基盤側で管理する(管理機能はアカウント管理グループで定義する)
 
 ## 参照
 
 - [docs/endpoints/auth.md](../../endpoints/auth.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

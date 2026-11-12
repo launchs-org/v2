@@ -7,17 +7,18 @@
 
 ## 説明
 
-指定した refresh token を無効化するエンドポイント。ログアウト後はその refresh token で [アクセストークン (取得)](003-post-refresh.md) を呼び出せなくなる。
+指定した refresh token を無効化するエンドポイント。ログアウト後はその refresh token で [アクセストークン (取得)](003-post-refresh.md) を呼び出せなくなる。エラーのボディは [共通ルール](../../endpoints/common.md#エラーレスポンス) の形式。
 
 ## テスト要件
 
 ### 正常系
 - 有効な refresh token を指定すると 200 が返り、以後その refresh token で [アクセストークン (取得)](003-post-refresh.md) を呼ぶと 401 になること
-- 既に発行済みの access token(ログアウト前に取得したもの)がログアウト後も有効期限内は使えるか/即座に無効化されるかは仕様未確定(別途定義する)
+- ログアウト前に発行された access token は無効化されず、有効期限(最大15分)まで使えること(access token の失効は管理しないため)
 
 ### 異常系
 - `Authorization` ヘッダが無い、または不正な refresh token の場合 401 が返ること
-- 既にログアウト済みの refresh token を再度指定した場合の挙動(401 or 200で冪等に成功扱い)は仕様未確定(別途定義する)
+- 既にログアウト済みの refresh token を再度指定した場合 401 が返ること(無効な refresh token として扱う)
+- access token を誤って `Authorization` に渡した場合(type が "access")、401 が返ること
 
 ### 境界値
 - 特になし
@@ -29,14 +30,18 @@
 ```json
 {
   "Content-Type": "application/json",
-  "Authorization": "Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJsYXVuY2hzLW9yZyIsInN1YiI6InVzZXJpZC04MGIwYjI5Yy03NTE0LTQwZGQtYTBiNC04ZjIyZjA5MzI5ZDgiLCJuYW1lIjoidXNlcjEiLCJpYXQiOjE1MTYyMzkwMjIsImV4cCI6IjE1MTYyMzkwMjIiLCJqdGkiOiJ0b2tlbmlkLWQ5Y2M2NGFiLTIxNmUtNDYwYy1iNThjLTRiNWNmMzZhODI5NSIsInR5cGUiOiJyZWZyZXNoIn0.J3V-cB-UJx0NHTHif58Jp1yfXW7WEWOjkJU0Y7EFDCx8FTttbEQwtX1G--pkqXWKj1ObztYX4O8HucFkxvtDNw"
+  "Authorization": "Bearer <refreshToken>"
 }
 ```
 - Response (200)
 ```json
 {}
 ```
+- Note: 指定した refresh token の `jti` を無効化する。以後その refresh token では [アクセストークン (取得)](003-post-refresh.md) を呼べない
+- Note: ログアウト前に発行された access token は無効化されず、有効期限(最大15分)まで使える
+- Note: 既にログアウト済みの refresh token を指定した場合は 401 を返す(無効な refresh token として扱う)
 
 ## 参照
 
 - [docs/endpoints/auth.md](../../endpoints/auth.md)
+- [docs/endpoints/common.md](../../endpoints/common.md)

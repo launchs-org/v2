@@ -7,3 +7,4 @@
 - [アクセストークン (取得)](003-post-refresh.md) `Post /refresh`
 - [自分の情報取得](004-get-me.md) `Get /me`
 - [ログアウト (/logout)](005-post-logout.md) `Post /logout`
+- [JWKS 取得](006-get-well-known-jwks.md) `Get /.well-known/jwks.json`
