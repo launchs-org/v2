@@ -6,6 +6,13 @@ services:
       dockerfile: backend/dockerfile
       target: Develop
     tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # テストが、使い捨てのデータベースを作るための接続先。
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:
       - .:/app
       - go-module-cache:/go/pkg/mod
