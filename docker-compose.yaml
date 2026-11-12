@@ -59,6 +59,15 @@ services:
     volumes:
       - ./dev/temporal:/dev-temporal:ro
 
+  temporal-ui:
+    image: temporalio/ui:2.58.1
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8233:8080"
+
 volumes:
   go-module-cache:
   postgres-data:
