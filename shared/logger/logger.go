@@ -38,6 +38,7 @@ func ParseLevel(text string) (slog.Level, error) {
 //
 // 作ったロガーは、全ての行に、どのコンテナのログかを表す component を付ける。
 // 呼び出し側は、With を使って request_id や user_id などのフィールドを足して使う。
+// パスワードやトークンなど、機密を表す名前のフィールドは、値が伏せ字になる。
 //
 // 引数:
 //   - output: 書き込み先。通常は os.Stdout。
@@ -47,6 +48,9 @@ func ParseLevel(text string) (slog.Level, error) {
 // 戻り値:
 //   - 作成したロガー。
 func New(output io.Writer, component string, level slog.Level) *slog.Logger {
-	handler := slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})
+	handler := slog.NewJSONHandler(output, &slog.HandlerOptions{
+		Level:       level,
+		ReplaceAttr: redactSensitiveAttribute,
+	})
 	return slog.New(handler).With("component", component)
 }
