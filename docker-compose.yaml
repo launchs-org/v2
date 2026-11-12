@@ -26,6 +26,30 @@ services:
       timeout: 3s
       retries: 20
 
+  # Temporal のデータベースにスキーマを作る。1回だけ実行して終わる。
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/dev-temporal/setup-schema.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  temporal:
+    image: temporalio/server:1.32.2
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /dev-temporal/config.yaml
+      # 開発環境では認証を使わない。
+      TEMPORAL_ALLOW_NO_AUTH: "true"
+    ports:
+      - "127.0.0.1:7233:7233"
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
 volumes:
   go-module-cache:
   postgres-data:
