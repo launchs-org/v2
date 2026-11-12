@@ -27,7 +27,7 @@ tasks:
     desc: 全てのパッケージがビルドできるか確認する
     deps: [image]
     cmds:
-      - docker compose run --rm backend go build ./...
+      - docker compose run --rm backend go build -o /dev/null ./...
 
   test:
     desc: 全てのテストを実行する
