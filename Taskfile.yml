@@ -18,6 +18,11 @@ tasks:
     cmds:
       - docker compose down
 
+  reset:
+    desc: 開発環境を停止し、データベースのデータも消す(最初からやり直す)
+    cmds:
+      - docker compose down --volumes
+
   logs:
     desc: バックエンドのログを表示する
     cmds:
