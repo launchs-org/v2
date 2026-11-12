@@ -32,11 +32,15 @@ type BackendConfig struct {
 
 	// LogLevel は、出力するログの最低のレベル(環境変数 LOG_LEVEL)。
 	LogLevel slog.Level
+
+	// DatabaseURL は、app データベースの接続先(環境変数 DATABASE_URL)。パスワードを含むので、ログに出さない。
+	DatabaseURL string
 }
 
 // LoadBackendConfig は、環境変数からバックエンドの設定を読む。
 //
 // 読む環境変数:
+//   - DATABASE_URL: app データベースの接続先(必須)。
 //   - HTTP_PORT: 待ち受けるポート番号(1〜65535)。省略すると 8080。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
@@ -49,6 +53,7 @@ type BackendConfig struct {
 //   - 読み込んだ設定。問題があったときは、ゼロ値。
 //   - エラー。問題があったとき、全ての問題の説明を含む。
 func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, error) {
+	databaseURL := reader.RequiredString("DATABASE_URL")
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
 
@@ -67,5 +72,5 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	if loadError != nil {
 		return BackendConfig{}, loadError
 	}
-	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel}, nil
+	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL}, nil
 }
