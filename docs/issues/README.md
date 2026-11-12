@@ -12,12 +12,14 @@
 
 ## レビュー進捗
 
-- [x] 認証関連 (/auth/) — レビュー完了
-- [x] プロジェクト関連 (/projects) — レビュー完了
-- [x] ビルド関連 (/upload, /build) — レビュー完了
-- [x] デプロイ・起動設定関連 (/deploy) — レビュー完了
-- [x] サービス関連 (/deploy/:deployId/service) — レビュー完了
-- [x] イングレス関連 (/projects/:projectId/ingresses) — レビュー完了
-- [x] ボリューム関連 (/projects/:projectId/volumes, /deploy/:deployId/mounts) — レビュー完了
+各グループのレビューは完了している。そのあと、実装前の確認で決まった内容(共通ルール、`deleting` 状態、ページング、トークンの仕様など。経緯は [実装前の確認項目](../pre-implementation-checklist.md))を全グループに反映した。反映後の再レビューは、省略した。
 
-全グループのレビューが完了。
+- [x] 認証関連 (/auth/) — レビュー完了(決定事項を反映済み)
+- [x] プロジェクト関連 (/projects) — レビュー完了(決定事項を反映済み)
+- [x] ビルド関連 (/upload, /build) — レビュー完了(決定事項を反映済み)
+- [x] デプロイ・起動設定関連 (/deploy) — レビュー完了(決定事項を反映済み)
+- [x] サービス関連 (/deploy/:deployId/service) — レビュー完了(決定事項を反映済み)
+- [x] イングレス関連 (/projects/:projectId/ingresses) — レビュー完了(決定事項を反映済み)
+- [x] ボリューム関連 (/projects/:projectId/volumes, /deploy/:deployId/mounts) — レビュー完了(決定事項を反映済み)
+
+決まっていない細かい点は、[実装前の確認項目](../pre-implementation-checklist.md) の「反映の過程で出た、決まっていないこと」にまとめてある。

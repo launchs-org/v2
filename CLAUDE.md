@@ -18,8 +18,20 @@ docs/
   endpoints/    確定したエンドポイント仕様(実装のソースオブトゥルース)
   issues/       エンドポイントごとの詳細設計レビュー用Issue
   talks/        作業の経緯・設計判断の記録(会話ログ)
+  pre-implementation-checklist.md  実装着手前に決める確認項目(回答欄付き)
 docker-compose.yaml  開発環境用
 ```
+
+## 実装方針(確定分)
+
+実装前に決めた技術方針は [docs/pre-implementation-checklist.md](docs/pre-implementation-checklist.md) に回答と決定を残している。実装時はまずそちらを確認すること。主な点は以下。
+
+- 構成: 認証・バックエンド(API)・ワーカー(Temporal Worker)・レジストリ(自作)・ログ収集は別コンテナ。プロジェクトルート直下にそれぞれフォルダを分け、各フォルダに `main.go` を置く。
+- バックエンドとワーカーで共有するコード(DBのモデル、Workflow/Activity の名前と入出力の型)は共有フォルダに置く。
+- Go モジュールはルートに `go.mod` を1つ置き、docker のビルドコンテキストはリポジトリルートにする(コンテナごとに Dockerfile で使うフォルダを選ぶ)。
+- コンテナ名は `backend`(または `app`)、`worker` など。コンテナの名前と、コンテナ内部のコード構成は別の話として扱う。
+- コンテナ内部のコード構成は `controller / service / repository / model` の層でファイルを分ける。
+- 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様
 
@@ -27,6 +39,7 @@ docker-compose.yaml  開発環境用
 
 - 元々 `docs/endpoints.md` 1ファイルにまとめていたが、ボリュームが大きくなりすぎたため、グループ(認証・プロジェクト・ビルド・デプロイ・サービス・イングレス・ボリューム)ごとにファイルを分割した。
 - [docs/endpoints/README.md](docs/endpoints/README.md) が索引。各グループの仕様ファイルへのリンクを持つ。
+- 全グループに共通するルール(パス、ID、日時、名前、エラー形式、404、排他制御と削除、ページング)は [docs/endpoints/common.md](docs/endpoints/common.md) にまとめてある。各グループの仕様書にはそのリンクを置き、同じ内容を繰り返さない。
 - ここに書かれている内容が実装すべき仕様の正本。pending_* → apply/discard という非同期反映モデル(config/service/ingress/volumeの変更はまず pending として保存し、apply で初めて実際に反映される)が全体を通した設計方針なので、新しいエンドポイントを追記する際もこのパターンに合わせる。
 - apply呼び出し時の処理順序は全グループで統一する: `pending_*` の値を使って**先に実際のインフラ(k8s/ルーティング設定/ストレージ)への反映を試み、その結果(成功/失敗)が確定してから**、正式な値(env/ports/rules/sizeMB等)を `pending_*` の内容で上書きし `pending_*` を null に戻す。正式な値は常に「最後に反映を試みた値」を表し、status の成功/失敗がその結果を表す。
 
