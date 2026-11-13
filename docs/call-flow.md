@@ -94,7 +94,33 @@ Temporal サーバー ── Task Queue "general" ──▶ worker
         (利用者は、もう一度 DELETE を呼んでやり直せる)
 ```
 
-## 5. どのファイルを見ればよいか
+## 5. もう1つの例: deploy の作成(`POST /deploy`)
+
+プロジェクトの削除と同じ形(バックエンドが受け付けて、ワーカーが非同期に実行する)。違いは、「成功すると status が active になる」ことと、namespace を**作る**側であること。
+
+```
+curl → ... → DeployController.Create(入力の検証: projectId、imageRef、spec)
+  → DeployService.Create
+      ├─ FindSpec            スペック(small など)がマスターデータにあるか
+      ├─ DeployRepository.Create   プロジェクトの行を共有ロックして、active か確かめて、deploy を pending で保存
+      │                            (削除中のプロジェクトには作れない → 409)
+      ├─ Temporal に CreateDeployWorkflow の開始を頼む
+      └─ 開始できなければ、保存を取り消す(起動されない deploy を残さない)
+  → すぐ 200 {deployId} を返す(この時点の status は pending)
+        ↓ ここから worker が非同期に実行
+  CreateDeployWorkflow
+   ├─ Activity: EnsureProjectNamespace  プロジェクトの namespace を、無ければ作る
+   ├─ Activity: ApplyDeployment         DB の deploy とスペックから、k8s の Deployment を作る
+   ├─ Activity: WaitDeploymentReady     Ready になるまで待つ(最長 300 秒。ワーカーが入れ替わっても引き継ぐ)
+   └─ Activity: MarkDeployResult        成功なら active、失敗(300 秒で Ready にならない等)なら failed
+```
+
+k8s を操作する部品は、`activity.DeploymentOperator`(interface)で、実装は2つ。`KUBERNETES_ACCESS` で、`chooseClusterOperators`(`worker/src/main.go`)が選ぶ。
+
+- `cluster.KubernetesDeploymentOperator`: client-go で、本当に操作する
+- `activity.LoggingDeploymentOperator`: 何も操作せず、ログだけを出し、常に Ready と答える(`none`。開発用)
+
+## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
 |---|---|
@@ -102,10 +128,10 @@ Temporal サーバー ── Task Queue "general" ──▶ worker
 | ワーカーの組み立て | `worker/src/main.go` |
 | URL とハンドラーの対応 | `backend/src/server/route_registration.go` |
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
-| ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/project_service.go`、`temporal_project_deletion_starter.go` |
-| DB の読み書き(SQL) | `shared/repository/project_repository.go` |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/project_deletion_activities.go`、`worker/src/cluster/namespace_deleter.go` |
+| ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
+| DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント | `shared/k8s/` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |
