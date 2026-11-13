@@ -8,9 +8,19 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+	"gorm.io/gorm"
 
 	"launchs/backend/src/middlewares"
 )
+
+// Dependencies は、サーバーが外から受け取る、依存するものの一式。
+type Dependencies struct {
+	// Database は、app データベースの接続。
+	Database *gorm.DB
+
+	// DevUserID は、開発用の仮の認証で、全てのリクエストのユーザーとして扱う ID。空なら API は全て 401。
+	DevUserID string
+}
 
 // New は、バックエンドの Echo のサーバーを組み立てる。
 //
@@ -23,19 +33,26 @@ import (
 //
 // 引数:
 //   - appLogger: アクセスログ、エラーの記録、Echo 自身のログに使うロガー。
+//   - dependencies: データベースなど、ルートが使うもの。
 //
 // 戻り値:
 //   - 組み立てた Echo のサーバー。起動は呼び出し側が行う。
-func New(appLogger *slog.Logger) *echo.Echo {
+func New(appLogger *slog.Logger, dependencies Dependencies) *echo.Echo {
+	// ロガーと、エラーを共通の形式に変換するハンドラーを設定して、サーバーを作る。
 	echoServer := echo.NewWithConfig(echo.Config{
 		Logger:           appLogger,
 		HTTPErrorHandler: middlewares.NewErrorHandler(appLogger),
 	})
 
+	// 一番外側で、リクエスト ID を付ける。
 	echoServer.Use(middleware.RequestID())
+	// リクエスト ID を出すため、その内側にアクセスログを置く。
 	echoServer.Use(middlewares.NewAccessLogMiddleware(appLogger))
+	// ハンドラーのパニックを 500 に変えるため、一番内側に置く。
 	echoServer.Use(middleware.Recover())
 
-	registerRoutes(echoServer)
+	// ルートを登録する。
+	registerRoutes(echoServer, dependencies)
+	// 組み立てたサーバーを返す。
 	return echoServer
 }

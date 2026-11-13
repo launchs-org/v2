@@ -42,5 +42,6 @@ type Project struct {
 // 戻り値:
 //   - テーブル名("projects")。
 func (Project) TableName() string {
+	// このモデルが対応するテーブルの名前を返す。
 	return "projects"
 }
