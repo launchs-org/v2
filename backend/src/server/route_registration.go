@@ -19,13 +19,19 @@ import (
 //   - echoServer: ルートを登録する Echo のサーバー。
 //   - dependencies: データベースなど、ルートが使うもの。
 func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
+	// ヘルスチェックのコントローラーを作る。
 	healthController := controller.NewHealthController()
+	// 認証不要のヘルスチェックを、/api/v1 の外に登録する。
 	echoServer.GET("/healthz", healthController.Check)
 
+	// /api/v1 のグループを作り、開発用の仮の認証を付ける。
 	apiGroup := echoServer.Group("/api/v1", middlewares.NewDevAuthenticationMiddleware(dependencies.DevUserID))
 
+	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)
+	// リポジトリ、サービス、コントローラーの順につなぐ。
 	projectController := controller.NewProjectController(service.NewProjectService(projectRepository))
+	// プロジェクトの作成、一覧、取得、名前の変更のルートを登録する。
 	apiGroup.POST("/projects", projectController.Create)
 	apiGroup.GET("/projects", projectController.List)
 	apiGroup.GET("/projects/:projectId", projectController.Get)

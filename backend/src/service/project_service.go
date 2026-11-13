@@ -35,6 +35,7 @@ type ProjectService struct {
 // 戻り値:
 //   - 作成した ProjectService。
 func NewProjectService(projectStore ProjectStore) *ProjectService {
+	// 保存先を持たせた ProjectService を返す。
 	return &ProjectService{projectStore: projectStore}
 }
 
@@ -52,15 +53,19 @@ func NewProjectService(projectStore ProjectStore) *ProjectService {
 //   - 作成したプロジェクトの ID。
 //   - 同じユーザーの中で名前が重複したときの conflict など、保存のエラー。
 func (projectService *ProjectService) Create(requestContext context.Context, userID string, name string) (string, error) {
+	// ID は接頭辞と UUID v4 で作り、状態は active にして、保存するモデルを組み立てる。
 	project := &model.Project{
 		ID:     model.ProjectIDPrefix + uuid.NewString(),
 		UserID: userID,
 		Name:   name,
 		Status: model.ProjectStatusActive,
 	}
+	// プロジェクトを保存する。名前の重複などは、保存先がエラーで返す。
 	if createError := projectService.projectStore.Create(requestContext, project); createError != nil {
+		// 保存に失敗したので、ID は返さず、エラーだけ返す。
 		return "", createError
 	}
+	// 保存できたので、作ったプロジェクトの ID を返す。
 	return project.ID, nil
 }
 
@@ -75,6 +80,7 @@ func (projectService *ProjectService) Create(requestContext context.Context, use
 //   - プロジェクト。
 //   - 無い、または他のユーザーのものなら not_found。
 func (projectService *ProjectService) Get(requestContext context.Context, userID string, projectID string) (model.Project, error) {
+	// ユーザーとプロジェクト ID の両方で探す。他のユーザーのものは、見つからない扱いになる。
 	return projectService.projectStore.FindByID(requestContext, userID, projectID)
 }
 
@@ -91,6 +97,7 @@ func (projectService *ProjectService) Get(requestContext context.Context, userID
 //   - 次のページがあるときの、最後の行の位置。最後のページなら nil。
 //   - 取得のエラー。
 func (projectService *ProjectService) List(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error) {
+	// 保存先に、ユーザーの1ページ分の取得を任せ、結果をそのまま返す。
 	return projectService.projectStore.ListByUser(requestContext, userID, limit, after)
 }
 
@@ -106,5 +113,6 @@ func (projectService *ProjectService) List(requestContext context.Context, userI
 //   - 無い、または他のユーザーのものなら not_found。
 //   - 削除中、または名前の重複なら conflict。
 func (projectService *ProjectService) Rename(requestContext context.Context, userID string, projectID string, newName string) error {
+	// 保存先に、名前の変更を任せ、結果(not_found や conflict)をそのまま返す。
 	return projectService.projectStore.Rename(requestContext, userID, projectID, newName)
 }

@@ -78,19 +78,29 @@ func NewProjectController(projectUseCase ProjectUseCase) *ProjectController {
 // 戻り値:
 //   - ボディが不正なら invalid_request、名前の重複なら conflict、未認証なら unauthorized。
 func (projectController *ProjectController) Create(echoContext *echo.Context) error {
+	// 認証のミドルウェアが入れたユーザー ID を取り出す。無ければ未認証のエラーになる。
 	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	// ユーザー ID を取れなければ、そのエラー(unauthorized)を返す。
 	if userIDError != nil {
+		// 未認証のエラーをそのまま返す。
 		return userIDError
 	}
+	// ボディの読み込み先を用意する。
 	var request ProjectNameRequest
+	// ボディを読み込んで検証する。
 	if bindError := bindAndValidate(echoContext, &request); bindError != nil {
+		// 不正なボディのエラー(invalid_request)を返す。
 		return bindError
 	}
 
+	// ビジネスルールに任せて、プロジェクトを作成する。
 	projectID, createError := projectController.projectUseCase.Create(echoContext.Request().Context(), userID, request.Name)
+	// 作成に失敗(名前の重複など)したら、そのエラーを返す。
 	if createError != nil {
+		// 作成のエラーをそのまま返す。
 		return createError
 	}
+	// 作成したプロジェクトの ID を、200 で返す。
 	return echoContext.JSON(http.StatusOK, CreateProjectResponse{ProjectID: projectID})
 }
 
@@ -104,36 +114,58 @@ func (projectController *ProjectController) Create(echoContext *echo.Context) er
 // 戻り値:
 //   - limit や cursor が不正なら invalid_request、未認証なら unauthorized。
 func (projectController *ProjectController) List(echoContext *echo.Context) error {
+	// 認証のミドルウェアが入れたユーザー ID を取り出す。
 	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	// 取れなければ未認証のエラーを返す。
 	if userIDError != nil {
+		// 未認証のエラーをそのまま返す。
 		return userIDError
 	}
+	// クエリの limit を読み取る。未指定なら既定値になり、範囲外なら失敗する。
 	limit, limitError := pagination.ParseLimit(echoContext.QueryParam("limit"))
+	// limit が不正なら、そのエラー(invalid_request)を返す。
 	if limitError != nil {
+		// limit のエラーをそのまま返す。
 		return limitError
 	}
+	// cursor が無い(最初のページ)ときは nil のままにする。
 	var after *pagination.Position
+	// cursor が指定されているときだけ、位置に戻す。
 	if cursorText := echoContext.QueryParam("cursor"); cursorText != "" {
+		// cursor の文字列を、前のページの最後の位置に戻す。
 		position, cursorError := pagination.DecodeCursor(cursorText)
+		// cursor が不正なら、そのエラーを返す。
 		if cursorError != nil {
+			// cursor のエラーをそのまま返す。
 			return cursorError
 		}
+		// 取り出した位置を、続きの取得の起点にする。
 		after = &position
 	}
 
+	// ビジネスルールに任せて、1ページ分を取得する。
 	projects, nextPosition, listError := projectController.projectUseCase.List(echoContext.Request().Context(), userID, limit, after)
+	// 取得に失敗したら、そのエラーを返す。
 	if listError != nil {
+		// 取得のエラーをそのまま返す。
 		return listError
 	}
 
+	// 一覧が空でも null ではなく [] で返すため、空のスライスで初期化する。
 	response := ListProjectsResponse{Projects: make([]ProjectResponse, 0, len(projects))}
+	// モデルを、1件ずつレスポンスの形にして並べる。
 	for _, project := range projects {
+		// 変換した1件をレスポンスに追加する。
 		response.Projects = append(response.Projects, newProjectResponse(project))
 	}
+	// 次のページがあるときだけ、カーソルを作る。
 	if nextPosition != nil {
+		// 最後の行の位置を、文字列のカーソルにする。
 		nextCursor := pagination.EncodeCursor(*nextPosition)
+		// カーソルをレスポンスに入れる。最後のページでは nil のままで、JSON では null になる。
 		response.NextCursor = &nextCursor
 	}
+	// 一覧を 200 で返す。
 	return echoContext.JSON(http.StatusOK, response)
 }
 
@@ -145,15 +177,22 @@ func (projectController *ProjectController) List(echoContext *echo.Context) erro
 // 戻り値:
 //   - 無い、または他のユーザーのものなら not_found、未認証なら unauthorized。
 func (projectController *ProjectController) Get(echoContext *echo.Context) error {
+	// 認証のミドルウェアが入れたユーザー ID を取り出す。
 	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	// 取れなければ未認証のエラーを返す。
 	if userIDError != nil {
+		// 未認証のエラーをそのまま返す。
 		return userIDError
 	}
 
+	// パスの projectId のプロジェクトを、ログイン中のユーザーのものとして取得する。
 	project, getError := projectController.projectUseCase.Get(echoContext.Request().Context(), userID, echoContext.Param("projectId"))
+	// 無い、または他のユーザーのものなら、not_found のエラーを返す。
 	if getError != nil {
+		// 取得のエラーをそのまま返す。
 		return getError
 	}
+	// 取得したプロジェクトを、レスポンスの形にして 200 で返す。
 	return echoContext.JSON(http.StatusOK, newProjectResponse(project))
 }
 
@@ -166,19 +205,29 @@ func (projectController *ProjectController) Get(echoContext *echo.Context) error
 //   - ボディが不正なら invalid_request、無い・他のユーザーのものなら not_found、
 //     削除中・名前の重複なら conflict、未認証なら unauthorized。
 func (projectController *ProjectController) Rename(echoContext *echo.Context) error {
+	// 認証のミドルウェアが入れたユーザー ID を取り出す。
 	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	// 取れなければ未認証のエラーを返す。
 	if userIDError != nil {
+		// 未認証のエラーをそのまま返す。
 		return userIDError
 	}
+	// 新しい名前の読み込み先を用意する。
 	var request ProjectNameRequest
+	// ボディを読み込んで検証する。
 	if bindError := bindAndValidate(echoContext, &request); bindError != nil {
+		// 不正なボディのエラーを返す。
 		return bindError
 	}
 
+	// ビジネスルールに任せて、名前を変更する。
 	renameError := projectController.projectUseCase.Rename(echoContext.Request().Context(), userID, echoContext.Param("projectId"), request.Name)
+	// 変更に失敗(無い、削除中、重複)したら、そのエラーを返す。
 	if renameError != nil {
+		// 変更のエラーをそのまま返す。
 		return renameError
 	}
+	// 返す内容は無いので、空のオブジェクトを 200 で返す。
 	return echoContext.JSON(http.StatusOK, struct{}{})
 }
 
@@ -190,5 +239,6 @@ func (projectController *ProjectController) Rename(echoContext *echo.Context) er
 // 戻り値:
 //   - レスポンスのボディ。
 func newProjectResponse(project model.Project) ProjectResponse {
+	// モデルから、API に出す項目(ID、名前、状態)だけを取り出して詰める。
 	return ProjectResponse{ProjectID: project.ID, Name: project.Name, Status: project.Status}
 }
