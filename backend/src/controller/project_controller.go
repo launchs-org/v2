@@ -19,6 +19,7 @@ type ProjectUseCase interface {
 	Get(requestContext context.Context, userID string, projectID string) (model.Project, error)
 	List(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error)
 	Rename(requestContext context.Context, userID string, projectID string, newName string) error
+	Delete(requestContext context.Context, userID string, projectID string) error
 }
 
 // ProjectNameRequest は、プロジェクトの作成・更新のリクエストのボディ。
@@ -241,4 +242,30 @@ func (projectController *ProjectController) Rename(echoContext *echo.Context) er
 func newProjectResponse(project model.Project) ProjectResponse {
 	// モデルから、API に出す項目(ID、名前、状態)だけを取り出して詰める。
 	return ProjectResponse{ProjectID: project.ID, Name: project.Name, Status: project.Status}
+}
+
+// Delete は、プロジェクトの削除を受け付ける(DELETE /projects/:projectId)。
+//
+// すぐに 200 を返し、実体の削除は非同期に行われる(受け付けた直後、status は deleting になる)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストのコンテキスト。
+//
+// 戻り値:
+//   - 無い・他のユーザーのものなら not_found、すでに削除中なら conflict、
+//     未認証なら unauthorized、削除を開始できなければ internal_error。
+func (projectController *ProjectController) Delete(echoContext *echo.Context) error {
+	// 認証したユーザーの ID を取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+
+	// 削除の受け付けを、ビジネスルールに任せる。
+	deleteError := projectController.projectUseCase.Delete(echoContext.Request().Context(), userID, echoContext.Param("projectId"))
+	if deleteError != nil {
+		return deleteError
+	}
+	// 受け付けたことを、空のオブジェクトで返す。
+	return echoContext.JSON(http.StatusOK, struct{}{})
 }

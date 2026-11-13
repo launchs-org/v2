@@ -30,10 +30,11 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)
 	// リポジトリ、サービス、コントローラーの順につなぐ。
-	projectController := controller.NewProjectController(service.NewProjectService(projectRepository))
+	projectController := controller.NewProjectController(service.NewProjectService(projectRepository, dependencies.ProjectDeletionStarter))
 	// プロジェクトの作成、一覧、取得、名前の変更のルートを登録する。
 	apiGroup.POST("/projects", projectController.Create)
 	apiGroup.GET("/projects", projectController.List)
 	apiGroup.GET("/projects/:projectId", projectController.Get)
 	apiGroup.PATCH("/projects/:projectId", projectController.Rename)
+	apiGroup.DELETE("/projects/:projectId", projectController.Delete)
 }
