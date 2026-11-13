@@ -53,6 +53,10 @@ func newProjectAPIClient(testingT *testing.T, devUserID string, dependencies Dep
 	}
 	// このクライアントのユーザーとして扱う ID を設定する。
 	dependencies.DevUserID = devUserID
+	// deploy の起動の開始が指定されていなければ、何もしない fake を使う。
+	if dependencies.DeployWorkflowStarter == nil {
+		dependencies.DeployWorkflowStarter = &fakeDeployWorkflowStarter{}
+	}
 	// 削除の開始が指定されていなければ、何もしない fake を使う。
 	if dependencies.ProjectDeletionStarter == nil {
 		dependencies.ProjectDeletionStarter = &fakeDeletionStarter{}
