@@ -58,25 +58,37 @@ type BackendConfig struct {
 //   - 読み込んだ設定。問題があったときは、ゼロ値。
 //   - エラー。問題があったとき、全ての問題の説明を含む。
 func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, error) {
+	// 必須の環境変数を読む。無いときは、reader が問題として覚えておく(ここでは止まらない)。
 	databaseURL := reader.RequiredString("DATABASE_URL")
+	// 開発用のユーザー ID を読む。省略は許すので、既定値は空にする。
 	devUserID := reader.OptionalString("DEV_USER_ID", "")
+	// ポート番号を整数で読む。整数でないときは、reader が問題として覚えておく。
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
+	// ログレベルを文字列のまま読む。意味の確認は、あとで ParseLevel で行う。
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
 
+	// ここまでの読み込みで見つかった問題を取り出し、以降の確認の問題と、まとめて報告できるようにする。
 	loadError := reader.Err()
 
+	// ポート番号が使える範囲の外のときは、問題として加える。
 	if httpPort < minimumPort || httpPort > maximumPort {
+		// 範囲と、実際の値を含むエラーを作る。
 		portError := fmt.Errorf("環境変数 HTTP_PORT は %d〜%d でなければならない: %d", minimumPort, maximumPort, httpPort)
+		// 見つかった問題を、これまでの問題にまとめる。
 		loadError = errors.Join(loadError, portError)
 	}
 
+	// ログレベルの文字列を、slog のレベルに変換する。
 	logLevel, levelError := logger.ParseLevel(logLevelText)
+	// 未知のレベルのときは、どの環境変数の問題か分かるようにして、問題に加える。
 	if levelError != nil {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
 	}
 
+	// 1つでも問題があれば、中途半端な設定を使わせないため、ゼロ値とエラーを返す。
 	if loadError != nil {
 		return BackendConfig{}, loadError
 	}
+	// 問題が無いので、読み込んだ値で設定を作って返す。
 	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID}, nil
 }
