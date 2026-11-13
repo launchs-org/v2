@@ -120,6 +120,28 @@ k8s を操作する部品は、`activity.DeploymentOperator`(interface)で、実
 - `cluster.KubernetesDeploymentOperator`: client-go で、本当に操作する
 - `activity.LoggingDeploymentOperator`: 何も操作せず、ログだけを出し、常に Ready と答える(`none`。開発用)
 
+## 5.1 起動設定の反映: `POST /deploy/:deployId/config/apply`
+
+`PUT /config` と `discard` は、DB の `pending_*` を書き換えるだけで、Workflow は使わない(`DeployRepository.SavePendingConfig` / `DiscardPendingConfig`。行を `FOR UPDATE` でロックして、状態を確かめる)。コンテナへの反映だけが、非同期になる。
+
+```
+curl → ... → DeployController.ApplyConfig
+  → DeployService.ApplyConfig
+      ├─ DeployRepository.BeginConfigApply   行をロックして、反映できる状態か確かめ、status を applying にする
+      │     (pending が無い・applying・起動中・削除の途中なら 409。元の status を覚えておく)
+      ├─ Temporal に ApplyDeployConfigWorkflow の開始を頼む
+      └─ 開始できなければ、status を元に戻す(applying のまま残さない)
+  → すぐ 200 {} を返す
+        ↓ ここから worker が非同期に実行
+  ApplyDeployConfigWorkflow
+   ├─ Activity: ApplyPendingConfig   pending の値で Deployment を更新する(k8s がコンテナを入れ替える)
+   ├─ Activity: WaitDeploymentReady  Ready になるまで待つ(作成と同じ Activity。最長 300 秒)
+   └─ Activity: CommitConfigResult   結果が決まってから、正式な値を pending の内容にして pending を空にし、
+                                      成功なら active(replicas 0 なら scaled_zero)、失敗なら failed にする
+```
+
+仕様どおり、**実際の反映を先に試み、結果が確定してから** DB の正式な値を更新する。失敗しても、正式な値は「最後に反映を試みた値」になる。
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -130,8 +152,8 @@ k8s を操作する部品は、`activity.DeploymentOperator`(interface)で、実
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント | `shared/k8s/` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |
