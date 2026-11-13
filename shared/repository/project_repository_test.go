@@ -310,7 +310,7 @@ func TestProjectRepositoryMarkDeleting(testingT *testing.T) {
 	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
 
 	// 1回目は、削除中にできるはず。
-	if markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
+	if _, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
 		testingT.Fatalf("削除中にできるはずが、エラー: %v", markError)
 	}
 	// 変更後のプロジェクトを取得し直す。
@@ -323,7 +323,7 @@ func TestProjectRepositoryMarkDeleting(testingT *testing.T) {
 	// 同じものをもう一度削除中にしようとして、conflict になることを確認する。
 	testingT.Run("すでに削除中なら conflict", func(subTest *testing.T) {
 		// 2回目の削除中への変更を実行する。
-		markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001")
+		_, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001")
 		// conflict になっているか確認する。
 		if apperror.KindOf(markError) != apperror.KindConflict {
 			subTest.Errorf("conflict のはずが、違う: %v", markError)
@@ -332,7 +332,7 @@ func TestProjectRepositoryMarkDeleting(testingT *testing.T) {
 	// 他のユーザーが指定すると、存在しないものとして not_found になることを確認する。
 	testingT.Run("他のユーザーは not_found", func(subTest *testing.T) {
 		// 他のユーザーとして、削除中への変更を実行する。
-		markError := projectRepository.MarkDeleting(context.Background(), "user-b", "project-00000001")
+		_, markError := projectRepository.MarkDeleting(context.Background(), "user-b", "project-00000001")
 		// not_found になっているか確認する。
 		if apperror.KindOf(markError) != apperror.KindNotFound {
 			subTest.Errorf("not_found のはずが、違う: %v", markError)
@@ -347,13 +347,13 @@ func TestProjectRepositoryRevertDeleting(testingT *testing.T) {
 	database := testdatabase.New(testingT)
 	projectRepository := NewProjectRepository(database)
 	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
-	if markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
+	if _, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
 		testingT.Fatalf("削除中にできませんでした: %v", markError)
 	}
 
 	// 他のユーザーが戻そうとしても、変わらない。
 	testingT.Run("他のユーザーでは戻らない", func(subTest *testing.T) {
-		if revertError := projectRepository.RevertDeleting(context.Background(), "user-b", "project-00000001"); revertError != nil {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-b", "project-00000001", model.ProjectStatusActive); revertError != nil {
 			subTest.Fatalf("エラーにならないはず: %v", revertError)
 		}
 		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
@@ -363,7 +363,7 @@ func TestProjectRepositoryRevertDeleting(testingT *testing.T) {
 	})
 	// 持ち主なら、active に戻る。
 	testingT.Run("持ち主なら active に戻る", func(subTest *testing.T) {
-		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001"); revertError != nil {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001", model.ProjectStatusActive); revertError != nil {
 			subTest.Fatalf("エラーにならないはず: %v", revertError)
 		}
 		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
@@ -373,7 +373,7 @@ func TestProjectRepositoryRevertDeleting(testingT *testing.T) {
 	})
 	// すでに active でも、エラーにならない。
 	testingT.Run("active のものに実行してもエラーにならない", func(subTest *testing.T) {
-		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001"); revertError != nil {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001", model.ProjectStatusActive); revertError != nil {
 			subTest.Errorf("エラーにならないはず: %v", revertError)
 		}
 	})
@@ -387,7 +387,7 @@ func TestProjectRepositoryDeleteRecord(testingT *testing.T) {
 	projectRepository := NewProjectRepository(database)
 	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
 	mustCreate(testingT, database, newTestProject(2, "user-a", time.Now()))
-	if markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000002"); markError != nil {
+	if _, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000002"); markError != nil {
 		testingT.Fatalf("削除中にできませんでした: %v", markError)
 	}
 
@@ -410,6 +410,141 @@ func TestProjectRepositoryDeleteRecord(testingT *testing.T) {
 		_, findError := projectRepository.FindByID(context.Background(), "user-a", "project-00000002")
 		if apperror.KindOf(findError) != apperror.KindNotFound {
 			subTest.Errorf("not_found になるはず: %v", findError)
+		}
+	})
+}
+
+// TestProjectRepositoryMarkDeletingReturnsPreviousStatus は、削除中にしたとき、更新前の状態を返し、
+// 前回の削除に失敗した(delete_failed)プロジェクトも、削除のやり直しとして受け付けることを確認する。
+func TestProjectRepositoryMarkDeletingReturnsPreviousStatus(testingT *testing.T) {
+	// active と delete_failed のプロジェクトを1件ずつ作る。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
+	failedProject := newTestProject(2, "user-a", time.Now())
+	failedProject.Status = model.ProjectStatusDeleteFailed
+	mustCreate(testingT, database, failedProject)
+
+	// 更新前の状態が、それぞれ返ること。
+	testCases := []struct {
+		name           string
+		projectID      string
+		expectedBefore string
+	}{
+		{name: "active からは、active が返る", projectID: "project-00000001", expectedBefore: model.ProjectStatusActive},
+		{name: "delete_failed からは、delete_failed が返り、やり直しになる", projectID: "project-00000002", expectedBefore: model.ProjectStatusDeleteFailed},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			previousStatus, markError := projectRepository.MarkDeleting(context.Background(), "user-a", testCase.projectID)
+			if markError != nil || previousStatus != testCase.expectedBefore {
+				subTest.Fatalf("更新前の状態が違う: 期待 %q、実際 %q(エラー %v)", testCase.expectedBefore, previousStatus, markError)
+			}
+			project, _ := projectRepository.FindByID(context.Background(), "user-a", testCase.projectID)
+			if project.Status != model.ProjectStatusDeleting {
+				subTest.Errorf("deleting になっているはず: %q", project.Status)
+			}
+		})
+	}
+}
+
+// TestProjectRepositoryMarkDeletingIsExclusive は、同時に何回削除を受け付けても、
+// ちょうど1回だけが成功し、残りは conflict になることを確認する。
+func TestProjectRepositoryMarkDeletingIsExclusive(testingT *testing.T) {
+	// プロジェクトを1件作り、10個の goroutine で一斉に削除を受け付ける。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
+	const concurrentCalls = 10
+	results := make(chan error, concurrentCalls)
+	for range concurrentCalls {
+		go func() {
+			_, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001")
+			results <- markError
+		}()
+	}
+
+	// 成功は1回だけで、残りは conflict であること。
+	successCount, conflictCount := 0, 0
+	for range concurrentCalls {
+		markError := <-results
+		switch {
+		case markError == nil:
+			successCount++
+		case apperror.KindOf(markError) == apperror.KindConflict:
+			conflictCount++
+		default:
+			testingT.Errorf("想定外のエラー: %v", markError)
+		}
+	}
+	if successCount != 1 || conflictCount != concurrentCalls-1 {
+		testingT.Errorf("成功は1回、conflict は %d 回のはず: 成功 %d、conflict %d", concurrentCalls-1, successCount, conflictCount)
+	}
+}
+
+// TestProjectRepositoryRevertDeletingRestoresPreviousStatus は、削除中のプロジェクトを、
+// 指定した前の状態(delete_failed)に戻せることを確認する。
+func TestProjectRepositoryRevertDeletingRestoresPreviousStatus(testingT *testing.T) {
+	// delete_failed のプロジェクトを、削除中にする。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	failedProject := newTestProject(1, "user-a", time.Now())
+	failedProject.Status = model.ProjectStatusDeleteFailed
+	mustCreate(testingT, database, failedProject)
+	previousStatus, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001")
+	if markError != nil {
+		testingT.Fatalf("削除中にできませんでした: %v", markError)
+	}
+
+	// 前の状態を指定して戻すと、delete_failed に戻る。
+	if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001", previousStatus); revertError != nil {
+		testingT.Fatalf("戻せませんでした: %v", revertError)
+	}
+	project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
+	if project.Status != model.ProjectStatusDeleteFailed {
+		testingT.Errorf("delete_failed に戻るはず: %q", project.Status)
+	}
+}
+
+// TestProjectRepositoryMarkDeleteFailed は、削除中のプロジェクトだけが delete_failed になり、
+// active のものは変わらず、繰り返しても壊れないことを確認する。
+func TestProjectRepositoryMarkDeleteFailed(testingT *testing.T) {
+	// active と deleting のプロジェクトを1件ずつ作る。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
+	mustCreate(testingT, database, newTestProject(2, "user-a", time.Now()))
+	if _, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000002"); markError != nil {
+		testingT.Fatalf("削除中にできませんでした: %v", markError)
+	}
+
+	// active のものは、変わらない。
+	testingT.Run("active のプロジェクトは変わらない", func(subTest *testing.T) {
+		if failError := projectRepository.MarkDeleteFailed(context.Background(), "project-00000001"); failError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", failError)
+		}
+		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
+		if project.Status != model.ProjectStatusActive {
+			subTest.Errorf("active のままのはず: %q", project.Status)
+		}
+	})
+	// 削除中のものは、delete_failed になる。2回目も、エラーにならない。
+	testingT.Run("削除中のプロジェクトは delete_failed になり、2回目もエラーにならない", func(subTest *testing.T) {
+		for range 2 {
+			if failError := projectRepository.MarkDeleteFailed(context.Background(), "project-00000002"); failError != nil {
+				subTest.Fatalf("エラーにならないはず: %v", failError)
+			}
+		}
+		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000002")
+		if project.Status != model.ProjectStatusDeleteFailed {
+			subTest.Errorf("delete_failed になるはず: %q", project.Status)
+		}
+	})
+	// delete_failed のプロジェクトは、名前の変更ができない(conflict)。
+	testingT.Run("delete_failed の間の名前の変更は conflict", func(subTest *testing.T) {
+		renameError := projectRepository.Rename(context.Background(), "user-a", "project-00000002", "renamed")
+		if apperror.KindOf(renameError) != apperror.KindConflict {
+			subTest.Errorf("conflict のはず: %v", renameError)
 		}
 	})
 }
