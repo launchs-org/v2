@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	sharedconfig "launchs/shared/config"
+	"launchs/shared/k8s"
 )
 
 // newTestReader は、固定の環境変数を持つ EnvironmentReader を作る(テスト用)。
@@ -35,17 +36,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, KubernetesAccess: KubernetesAccessNone},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, KubernetesAccess: KubernetesAccessKubeconfig, KubeconfigPath: "/kube/config"},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, KubernetesAccess: KubernetesAccessInCluster},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
