@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"gorm.io/datatypes"
+
 	"context"
 	"testing"
 	"time"
@@ -47,6 +49,13 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 		{name: "deploy 作成: プロジェクト ID が空", call: func() error { return deployRepository.Create(requestContext, newTestDeploy(9, "", "user-a")) }, expectedKind: apperror.KindInternal},
 		{name: "deploy 取得: ユーザー ID が空", call: func() error { _, err := deployRepository.FindByID(requestContext, "", "deploy-00000001"); return err }, expectedKind: apperror.KindNotFound},
 		{name: "deploy 取得(ワーカー): ID が空", call: func() error { _, err := deployRepository.FindForWorker(requestContext, ""); return err }, expectedKind: apperror.KindNotFound},
+		{name: "起動設定の保存: ID が空", call: func() error {
+			return deployRepository.SavePendingConfig(requestContext, "user-a", "", datatypes.JSON(`{}`), nil, nil)
+		}, expectedKind: apperror.KindNotFound},
+		{name: "起動設定の保存: ユーザー ID が空", call: func() error {
+			return deployRepository.SavePendingConfig(requestContext, "", "deploy-00000001", datatypes.JSON(`{}`), nil, nil)
+		}, expectedKind: apperror.KindNotFound},
+		{name: "起動設定の破棄: ID が空", call: func() error { return deployRepository.DiscardPendingConfig(requestContext, "user-a", "") }, expectedKind: apperror.KindNotFound},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 状態変更: ID が空", call: func() error {
 			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")

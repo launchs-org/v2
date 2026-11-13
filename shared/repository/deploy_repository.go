@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -225,4 +226,117 @@ func (deployRepository *DeployRepository) UpdateStatus(requestContext context.Co
 	}
 	// 1行以上更新できたときだけ、変えられたことにする。
 	return updateResult.RowsAffected > 0, nil
+}
+
+// lockEditableDeploy は、起動設定を編集できる deploy を、更新用にロックして取得する(トランザクションの中で使う)。
+//
+// 他のユーザーの deploy は、存在しないものとして扱う。反映中(applying)と削除の途中(deleting、delete_failed)の
+// deploy は、起動設定を変えられないので、conflict にする。
+//
+// 引数:
+//   - transaction: 使っているトランザクション。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 取得する deploy の ID。
+//
+// 戻り値:
+//   - ロックした deploy。
+//   - 無い、または他のユーザーのものなら not_found。編集できない状態なら conflict。
+func lockEditableDeploy(transaction *gorm.DB, userID string, deployID string) (model.Deploy, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID, deployID) {
+		return model.Deploy{}, apperror.New(apperror.KindNotFound, "deploy が見つかりません")
+	}
+	// ID と持ち主の両方で探し、同時に別の処理が状態を変えないよう、行をロックする。
+	var deploy model.Deploy
+	findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where(&model.Deploy{ID: deployID, UserID: userID}).
+		Take(&deploy).Error
+	// 見つからなければ not_found にする。
+	if errors.Is(findError, gorm.ErrRecordNotFound) {
+		return model.Deploy{}, apperror.Wrap(apperror.KindNotFound, "deploy が見つかりません", findError)
+	}
+	// それ以外のデータベースのエラーは、内部エラーにする。
+	if findError != nil {
+		return model.Deploy{}, apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
+	}
+	// 反映中や削除の途中は、起動設定を変えられない。
+	switch deploy.Status {
+	case model.DeployStatusApplying, model.DeployStatusDeleting, model.DeployStatusDeleteFailed:
+		return model.Deploy{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、起動設定を操作できません")
+	}
+	return deploy, nil
+}
+
+// SavePendingConfig は、起動設定(環境変数、起動コマンド、起動引数)を、まだ適用しない値として保存する。
+//
+// 3つは、常にまとめて置き換える。すでに適用していない値があるときは、新しい値で上書きする。
+// 現在反映されている値(env、command、args)は変えない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 設定を保存する deploy の ID。
+//   - env: 環境変数(JSON のオブジェクト)。
+//   - command: 起動コマンド。nil ならイメージの既定。
+//   - args: 起動引数(JSON の配列)。nil ならイメージの既定。
+//
+// 戻り値:
+//   - deploy が無い、または他のユーザーのものなら not_found。反映中や削除の途中なら conflict。
+//   - それ以外のデータベースのエラーは internal_error。
+func (deployRepository *DeployRepository) SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error {
+	// 取得と更新を、1つのトランザクションで行う。
+	return deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 編集できる状態であることを、行をロックして確かめる。
+		if _, lockError := lockEditableDeploy(transaction, userID, deployID); lockError != nil {
+			return lockError
+		}
+		// 3つの列を、nil のものも含めて、まとめて更新する(更新日時は Gorm が更新する)。
+		updateError := transaction.Model(&model.Deploy{}).
+			Where(&model.Deploy{ID: deployID}).
+			Select("pending_env", "pending_command", "pending_args").
+			Updates(&model.Deploy{PendingEnv: env, PendingCommand: command, PendingArgs: args}).Error
+		// データベースのエラーは、内部エラーにして返す。
+		if updateError != nil {
+			return apperror.Wrap(apperror.KindInternal, "起動設定を保存できませんでした", updateError)
+		}
+		return nil
+	})
+}
+
+// DiscardPendingConfig は、まだ適用していない起動設定を、適用せずに破棄する。
+//
+// 現在反映されている値(env、command、args)は変えない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 破棄する deploy の ID。
+//
+// 戻り値:
+//   - deploy が無い、または他のユーザーのものなら not_found。
+//     反映中や削除の途中、または破棄する値が無いなら conflict。
+//   - それ以外のデータベースのエラーは internal_error。
+func (deployRepository *DeployRepository) DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error {
+	// 取得と更新を、1つのトランザクションで行う。
+	return deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 編集できる状態であることを、行をロックして確かめる。
+		deploy, lockError := lockEditableDeploy(transaction, userID, deployID)
+		if lockError != nil {
+			return lockError
+		}
+		// 3つとも無いときは、破棄するものが無い。保存のたびに env は必ず入るので、env で判定できる。
+		if len(deploy.PendingEnv) == 0 && deploy.PendingCommand == nil && len(deploy.PendingArgs) == 0 {
+			return apperror.New(apperror.KindConflict, "破棄する起動設定の変更がありません")
+		}
+		// 3つの列を NULL に戻す(更新日時は Gorm が更新する)。
+		updateError := transaction.Model(&model.Deploy{}).
+			Where(&model.Deploy{ID: deployID}).
+			Select("pending_env", "pending_command", "pending_args").
+			Updates(&model.Deploy{}).Error
+		// データベースのエラーは、内部エラーにして返す。
+		if updateError != nil {
+			return apperror.Wrap(apperror.KindInternal, "起動設定を破棄できませんでした", updateError)
+		}
+		return nil
+	})
 }
