@@ -5,9 +5,11 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
+	"launchs/shared/apperror"
 	"launchs/shared/model"
 	"launchs/shared/pagination"
 )
@@ -20,23 +22,35 @@ type ProjectStore interface {
 	FindByID(requestContext context.Context, userID string, projectID string) (model.Project, error)
 	ListByUser(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error)
 	Rename(requestContext context.Context, userID string, projectID string, newName string) error
+	MarkDeleting(requestContext context.Context, userID string, projectID string) error
+	RevertDeleting(requestContext context.Context, userID string, projectID string) error
+}
+
+// ProjectDeletionStarter は、プロジェクトの実体を削除する処理(Workflow)を開始する。
+//
+// 実体は TemporalProjectDeletionStarter。テストでは fake に差し替える。
+type ProjectDeletionStarter interface {
+	// StartProjectDeletion は、削除の処理を開始する。完了は待たない。
+	StartProjectDeletion(requestContext context.Context, projectID string) error
 }
 
 // ProjectService は、プロジェクトに関する操作のビジネスルールを担当する。
 type ProjectService struct {
-	projectStore ProjectStore
+	projectStore           ProjectStore
+	projectDeletionStarter ProjectDeletionStarter
 }
 
 // NewProjectService は、ProjectService を作る。
 //
 // 引数:
 //   - projectStore: プロジェクトの保存先。
+//   - projectDeletionStarter: プロジェクトの実体の削除を開始するもの。
 //
 // 戻り値:
 //   - 作成した ProjectService。
-func NewProjectService(projectStore ProjectStore) *ProjectService {
-	// 保存先を持たせた ProjectService を返す。
-	return &ProjectService{projectStore: projectStore}
+func NewProjectService(projectStore ProjectStore, projectDeletionStarter ProjectDeletionStarter) *ProjectService {
+	// 保存先と、削除の開始を持たせた ProjectService を返す。
+	return &ProjectService{projectStore: projectStore, projectDeletionStarter: projectDeletionStarter}
 }
 
 // Create は、ユーザーのプロジェクトを新しく作る。
@@ -115,4 +129,40 @@ func (projectService *ProjectService) List(requestContext context.Context, userI
 func (projectService *ProjectService) Rename(requestContext context.Context, userID string, projectID string, newName string) error {
 	// 保存先に、名前の変更を任せ、結果(not_found や conflict)をそのまま返す。
 	return projectService.projectStore.Rename(requestContext, userID, projectID, newName)
+}
+
+// Delete は、プロジェクトの削除を受け付ける。実体の削除は、非同期に行われる。
+//
+// 処理の流れ:
+//  1. プロジェクトの状態を、削除中(deleting)にする(以後の変更は 409 になる)
+//  2. 実体を削除する Workflow を開始する(完了は待たない)
+//  3. 手順 2 に失敗したら、状態を active に戻す(削除中のまま残らないようにする)
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - projectID: 削除するプロジェクトの ID。
+//
+// 戻り値:
+//   - 無い、または他のユーザーのものなら not_found。すでに削除中なら conflict。
+//   - Workflow を開始できなかったときの internal_error(状態は戻してある)。
+func (projectService *ProjectService) Delete(requestContext context.Context, userID string, projectID string) error {
+	// 1. 状態を削除中にする(無い・他人のもの・すでに削除中は、ここでエラーになる)。
+	if markError := projectService.projectStore.MarkDeleting(requestContext, userID, projectID); markError != nil {
+		return markError
+	}
+
+	// 2. 実体を削除する Workflow を開始する。
+	startError := projectService.projectDeletionStarter.StartProjectDeletion(requestContext, projectID)
+	if startError == nil {
+		return nil
+	}
+
+	// 3. 開始できなかったので、状態を戻す。リクエストが中断されていても戻せるよう、context を切り離す。
+	revertContext := context.WithoutCancel(requestContext)
+	if revertError := projectService.projectStore.RevertDeleting(revertContext, userID, projectID); revertError != nil {
+		// 戻すのにも失敗したときは、両方の原因を残す(プロジェクトは削除中のまま残る)。
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", errors.Join(startError, revertError))
+	}
+	return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", startError)
 }
