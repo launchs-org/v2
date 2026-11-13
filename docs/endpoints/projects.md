@@ -34,7 +34,7 @@
 ```json
 {"projects": [{"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app", "status": "active"}], "nextCursor": null}
 ```
-- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態
+- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態、`"delete_failed"` は削除がリトライの期限までに終わらず止まっている状態(もう一度 DELETE を呼ぶとやり直せる)
 - Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
 
 ### プロジェクト取得
@@ -47,7 +47,7 @@
 ```json
 {"projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "name": "my-app", "status": "active"}
 ```
-- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態
+- Note: `status` はプロジェクトの状態。`"active"` は通常の状態、`"deleting"` は削除を受け付けて実体を削除している最中の状態、`"delete_failed"` は削除がリトライの期限までに終わらず止まっている状態(もう一度 DELETE を呼ぶとやり直せる)
 
 ### プロジェクト build 履歴一覧
 - Get: /projects/:projectId/builds
@@ -116,7 +116,7 @@
 ```json
 {}
 ```
-- Note: `name` の制約と重複の扱いは [プロジェクト作成](#プロジェクト作成) と同じ。プロジェクトの status が "deleting" の間は 409
+- Note: `name` の制約と重複の扱いは [プロジェクト作成](#プロジェクト作成) と同じ。プロジェクトの status が "deleting" または "delete_failed" の間は 409
 
 ### プロジェクト削除
 - Delete: /projects/:projectId
@@ -131,3 +131,4 @@
 - Note: プロジェクト削除時、配下の build 履歴・イメージ・deploy(稼働中のものを含む)・ingress・volume(データごと)は全て連鎖して削除される。k8s の namespace(プロジェクトごとに1つ、名前は projectId)ごと削除するので、PVC のデータも消える
 - Note: 呼び出すと即座に応答し、status は直ちに "deleting" になる。実体の削除は Workflow で非同期に行い、完了するとレコード自体が削除される(以後の GET は 404 を返す)
 - Note: deleting の間は、変更系の操作と再度の削除は 409 を返す。GET は status が "deleting" の状態を返す
+- Note: 削除の Workflow は、k8s などの一時的な障害ならリトライして完了させる。リトライの期限(15分、仮)までに終わらなければ、status を "delete_failed" にして止まる。このとき、実体は一部だけ削除されている可能性がある。"delete_failed" のプロジェクトにもう一度 DELETE を呼ぶと、受け付けられて status が "deleting" に戻り、削除をやり直す(冪等なので、途中まで消えていても問題ない)。"delete_failed" の間も、変更系の操作は 409
