@@ -45,25 +45,25 @@ main()
      ├─ database.Open / client.Dial                    DB と Temporal
      ├─ worker.New(temporalClient, "general")          Task Queue "general" を処理するワーカー
      ├─ RegisterWorkflow(DeleteProjectWorkflow)        Workflow を登録
-     ├─ chooseNamespaceDeleter(設定)                    ← 「どの実装を使うか」を選ぶ(下の 3 を参照)
+     ├─ chooseClusterOperators(設定)                    ← 「どの実装を使うか」を選ぶ(下の 3 を参照)
      ├─ activity.NewProjectDeletionActivities(namespace を消す役, repository, logger)
      └─ RegisterActivity(...) × 3                      Activity を名前で登録 → Run()
 ```
 
-## 3. 「選ぶ」処理: `chooseNamespaceDeleter`(以前の factory)
+## 3. 「選ぶ」処理: `chooseClusterOperators`(以前の factory)
 
-namespace を消す役(`activity.NamespaceDeleter`)には、実装が2つある。どちらを使うかは、環境変数 `KUBERNETES_ACCESS` で決まる。
+k8s を操作する役(namespace を消す `activity.NamespaceDeleter`、namespace と Deployment を作る `activity.DeploymentOperator`)には、それぞれ実装が2つある。どちらを使うかは、環境変数 `KUBERNETES_ACCESS` で決まる。
 
 ```
-chooseNamespaceDeleter(設定)
+chooseClusterOperators(設定, RUNTIME_CLASS)
  └─ k8s.NewClientset(設定)                              shared/k8s(他の部品でも使える共通部品)
      ├─ none の場合 → ErrNotConnected を返す
-     │     → LoggingNamespaceDeleter(何も消さず、警告のログだけ。開発用)
-     └─ kubeconfig / in-cluster の場合 → k8s のクライアント
-           → KubernetesNamespaceDeleter(client-go で本当に消す)
+     │     → LoggingNamespaceDeleter / LoggingDeploymentOperator(何も操作せず、警告のログだけ。開発用)
+     └─ kubeconfig / in-cluster の場合 → k8s のクライアント(1つだけ作って、全ての役で共有)
+           → KubernetesNamespaceDeleter / KubernetesDeploymentOperator(client-go で本当に操作する)
 ```
 
-「実装を選ぶ関数」は、ここ1か所だけ。k8s のクライアントの作り方そのものは `shared/k8s` にあり、deploy など別の処理が k8s につなぐときも、同じ `k8s.NewClientset` を使う。
+「実装を選ぶ関数」は、ここ1か所だけ。k8s のクライアントの作り方そのものは `shared/k8s` にあり、別の処理が k8s につなぐときも、同じ `k8s.NewClientset` を使う。
 
 ## 4. リクエストの流れ: `DELETE /api/v1/projects/:projectId`
 
