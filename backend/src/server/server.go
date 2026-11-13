@@ -22,6 +22,9 @@ type Dependencies struct {
 	// DevUserID は、開発用の仮の認証で、全てのリクエストのユーザーとして扱う ID。空なら API は全て 401。
 	DevUserID string
 
+	// DeployWorkflowStarter は、deploy の起動(k8s への作成)の Workflow を開始するもの。
+	DeployWorkflowStarter service.DeployWorkflowStarter
+
 	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
 	ProjectDeletionStarter service.ProjectDeletionStarter
 }

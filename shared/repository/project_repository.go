@@ -70,6 +70,10 @@ func (projectRepository *ProjectRepository) Create(requestContext context.Contex
 //   - 見つかったプロジェクト。
 //   - 無い、または他のユーザーのものだったときの、not_found のエラー。
 func (projectRepository *ProjectRepository) FindByID(requestContext context.Context, userID string, projectID string) (model.Project, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID, projectID) {
+		return model.Project{}, apperror.New(apperror.KindNotFound, "プロジェクトが見つかりません")
+	}
 	// 取得した行を入れる変数。
 	var project model.Project
 	// ID と持ち主の両方で絞って1件取る。持ち主も条件に入れて、他人のものを見せない。
@@ -101,6 +105,10 @@ func (projectRepository *ProjectRepository) FindByID(requestContext context.Cont
 //   - 次のページがあるときは、その開始の位置の元になる、最後の行の位置。最後のページなら nil。
 //   - データベースのエラー。
 func (projectRepository *ProjectRepository) ListByUser(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID) {
+		return nil, nil, newEmptyConditionError()
+	}
 	// 自分のプロジェクトを、新しい順に並べる検索を組み立てる。
 	query := projectRepository.database.WithContext(requestContext).
 		Where(&model.Project{UserID: userID}).
@@ -145,6 +153,10 @@ func (projectRepository *ProjectRepository) ListByUser(requestContext context.Co
 //   - 削除中(deleting)なら conflict。
 //   - 同じユーザーの中で名前が重複したら conflict。
 func (projectRepository *ProjectRepository) Rename(requestContext context.Context, userID string, projectID string, newName string) error {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID, projectID, newName) {
+		return newEmptyConditionError()
+	}
 	// active のものだけを対象に、名前を UPDATE する。削除中のものは変えない。
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
@@ -184,6 +196,10 @@ func (projectRepository *ProjectRepository) Rename(requestContext context.Contex
 //   - 更新する前の状態(active または delete_failed)。Workflow を開始できなかったときに、戻すために使う。
 //   - 無い、または他のユーザーのものなら not_found。すでに削除中なら conflict。
 func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.Context, userID string, projectID string) (string, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID, projectID) {
+		return "", apperror.New(apperror.KindNotFound, "プロジェクトが見つかりません")
+	}
 	// 更新前の状態を、トランザクションの外へ持ち出すための変数。
 	previousStatus := ""
 
@@ -260,6 +276,10 @@ func (projectRepository *ProjectRepository) explainNoUpdate(requestContext conte
 // 戻り値:
 //   - データベースのエラー。
 func (projectRepository *ProjectRepository) RevertDeleting(requestContext context.Context, userID string, projectID string, previousStatus string) error {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(userID, projectID, previousStatus) {
+		return newEmptyConditionError()
+	}
 	// 持ち主の、削除中のプロジェクトだけを対象にして、前の状態に戻す(更新日時は Gorm が更新する)。
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
@@ -284,6 +304,10 @@ func (projectRepository *ProjectRepository) RevertDeleting(requestContext contex
 // 戻り値:
 //   - データベースのエラー。
 func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext context.Context, projectID string) error {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(projectID) {
+		return newEmptyConditionError()
+	}
 	// 削除中のプロジェクトだけを、delete_failed にする(更新日時は Gorm が更新する)。
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
@@ -296,10 +320,15 @@ func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext cont
 	return nil
 }
 
-// DeleteRecord は、プロジェクトの行を物理削除する。削除の Workflow が、最後に使う。
+// DeleteRecord は、プロジェクトと、配下のレコードを物理削除する。削除の Workflow が、最後に使う。
+//
+// 削除するもの(1つのトランザクションで、全て成功するか、全て取り消される):
+//   - プロジェクトの配下の deploy
+//   - プロジェクトの行
 //
 // 繰り返し実行されても壊れないよう、行がすでに無くてもエラーにしない。
-// 削除中(deleting)でないプロジェクトは、消さない(誤って消さないための安全装置)。
+// 削除中(deleting)でないプロジェクトは、配下も含めて、消さない(誤って消さないための安全装置)。
+// build、service、ingress、volume のテーブルができたら、配下の削除に、ここへ足す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -308,13 +337,34 @@ func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext cont
 // 戻り値:
 //   - データベースのエラー。
 func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.Context, projectID string) error {
-	// 削除中のプロジェクトだけを、物理削除する(無ければ 0 件で、エラーにはならない)。
-	deleteError := projectRepository.database.WithContext(requestContext).
-		Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
-		Delete(&model.Project{}).Error
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(projectID) {
+		return newEmptyConditionError()
+	}
+	// 配下と本体の削除を、1つのトランザクションで行う。
+	transactionError := projectRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 削除中のプロジェクトかを、行をロックして確かめる。そうでなければ(無い、または削除中でない)、何も消さない。
+		var project model.Project
+		findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
+			Take(&project).Error
+		if errors.Is(findError, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if findError != nil {
+			return findError
+		}
+
+		// 配下の deploy を削除する。
+		if deployError := transaction.Where(&model.Deploy{ProjectID: projectID}).Delete(&model.Deploy{}).Error; deployError != nil {
+			return deployError
+		}
+		// プロジェクトの行を削除する。
+		return transaction.Delete(&project).Error
+	})
 	// データベースのエラーは、内部エラーにして返す。
-	if deleteError != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除できませんでした", deleteError)
+	if transactionError != nil {
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除できませんでした", transactionError)
 	}
 	return nil
 }

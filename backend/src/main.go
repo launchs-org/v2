@@ -77,6 +77,7 @@ func run() error {
 		Database:               appDatabase,
 		DevUserID:              backendConfig.DevUserID,
 		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),
+		DeployWorkflowStarter:  service.NewTemporalDeployWorkflowStarter(temporalClient),
 	})
 
 	// SIGINT と SIGTERM を受けると終わる context を作る。これを使って、停止の合図で、サーバーを止める。

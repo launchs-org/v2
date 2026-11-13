@@ -165,7 +165,19 @@ func (projectService *ProjectService) Delete(requestContext context.Context, use
 	revertContext := context.WithoutCancel(requestContext)
 	if revertError := projectService.projectStore.RevertDeleting(revertContext, userID, projectID, previousStatus); revertError != nil {
 		// 戻すのにも失敗したときは、両方の原因を残す(プロジェクトは削除中のまま残る)。
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", errors.Join(startError, revertError))
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", joinErrors(startError, revertError))
 	}
 	return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", startError)
+}
+
+// joinErrors は、複数のエラーを1つにまとめる。
+//
+// 引数:
+//   - errorList: まとめるエラー。
+//
+// 戻り値:
+//   - 全てのエラーを含む1つのエラー。
+func joinErrors(errorList ...error) error {
+	// 標準ライブラリに任せる(呼び出し側を読みやすくするための、薄い包み)。
+	return errors.Join(errorList...)
 }
