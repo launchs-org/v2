@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"go.temporal.io/sdk/client"
 
 	"launchs/backend/src/config"
 	"launchs/backend/src/server"
+	"launchs/backend/src/service"
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/database"
 	"launchs/shared/logger"
@@ -61,7 +63,21 @@ func run() error {
 	defer func() { _ = database.Close(appDatabase) }()
 
 	// ロガーとデータベースと開発用ユーザー ID を渡して、ルートとミドルウェアを組み立てたサーバーを作る。
-	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, DevUserID: backendConfig.DevUserID})
+	// Temporal のサーバーに接続する(削除などの非同期の処理を開始するため)。
+	temporalClient, temporalError := client.Dial(client.Options{
+		HostPort:  backendConfig.TemporalAddress,
+		Namespace: backendConfig.TemporalNamespace,
+	})
+	if temporalError != nil {
+		return fmt.Errorf("Temporal に接続できませんでした: %w", temporalError)
+	}
+	defer temporalClient.Close()
+
+	echoServer := server.New(appLogger, server.Dependencies{
+		Database:               appDatabase,
+		DevUserID:              backendConfig.DevUserID,
+		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),
+	})
 
 	// SIGINT と SIGTERM を受けると終わる context を作る。これを使って、停止の合図で、サーバーを止める。
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

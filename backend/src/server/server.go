@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"launchs/backend/src/middlewares"
+	"launchs/backend/src/service"
 )
 
 // Dependencies は、サーバーが外から受け取る、依存するものの一式。
@@ -20,6 +21,9 @@ type Dependencies struct {
 
 	// DevUserID は、開発用の仮の認証で、全てのリクエストのユーザーとして扱う ID。空なら API は全て 401。
 	DevUserID string
+
+	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
+	ProjectDeletionStarter service.ProjectDeletionStarter
 }
 
 // New は、バックエンドの Echo のサーバーを組み立てる。

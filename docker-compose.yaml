@@ -9,10 +9,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
       # 認証のコンテナができるまでの、開発用の仮のユーザー。
       DEV_USER_ID: user-dev
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
       # テストが、使い捨てのデータベースを作るための接続先。
       TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:
