@@ -51,6 +51,7 @@
 - `applying` 中・`deleting` 中のリソースに対する変更系の操作は、409 を返す。
 - 削除は Workflow で非同期に行う。削除を受け付けると、対象と配下のリソースの `status` が `deleting` になる。
 - `deleting` 中の GET は `deleting` を返し、削除が完了したら 404 になる。
+- 削除がリトライの期限までに終わらなかったときは、`status` が `delete_failed` になって止まる(変更系の操作は 409)。もう一度削除を呼ぶと、やり直せる。(いまはプロジェクトだけ。他のリソースへの適用は、実装するときに決める)
 
 ## ページング
 - 一覧系(project、build 履歴、deploy 履歴、ingress、volume)は limit + cursor 方式。
