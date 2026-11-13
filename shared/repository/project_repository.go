@@ -320,10 +320,15 @@ func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext cont
 	return nil
 }
 
-// DeleteRecord は、プロジェクトの行を物理削除する。削除の Workflow が、最後に使う。
+// DeleteRecord は、プロジェクトと、配下のレコードを物理削除する。削除の Workflow が、最後に使う。
+//
+// 削除するもの(1つのトランザクションで、全て成功するか、全て取り消される):
+//   - プロジェクトの配下の deploy
+//   - プロジェクトの行
 //
 // 繰り返し実行されても壊れないよう、行がすでに無くてもエラーにしない。
-// 削除中(deleting)でないプロジェクトは、消さない(誤って消さないための安全装置)。
+// 削除中(deleting)でないプロジェクトは、配下も含めて、消さない(誤って消さないための安全装置)。
+// build、service、ingress、volume のテーブルができたら、配下の削除に、ここへ足す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -336,13 +341,30 @@ func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.
 	if hasEmpty(projectID) {
 		return newEmptyConditionError()
 	}
-	// 削除中のプロジェクトだけを、物理削除する(無ければ 0 件で、エラーにはならない)。
-	deleteError := projectRepository.database.WithContext(requestContext).
-		Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
-		Delete(&model.Project{}).Error
+	// 配下と本体の削除を、1つのトランザクションで行う。
+	transactionError := projectRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 削除中のプロジェクトかを、行をロックして確かめる。そうでなければ(無い、または削除中でない)、何も消さない。
+		var project model.Project
+		findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
+			Take(&project).Error
+		if errors.Is(findError, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if findError != nil {
+			return findError
+		}
+
+		// 配下の deploy を削除する。
+		if deployError := transaction.Where(&model.Deploy{ProjectID: projectID}).Delete(&model.Deploy{}).Error; deployError != nil {
+			return deployError
+		}
+		// プロジェクトの行を削除する。
+		return transaction.Delete(&project).Error
+	})
 	// データベースのエラーは、内部エラーにして返す。
-	if deleteError != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除できませんでした", deleteError)
+	if transactionError != nil {
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除できませんでした", transactionError)
 	}
 	return nil
 }
