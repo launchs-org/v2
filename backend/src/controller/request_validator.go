@@ -14,6 +14,11 @@ import (
 // resourceNamePattern は、リソースの名前に使える文字(英数字とハイフンのみ)。
 var resourceNamePattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
+// imageReferencePattern は、イメージの参照(imageRef)に使える形。
+//
+// 英数字で始まり、英数字と . _ - / : @ だけを使える(registry.example/app:1 や、@sha256:... の形)。空白は含められない。
+var imageReferencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-/:@]*$`)
+
 // requestValidator は、リクエストのボディの検証に使う validator。
 // エラーのメッセージに JSON のキー名(name など)が出るよう、タグ名の取り方を差し替えてある。
 var requestValidator = newRequestValidator()
@@ -22,6 +27,7 @@ var requestValidator = newRequestValidator()
 //
 // 登録する規則:
 //   - resourcename: 英数字とハイフンのみ(長さは、min と max で別に指定する)。
+//   - imageref: イメージの参照に使える文字だけ(英数字で始まり、英数字と . _ - / : @)。
 //
 // 戻り値:
 //   - 設定済みの validator。
@@ -46,6 +52,10 @@ func newRequestValidator() *validator.Validate {
 		return resourceNamePattern.MatchString(fieldLevel.Field().String())
 	})
 	// 設定済みの validator を返す。
+	// イメージの参照の規則を登録する。
+	_ = validate.RegisterValidation("imageref", func(fieldLevel validator.FieldLevel) bool {
+		return imageReferencePattern.MatchString(fieldLevel.Field().String())
+	})
 	return validate
 }
 
