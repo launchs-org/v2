@@ -18,8 +18,10 @@ type fakeProjectStore struct {
 	renameError    error
 	renamedName    string
 	markError      error
+	markPrevious   string
 	revertError    error
 	revertCalled   bool
+	revertedTo     string
 }
 
 // Create は、受け取ったプロジェクトを覚えて、決めたエラーを返す。
@@ -128,13 +130,14 @@ func TestProjectServiceRename(testingT *testing.T) {
 }
 
 // MarkDeleting は、決めたエラーを返す。
-func (fakeStore *fakeProjectStore) MarkDeleting(_ context.Context, _ string, _ string) error {
-	return fakeStore.markError
+func (fakeStore *fakeProjectStore) MarkDeleting(_ context.Context, _ string, _ string) (string, error) {
+	return fakeStore.markPrevious, fakeStore.markError
 }
 
 // RevertDeleting は、呼ばれたことを覚えて、決めたエラーを返す。
-func (fakeStore *fakeProjectStore) RevertDeleting(_ context.Context, _ string, _ string) error {
+func (fakeStore *fakeProjectStore) RevertDeleting(_ context.Context, _ string, _ string, previousStatus string) error {
 	fakeStore.revertCalled = true
+	fakeStore.revertedTo = previousStatus
 	return fakeStore.revertError
 }
 
@@ -176,6 +179,15 @@ func TestProjectServiceDelete(testingT *testing.T) {
 		deleteError := NewProjectService(fakeStore, fakeStarter).Delete(context.Background(), "user-a", "project-1")
 		if apperror.KindOf(deleteError) != apperror.KindInternal || !fakeStore.revertCalled {
 			subTest.Errorf("internal_error で、状態を戻すはず: エラー %v、戻した %v", deleteError, fakeStore.revertCalled)
+		}
+	})
+	// やり直し(delete_failed から)の開始に失敗した場合は、delete_failed に戻す(active にはしない)。
+	testingT.Run("delete_failed からのやり直しで、Workflow を開始できなければ、delete_failed に戻す", func(subTest *testing.T) {
+		fakeStore := &fakeProjectStore{markPrevious: "delete_failed"}
+		fakeStarter := &fakeDeletionStarter{startError: errors.New("temporal down")}
+		deleteError := NewProjectService(fakeStore, fakeStarter).Delete(context.Background(), "user-a", "project-1")
+		if apperror.KindOf(deleteError) != apperror.KindInternal || fakeStore.revertedTo != "delete_failed" {
+			subTest.Errorf("delete_failed に戻すはず: エラー %v、戻し先 %q", deleteError, fakeStore.revertedTo)
 		}
 	})
 	// 状態を戻すのにも失敗した場合も、internal_error で返す。
