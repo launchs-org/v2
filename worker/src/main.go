@@ -16,6 +16,7 @@ import (
 	"launchs/shared/repository"
 	sharedworkflow "launchs/shared/workflow"
 	"launchs/worker/src/activity"
+	"launchs/worker/src/cluster"
 	"launchs/worker/src/config"
 	"launchs/worker/src/workflow"
 )
@@ -62,8 +63,13 @@ func run() error {
 	// 一般の Task Queue を処理するワーカーを作り、Workflow と Activity を登録する。
 	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteProjectWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteProjectWorkflowName})
+	// k8s の namespace を削除するものを、設定に合わせて作る。
+	namespaceDeleter, namespaceDeleterError := cluster.NewNamespaceDeleter(workerConfig, appLogger)
+	if namespaceDeleterError != nil {
+		return namespaceDeleterError
+	}
 	projectDeletionActivities := activity.NewProjectDeletionActivities(
-		activity.NewLoggingNamespaceDeleter(appLogger),
+		namespaceDeleter,
 		repository.NewProjectRepository(appDatabase),
 		appLogger,
 	)
