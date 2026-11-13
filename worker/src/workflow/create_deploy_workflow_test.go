@@ -110,12 +110,12 @@ func TestCreateDeployWorkflow(testingT *testing.T) {
 		testEnvironment.AssertCalled(subTest, sharedworkflow.MarkDeployResultActivityName, mock.Anything, failedInput)
 	})
 
-	// 起動が確認できない(タイムアウトなど)場合は、リトライせずに failed にする。
-	testingT.Run("起動を待つ Activity が失敗したら、リトライせず、失敗を記録して失敗で終わる", func(subTest *testing.T) {
+	// 起動が、期限(300秒)まで確認できない場合は、failed にする。
+	testingT.Run("起動が期限まで確認できなければ、失敗を記録して失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newCreateDeployEnvironment(subTest)
 		testEnvironment.OnActivity(sharedworkflow.EnsureProjectNamespaceActivityName, mock.Anything, ensureInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.ApplyDeploymentActivityName, mock.Anything, applyInput).Return(nil)
-		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(errors.New("not ready in time")).Once()
+		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(errors.New("not ready in time"))
 		testEnvironment.OnActivity(sharedworkflow.MarkDeployResultActivityName, mock.Anything, failedInput).Return(nil)
 
 		testEnvironment.ExecuteWorkflow(CreateDeployWorkflow, sharedworkflow.CreateDeployInput{DeployID: "deploy-1"})
@@ -123,9 +123,27 @@ func TestCreateDeployWorkflow(testingT *testing.T) {
 		if testEnvironment.GetWorkflowError() == nil {
 			subTest.Fatalf("失敗で終わるはず")
 		}
-		// 待つ Activity は、1回だけ(リトライしない)。
-		testEnvironment.AssertNumberOfCalls(subTest, sharedworkflow.WaitDeploymentReadyActivityName, 1)
 		testEnvironment.AssertCalled(subTest, sharedworkflow.MarkDeployResultActivityName, mock.Anything, failedInput)
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.MarkDeployResultActivityName, mock.Anything, succeededInput)
+	})
+
+	// 待っている途中でワーカーが入れ替わるなどして途切れても、期限内ならやり直して、成功にする。
+	testingT.Run("待っている途中で途切れても、期限内に引き継がれれば、成功で終わる", func(subTest *testing.T) {
+		testEnvironment := newCreateDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.EnsureProjectNamespaceActivityName, mock.Anything, ensureInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.ApplyDeploymentActivityName, mock.Anything, applyInput).Return(nil)
+		// 最初の1回は途切れ(エラー)、2回目で Ready になる。
+		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(errors.New("worker restarted")).Once()
+		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.MarkDeployResultActivityName, mock.Anything, succeededInput).Return(nil)
+
+		testEnvironment.ExecuteWorkflow(CreateDeployWorkflow, sharedworkflow.CreateDeployInput{DeployID: "deploy-1"})
+
+		if testEnvironment.GetWorkflowError() != nil {
+			subTest.Fatalf("引き継がれて成功するはず: %v", testEnvironment.GetWorkflowError())
+		}
+		testEnvironment.AssertNumberOfCalls(subTest, sharedworkflow.WaitDeploymentReadyActivityName, 2)
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.MarkDeployResultActivityName, mock.Anything, failedInput)
 	})
 
 	// 結果の記録にも失敗した場合。

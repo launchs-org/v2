@@ -19,7 +19,8 @@ import (
 //  4. 成功なら、status を active にする
 //
 // 1 と 2 は、k8s の一時的な障害なら、リトライの期限(2分)までリトライする。
-// 3 は、300 秒で Ready にならなければ、リトライせずに失敗とする(仕様のタイムアウト)。
+// 3 は、300 秒(仕様のタイムアウト)で Ready にならなければ失敗とする。待っている間にワーカーが入れ替わっても、
+// 期限内なら別のワーカーが引き継ぐ。
 // どこかで失敗したら、status を failed にして、Workflow を失敗で終える。
 //
 // 引数:
@@ -87,11 +88,18 @@ func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.Creat
 		return fmt.Errorf("Deployment を作れませんでした: %w", applyError)
 	}
 
-	// 3. 起動し終えるのを待つ。仕様のタイムアウト(300秒)までに終わらなければ、リトライせずに失敗とする。
+	// 3. 起動し終えるのを待つ。仕様のタイムアウト(300秒)を、リトライを含めた全体の期限(ScheduleToClose)にする。
+	//    ワーカーの再起動などで Activity が途切れても、期限内なら別のワーカーが引き継ぐ(正常に起動できる
+	//    deploy を、ワーカーの入れ替えだけで failed にしないため)。期限を超えたら、失敗とする(リトライしない)。
 	waitContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout: sharedworkflow.DeployStartTimeout,
-		HeartbeatTimeout:    sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
-		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+		StartToCloseTimeout:    sharedworkflow.DeployStartTimeout,
+		ScheduleToCloseTimeout: sharedworkflow.DeployStartTimeout,
+		HeartbeatTimeout:       sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    activityInitialRetryInterval,
+			MaximumInterval:    activityMaximumRetryInterval,
+			BackoffCoefficient: 2,
+		},
 	})
 	if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
 		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID}).Get(waitContext, nil); waitError != nil {
