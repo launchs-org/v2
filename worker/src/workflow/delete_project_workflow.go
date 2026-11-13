@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// activityMaximumAttempts は、Activity 1つを、失敗したときに試す最大の回数。
-	activityMaximumAttempts = 5
+	// activityMaximumRetryInterval は、リトライの間隔の上限。間隔は倍々に増えるが、これで頭打ちにする。
+	activityMaximumRetryInterval = time.Minute
 
 	// activityInitialRetryInterval は、最初のリトライまでの待ち時間。以降は倍々に増える。
 	activityInitialRetryInterval = 2 * time.Second
@@ -27,8 +27,9 @@ const (
 //  1. k8s の namespace を削除する(配下の deploy、service、ingress、volume のデータごと消える)
 //  2. DB のレコードを削除する(これが終わると、プロジェクトの GET は 404 になる)
 //
-// どちらの Activity も冪等で、失敗したときはリトライする。リトライしても失敗が続いたら、
-// Workflow は失敗で終わり、プロジェクトは deleting のまま残る(あとから再実行できる)。
+// どちらの Activity も冪等で、失敗したときは、Workflow 全体のタイムアウトまでリトライし続ける
+// (間隔は最大1分)。タイムアウトまでに終わらなければ、Workflow は失敗で終わり、
+// プロジェクトは deleting のまま残る。リトライしても無駄なエラー(名前の形の不正)は、すぐ失敗にする。
 //
 // 引数:
 //   - workflowContext: Temporal の Workflow の context。
@@ -42,7 +43,10 @@ func DeleteProjectWorkflow(workflowContext sdkworkflow.Context, input sharedwork
 		StartToCloseTimeout: sharedworkflow.DeleteProjectActivityTimeout,
 		HeartbeatTimeout:    sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts:    activityMaximumAttempts,
+			// 回数は無制限にする(0)。k8s の障害が長引いても、復旧すれば削除が完了するようにし、
+			// 上限は、Workflow 全体のタイムアウトに任せる。
+			MaximumAttempts:    0,
+			MaximumInterval:    activityMaximumRetryInterval,
 			InitialInterval:    activityInitialRetryInterval,
 			BackoffCoefficient: 2,
 		},

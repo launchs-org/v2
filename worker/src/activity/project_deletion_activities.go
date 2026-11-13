@@ -5,13 +5,20 @@ package activity
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 
 	"launchs/shared/workflow"
 )
+
+// ErrInvalidNamespaceName は、namespace の名前がプロジェクトの ID の形ではないときのエラー。
+//
+// 何度やり直しても結果は同じなので、Activity は、このエラーをリトライしない。
+var ErrInvalidNamespaceName = errors.New("namespace の名前がプロジェクトの ID の形ではありません")
 
 // defaultNamespacePollInterval は、namespace が消えたかを確かめる、既定の間隔。
 const defaultNamespacePollInterval = 2 * time.Second
@@ -80,7 +87,7 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectNamespa
 		"project_id", input.ProjectID, "activity", workflow.DeleteProjectNamespaceActivityName)
 	// 削除を頼む(namespace 名は projectId)。すでに無ければ、成功として扱われる。
 	if deleteError := projectDeletionActivities.namespaceDeleter.DeleteNamespace(requestContext, input.ProjectID); deleteError != nil {
-		return deleteError
+		return markNonRetryable(deleteError)
 	}
 
 	// k8s の namespace の削除は非同期なので、配下のリソース(PVC のデータを含む)を含めて、
@@ -89,7 +96,7 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectNamespa
 		// namespace がまだ残っているかを確かめる。
 		exists, existsError := projectDeletionActivities.namespaceDeleter.NamespaceExists(requestContext, input.ProjectID)
 		if existsError != nil {
-			return existsError
+			return markNonRetryable(existsError)
 		}
 		// 消えていれば、完了。
 		if !exists {
@@ -169,4 +176,22 @@ func (loggingNamespaceDeleter *LoggingNamespaceDeleter) DeleteNamespace(_ contex
 func (loggingNamespaceDeleter *LoggingNamespaceDeleter) NamespaceExists(_ context.Context, _ string) (bool, error) {
 	// 何も削除していないので、待つ必要は無く、常に無いものとして扱う。
 	return false, nil
+}
+
+// markNonRetryable は、何度やり直しても同じ結果になるエラー(名前の形が不正)を、リトライしないエラーにする。
+//
+// それ以外のエラー(k8s の一時的な障害など)は、そのまま返し、Temporal にリトライさせる。
+//
+// 引数:
+//   - originalError: Activity で起きたエラー。
+//
+// 戻り値:
+//   - リトライしないエラー、またはそのままのエラー。
+func markNonRetryable(originalError error) error {
+	// 名前の形が不正なら、リトライしても無駄なので、リトライしない印を付ける。
+	if errors.Is(originalError, ErrInvalidNamespaceName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidNamespaceName", originalError)
+	}
+	// それ以外は、一時的な障害の可能性があるので、そのまま返す。
+	return originalError
 }

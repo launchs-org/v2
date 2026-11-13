@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"launchs/shared/logger"
@@ -141,4 +143,28 @@ func TestLoggingNamespaceDeleter(testingT *testing.T) {
 	if !strings.Contains(logOutput.String(), `"level":"WARN"`) || !strings.Contains(logOutput.String(), "project-1") {
 		testingT.Errorf("警告のログに名前が出ていない: %s", logOutput.String())
 	}
+}
+
+// TestMarkNonRetryable は、名前の形の不正だけがリトライしないエラーになり、
+// k8s の一時的な障害などは、そのまま(リトライされる)返ることを確認する。
+func TestMarkNonRetryable(testingT *testing.T) {
+	// 名前の形が不正なエラーは、リトライしない印が付く。
+	testingT.Run("名前の形の不正は、リトライしないエラーになる", func(subTest *testing.T) {
+		markedError := markNonRetryable(fmt.Errorf("%w: kube-system", ErrInvalidNamespaceName))
+		var applicationError *temporal.ApplicationError
+		if !errors.As(markedError, &applicationError) || !applicationError.NonRetryable() {
+			subTest.Errorf("リトライしないエラーのはず: %v", markedError)
+		}
+	})
+	// 一時的な障害は、そのまま返る(リトライされる)。
+	testingT.Run("一時的な障害は、そのまま返す", func(subTest *testing.T) {
+		temporaryError := errors.New("k8s down")
+		if markedError := markNonRetryable(temporaryError); !errors.Is(markedError, temporaryError) {
+			subTest.Errorf("そのまま返すはず: %v", markedError)
+		}
+		var applicationError *temporal.ApplicationError
+		if errors.As(markNonRetryable(temporaryError), &applicationError) {
+			subTest.Errorf("リトライしないエラーにしてはいけない")
+		}
+	})
 }
