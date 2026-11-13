@@ -1,0 +1,74 @@
+# プルリクエストと develop への push で、整形・静的解析・ビルド・テストを実行する。
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+# 同じブランチで新しい実行が始まったら、古い実行は止める。
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # リポジトリのテストが使う PostgreSQL。テストごとに、使い捨てのデータベースを作る。
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      # shared/database/testdatabase が、使い捨てのデータベースを作るための接続先。
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go のバージョンは go.mod に合わせる。モジュールのキャッシュも自動で効く。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: 整形されているか確認する(gofmt)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt で整形されていないファイル:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: 静的解析(go vet)
+        run: go vet ./...
+
+      - name: ビルド
+        run: go build -o /dev/null ./...
+
+      # データベースを使うテストが、飛ばされずに実行されることを、-v の出力で確認する。
+      - name: テスト
+        run: go test -v ./... | tee test-output.txt
+
+      - name: データベースのテストが飛ばされていないか確認する
+        run: |
+          if grep -q -- "--- SKIP" test-output.txt; then
+            echo "飛ばされたテストがある:"
+            grep -- "--- SKIP" test-output.txt
+            exit 1
+          fi
