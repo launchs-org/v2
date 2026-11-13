@@ -38,6 +38,7 @@ type EnvironmentReader struct {
 // 戻り値:
 //   - 作成した EnvironmentReader。
 func NewEnvironmentReader(lookup LookupFunc) *EnvironmentReader {
+	// 渡された調べ方を持つ EnvironmentReader を作って返す。問題の一覧は空から始める。
 	return &EnvironmentReader{lookup: lookup}
 }
 
@@ -46,6 +47,7 @@ func NewEnvironmentReader(lookup LookupFunc) *EnvironmentReader {
 // 戻り値:
 //   - 作成した EnvironmentReader。
 func NewProcessEnvironmentReader() *EnvironmentReader {
+	// 本番では、プロセスの環境変数を調べる os.LookupEnv を使う。
 	return NewEnvironmentReader(os.LookupEnv)
 }
 
@@ -59,11 +61,16 @@ func NewProcessEnvironmentReader() *EnvironmentReader {
 // 戻り値:
 //   - 環境変数の値。問題があったときは空文字。
 func (reader *EnvironmentReader) RequiredString(name string) string {
+	// 環境変数の値と、設定されているかを調べる。
 	value, isSet := reader.lookup(name)
+	// 設定されていない、または空のときは、必須の値が無い状態として扱う。
 	if !isSet || value == "" {
+		// 問題として覚える。止めずに続けて、あとでまとめて報告するため。
 		reader.problems = append(reader.problems, fmt.Sprintf("必須の環境変数 %s が設定されていない", name))
+		// 問題があるときは、代わりに空文字を返して処理を続ける。
 		return ""
 	}
+	// 正しく設定されているので、その値をそのまま返す。
 	return value
 }
 
@@ -76,10 +83,14 @@ func (reader *EnvironmentReader) RequiredString(name string) string {
 // 戻り値:
 //   - 環境変数の値。無い、または空のときは defaultValue。
 func (reader *EnvironmentReader) OptionalString(name string, defaultValue string) string {
+	// 環境変数の値と、設定されているかを調べる。
 	value, isSet := reader.lookup(name)
+	// 設定されていない、または空のときは、省略されたものとして扱う。
 	if !isSet || value == "" {
+		// 省略されたので、既定値を返す。
 		return defaultValue
 	}
+	// 設定された値をそのまま返す。
 	return value
 }
 
@@ -94,16 +105,24 @@ func (reader *EnvironmentReader) OptionalString(name string, defaultValue string
 // 戻り値:
 //   - 環境変数の値。無い、空、または整数として読めないときは defaultValue。
 func (reader *EnvironmentReader) OptionalInt(name string, defaultValue int) int {
+	// 環境変数の値と、設定されているかを調べる。
 	value, isSet := reader.lookup(name)
+	// 設定されていない、または空のときは、省略されたものとして扱う。
 	if !isSet || value == "" {
+		// 省略されたので、既定値を返す。
 		return defaultValue
 	}
 
+	// 前後の空白を取り除いてから、整数として読む。
 	parsedValue, parseError := strconv.Atoi(strings.TrimSpace(value))
+	// 整数として読めなかったときの処理。
 	if parseError != nil {
+		// 問題として覚えて、あとでまとめて報告する。値は引用符付きで出して、空白などの混入に気づけるようにする。
 		reader.problems = append(reader.problems, fmt.Sprintf("環境変数 %s は整数でなければならない: %q", name, value))
+		// 処理を続けられるように、既定値を返す。
 		return defaultValue
 	}
+	// 整数として読めたので、その値を返す。
 	return parsedValue
 }
 
@@ -119,16 +138,24 @@ func (reader *EnvironmentReader) OptionalInt(name string, defaultValue int) int 
 // 戻り値:
 //   - 環境変数の値。無い、空、または時間として読めないときは defaultValue。
 func (reader *EnvironmentReader) OptionalDuration(name string, defaultValue time.Duration) time.Duration {
+	// 環境変数の値と、設定されているかを調べる。
 	value, isSet := reader.lookup(name)
+	// 設定されていない、または空のときは、省略されたものとして扱う。
 	if !isSet || value == "" {
+		// 省略されたので、既定値を返す。
 		return defaultValue
 	}
 
+	// 前後の空白を取り除いてから、時間として読む。
 	parsedValue, parseError := time.ParseDuration(strings.TrimSpace(value))
+	// 時間として読めなかったときの処理。
 	if parseError != nil {
+		// 問題として覚えて、あとでまとめて報告する。
 		reader.problems = append(reader.problems, fmt.Sprintf("環境変数 %s は時間(例: 30s、5m)でなければならない: %q", name, value))
+		// 処理を続けられるように、既定値を返す。
 		return defaultValue
 	}
+	// 時間として読めたので、その値を返す。
 	return parsedValue
 }
 
@@ -138,8 +165,11 @@ func (reader *EnvironmentReader) OptionalDuration(name string, defaultValue time
 //   - 問題が無かったときは nil。
 //   - 問題があったときは、全ての問題の説明を含むエラー。
 func (reader *EnvironmentReader) Err() error {
+	// 問題が1つも無いときは、エラー無しとして扱う。
 	if len(reader.problems) == 0 {
+		// 問題が無かったことを、nil で伝える。
 		return nil
 	}
+	// 全ての問題を区切りでつないで、1つのエラーにして返す。
 	return errors.New("環境変数の設定に問題がある: " + strings.Join(reader.problems, "; "))
 }
