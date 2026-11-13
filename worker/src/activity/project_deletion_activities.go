@@ -6,11 +6,15 @@ package activity
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 
 	"launchs/shared/workflow"
 )
+
+// defaultNamespacePollInterval は、namespace が消えたかを確かめる、既定の間隔。
+const defaultNamespacePollInterval = 2 * time.Second
 
 // NamespaceDeleter は、プロジェクトの k8s の namespace を削除する。
 //
@@ -19,6 +23,9 @@ import (
 type NamespaceDeleter interface {
 	// DeleteNamespace は、namespace を削除する。すでに無いときは、成功として扱う(冪等)。
 	DeleteNamespace(requestContext context.Context, namespaceName string) error
+
+	// NamespaceExists は、namespace が(削除中のものを含めて)まだ残っているかを返す。
+	NamespaceExists(requestContext context.Context, namespaceName string) (bool, error)
 }
 
 // ProjectRecordDeleter は、プロジェクトのレコードを DB から削除する。
@@ -34,6 +41,8 @@ type ProjectDeletionActivities struct {
 	namespaceDeleter     NamespaceDeleter
 	projectRecordDeleter ProjectRecordDeleter
 	appLogger            *slog.Logger
+	// namespacePollInterval は、namespace が消えたかを確かめる間隔。
+	namespacePollInterval time.Duration
 }
 
 // NewProjectDeletionActivities は、ProjectDeletionActivities を作る。
@@ -47,9 +56,10 @@ type ProjectDeletionActivities struct {
 //   - 作成した ProjectDeletionActivities。
 func NewProjectDeletionActivities(namespaceDeleter NamespaceDeleter, projectRecordDeleter ProjectRecordDeleter, appLogger *slog.Logger) *ProjectDeletionActivities {
 	return &ProjectDeletionActivities{
-		namespaceDeleter:     namespaceDeleter,
-		projectRecordDeleter: projectRecordDeleter,
-		appLogger:            appLogger,
+		namespaceDeleter:      namespaceDeleter,
+		projectRecordDeleter:  projectRecordDeleter,
+		appLogger:             appLogger,
+		namespacePollInterval: defaultNamespacePollInterval,
 	}
 }
 
@@ -68,8 +78,31 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectNamespa
 	// ログに、どの Activity が何のために動いているかを残す。
 	projectDeletionActivities.appLogger.Info("プロジェクトの namespace を削除する",
 		"project_id", input.ProjectID, "activity", workflow.DeleteProjectNamespaceActivityName)
-	// 実際の削除は、namespace を削除するものに任せる(namespace 名は projectId)。
-	return projectDeletionActivities.namespaceDeleter.DeleteNamespace(requestContext, input.ProjectID)
+	// 削除を頼む(namespace 名は projectId)。すでに無ければ、成功として扱われる。
+	if deleteError := projectDeletionActivities.namespaceDeleter.DeleteNamespace(requestContext, input.ProjectID); deleteError != nil {
+		return deleteError
+	}
+
+	// k8s の namespace の削除は非同期なので、配下のリソース(PVC のデータを含む)を含めて、
+	// 完全に消えるまで待つ。待つ間は、Temporal に、生きていることを伝え続ける。
+	for {
+		// namespace がまだ残っているかを確かめる。
+		exists, existsError := projectDeletionActivities.namespaceDeleter.NamespaceExists(requestContext, input.ProjectID)
+		if existsError != nil {
+			return existsError
+		}
+		// 消えていれば、完了。
+		if !exists {
+			return nil
+		}
+		// まだ残っているので、生きていることを伝えて、少し待つ(キャンセルや期限なら、そこで終わる)。
+		activity.RecordHeartbeat(requestContext)
+		select {
+		case <-requestContext.Done():
+			return requestContext.Err()
+		case <-time.After(projectDeletionActivities.namespacePollInterval):
+		}
+	}
 }
 
 // DeleteProjectRecords は、プロジェクトの行を DB から削除する。
@@ -123,4 +156,17 @@ func (loggingNamespaceDeleter *LoggingNamespaceDeleter) DeleteNamespace(_ contex
 	// 実際には削除していないことが分かるよう、警告で出す。
 	loggingNamespaceDeleter.appLogger.Warn("k8s に未接続のため、namespace は削除しない(仮の実装)", "namespace", namespaceName)
 	return nil
+}
+
+// NamespaceExists は、仮の実装なので、何も作っていない・消していないため、常に「無い」を返す。
+//
+// 引数:
+//   - requestContext: 使わない。
+//   - namespaceName: 使わない。
+//
+// 戻り値:
+//   - 常に false と nil。
+func (loggingNamespaceDeleter *LoggingNamespaceDeleter) NamespaceExists(_ context.Context, _ string) (bool, error) {
+	// 何も削除していないので、待つ必要は無く、常に無いものとして扱う。
+	return false, nil
 }
