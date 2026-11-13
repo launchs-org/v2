@@ -29,3 +29,15 @@ Content-Type: application/json
 
 ### deploy の詳細を取る(status は pending → active。失敗すると failed)
 GET {{baseUrl}}/deploy/{{deployId}}
+
+### 起動設定を取る(現在の値と、まだ適用していない pending_* が入っている)
+GET {{baseUrl}}/deploy/{{deployId}}/config
+
+### 起動設定を保存する(env、command、args を全件置き換え。まだ反映されず pending_* になる)
+PUT {{baseUrl}}/deploy/{{deployId}}/config
+Content-Type: application/json
+
+{"env": {"PORT": "8080"}, "command": null, "args": null}
+
+### 適用していない起動設定を破棄する(pending が無いと 409)
+POST {{baseUrl}}/deploy/{{deployId}}/config/discard

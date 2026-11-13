@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"gorm.io/datatypes"
+
 	"launchs/shared/apperror"
 	"launchs/shared/model"
 )
@@ -39,6 +41,16 @@ func (fakeStore *fakeDeployStore) FindByID(_ context.Context, userID string, dep
 func (fakeStore *fakeDeployStore) DeleteUnstarted(_ context.Context, deployID string) error {
 	fakeStore.canceledDeploys = append(fakeStore.canceledDeploys, deployID)
 	return fakeStore.cancelError
+}
+
+// SavePendingConfig は、何もせず成功する。
+func (fakeStore *fakeDeployStore) SavePendingConfig(_ context.Context, _ string, _ string, _ datatypes.JSON, _ *string, _ datatypes.JSON) error {
+	return nil
+}
+
+// DiscardPendingConfig は、何もせず成功する。
+func (fakeStore *fakeDeployStore) DiscardPendingConfig(_ context.Context, _ string, _ string) error {
+	return nil
 }
 
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
