@@ -42,7 +42,7 @@ type ProjectResponse struct {
 	// Name は、プロジェクトの名前。
 	Name string `json:"name"`
 
-	// Status は、プロジェクトの状態("active" または "deleting")。
+	// Status は、プロジェクトの状態("active"、"deleting"、"delete_failed" のどれか)。
 	Status string `json:"status"`
 }
 

@@ -176,6 +176,8 @@ docker-compose.yaml
 
 **注意:** `task` コマンドは、インストール済み(go-task)。
 
+**開発環境の k8s への接続:** ワーカーは、環境変数 `KUBERNETES_ACCESS`(必須)で、k8s への接続を選ぶ。`none` は何も操作せずログに出すだけ(`docker-compose.yaml` の既定)、`kubeconfig` は `KUBECONFIG` のファイルで接続(開発用)、`in-cluster` は Pod の ServiceAccount で接続(本番)。開発用の k8s につなぐときは、`task up:k8s`(`docker-compose.kubernetes.yaml` を重ねる)を使い、ホストの `~/.kube/config` を読み取り専用でマウントする。ワーカーが削除する namespace は、`project-` + UUID の形のものだけに限る。
+
 **開発環境の入り口:** バックエンドはホストに公開せず、nginx が自己署名の証明書で HTTPS を終端して、コンテナネットワークの中でプロキシする(`https://localhost:18443`)。
 
 ---

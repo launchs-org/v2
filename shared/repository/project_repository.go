@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
@@ -168,7 +169,11 @@ func (projectRepository *ProjectRepository) Rename(requestContext context.Contex
 
 // MarkDeleting は、プロジェクトの状態を、削除中(deleting)にする。
 //
-// 実体の削除は、ここでは行わない(Workflow が非同期に行う)。
+// 通常(active)のものと、前回の削除に失敗して止まっている(delete_failed)ものが、対象。
+// 後者は、削除のやり直しになる。実体の削除は、ここでは行わない(Workflow が非同期に行う)。
+//
+// 状態の確認と更新は、行をロックした1つのトランザクションで行う。同時に2つの削除が来ても、
+// 1つだけが受け付けられる。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -176,24 +181,47 @@ func (projectRepository *ProjectRepository) Rename(requestContext context.Contex
 //   - projectID: 削除するプロジェクトの ID。
 //
 // 戻り値:
-//   - 無い、または他のユーザーのものなら not_found。
-//   - すでに削除中なら conflict。
-func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.Context, userID string, projectID string) error {
-	// active のものだけを対象に、status を deleting に UPDATE する。二重の削除を防ぐ。
-	updateResult := projectRepository.database.WithContext(requestContext).
-		Model(&model.Project{}).
-		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusActive}).
-		Updates(&model.Project{Status: model.ProjectStatusDeleting})
-	// データベースのエラーは、internal にする。
-	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", updateResult.Error)
+//   - 更新する前の状態(active または delete_failed)。Workflow を開始できなかったときに、戻すために使う。
+//   - 無い、または他のユーザーのものなら not_found。すでに削除中なら conflict。
+func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.Context, userID string, projectID string) (string, error) {
+	// 更新前の状態を、トランザクションの外へ持ち出すための変数。
+	previousStatus := ""
+
+	// 行をロックして読み、状態を確かめて、更新する。
+	transactionError := projectRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 持ち主のプロジェクトを、更新が終わるまで他から変更されないよう、ロックして読む。
+		var project model.Project
+		findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(&model.Project{ID: projectID, UserID: userID}).
+			Take(&project).Error
+		if errors.Is(findError, gorm.ErrRecordNotFound) {
+			return apperror.Wrap(apperror.KindNotFound, "プロジェクトが見つかりません", findError)
+		}
+		if findError != nil {
+			return apperror.Wrap(apperror.KindInternal, "プロジェクトを取得できませんでした", findError)
+		}
+
+		// 削除を受け付けられる状態(active、delete_failed)でなければ、conflict にする。
+		if project.Status != model.ProjectStatusActive && project.Status != model.ProjectStatusDeleteFailed {
+			return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、変更できません")
+		}
+
+		// 更新すると、読み込んだ project の Status も書き換わるので、先に更新前の状態を控える。
+		statusBeforeUpdate := project.Status
+
+		// 状態を deleting に更新する(更新日時は Gorm が更新する)。
+		updateError := transaction.Model(&project).Updates(&model.Project{Status: model.ProjectStatusDeleting}).Error
+		if updateError != nil {
+			return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", updateError)
+		}
+		previousStatus = statusBeforeUpdate
+		return nil
+	})
+	// トランザクションが失敗したら、そのエラー(not_found、conflict、internal)を返す。
+	if transactionError != nil {
+		return "", transactionError
 	}
-	// 更新された行が無いときは、無いのか、すでに削除中なのかを調べて、理由のエラーを返す。
-	if updateResult.RowsAffected == 0 {
-		return projectRepository.explainNoUpdate(requestContext, userID, projectID)
-	}
-	// 削除中にできたので、エラー無しで返す。
-	return nil
+	return previousStatus, nil
 }
 
 // explainNoUpdate は、更新の対象が0件だったとき、その理由をエラーにする。
@@ -218,27 +246,52 @@ func (projectRepository *ProjectRepository) explainNoUpdate(requestContext conte
 	return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、変更できません")
 }
 
-// RevertDeleting は、削除中(deleting)にしたプロジェクトを、通常(active)に戻す。
+// RevertDeleting は、削除中(deleting)にしたプロジェクトを、削除を受け付ける前の状態に戻す。
 //
 // 削除の Workflow を開始できなかったときに、プロジェクトが削除中のまま残らないよう、
-// 状態を戻すために使う。すでに active のとき、または無いときは、何もしない。
+// 状態を戻すために使う。削除中でないとき、または無いときは、何もしない。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: 状態を戻すプロジェクトの ID。
+//   - previousStatus: 戻す先の状態(MarkDeleting が返した、active または delete_failed)。
 //
 // 戻り値:
 //   - データベースのエラー。
-func (projectRepository *ProjectRepository) RevertDeleting(requestContext context.Context, userID string, projectID string) error {
-	// 持ち主の、削除中のプロジェクトだけを対象にして、active に戻す(更新日時は Gorm が更新する)。
+func (projectRepository *ProjectRepository) RevertDeleting(requestContext context.Context, userID string, projectID string, previousStatus string) error {
+	// 持ち主の、削除中のプロジェクトだけを対象にして、前の状態に戻す(更新日時は Gorm が更新する)。
 	updateResult := projectRepository.database.WithContext(requestContext).
 		Model(&model.Project{}).
 		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusDeleting}).
-		Updates(&model.Project{Status: model.ProjectStatusActive})
+		Updates(&model.Project{Status: previousStatus})
 	// データベースのエラーは、内部エラーにして返す。
 	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを通常の状態に戻せませんでした", updateResult.Error)
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを元の状態に戻せませんでした", updateResult.Error)
+	}
+	return nil
+}
+
+// MarkDeleteFailed は、削除中(deleting)のプロジェクトを、削除に失敗した状態(delete_failed)にする。
+//
+// 削除の Workflow が、リトライの期限までに削除を終えられなかったときに、補償として使う。
+// 削除中でないとき、または無いときは、何もしない(冪等)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - projectID: 削除に失敗したプロジェクトの ID。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext context.Context, projectID string) error {
+	// 削除中のプロジェクトだけを、delete_failed にする(更新日時は Gorm が更新する)。
+	updateResult := projectRepository.database.WithContext(requestContext).
+		Model(&model.Project{}).
+		Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
+		Updates(&model.Project{Status: model.ProjectStatusDeleteFailed})
+	// データベースのエラーは、内部エラーにして返す。
+	if updateResult.Error != nil {
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除失敗の状態にできませんでした", updateResult.Error)
 	}
 	return nil
 }

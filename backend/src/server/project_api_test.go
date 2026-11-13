@@ -434,3 +434,51 @@ func TestProjectAPIDeleteWhenWorkflowCannotStart(testingT *testing.T) {
 		testingT.Errorf("active に戻っているはず: %v", getBody)
 	}
 }
+
+// TestProjectAPIDeleteFailedProject は、削除に失敗して止まっている(delete_failed)プロジェクトが、
+// 取得で status が見え、変更は 409、もう一度の削除は受け付けられて deleting に戻り、
+// 再度の開始に失敗したときは delete_failed に戻る(active にはならない)ことを確認する。
+func TestProjectAPIDeleteFailedProject(testingT *testing.T) {
+	// プロジェクトを作り、ワーカーが失敗を記録した状態(delete_failed)を、直接作る。
+	database := testdatabase.New(testingT)
+	fakeStarter := &fakeDeletionStarter{}
+	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{Database: database, ProjectDeletionStarter: fakeStarter})
+	_, createdBody := apiClient.call(http.MethodPost, "/projects", `{"name":"stuck"}`)
+	projectID := createdBody["projectId"].(string)
+	if updateError := database.Exec("UPDATE projects SET status = 'delete_failed' WHERE id = ?", projectID).Error; updateError != nil {
+		testingT.Fatalf("状態を変えられませんでした: %v", updateError)
+	}
+
+	// 取得で、delete_failed が見える。
+	testingT.Run("取得で status が delete_failed と見える", func(subTest *testing.T) {
+		statusCode, responseBody := apiClient.call(http.MethodGet, "/projects/"+projectID, "")
+		if statusCode != 200 || responseBody["status"] != "delete_failed" {
+			subTest.Errorf("delete_failed のはず: %d %v", statusCode, responseBody)
+		}
+	})
+	// 名前の変更は、409 になる。
+	testingT.Run("delete_failed の間の更新は 409", func(subTest *testing.T) {
+		statusCode, responseBody := apiClient.call(http.MethodPatch, "/projects/"+projectID, `{"name":"renamed"}`)
+		if statusCode != 409 || errorCodeOf(responseBody) != "conflict" {
+			subTest.Errorf("409 のはず: %d %v", statusCode, responseBody)
+		}
+	})
+	// 開始に失敗したときは、delete_failed のまま(active に戻らない)。
+	testingT.Run("やり直しの開始に失敗すると、500 で、delete_failed のまま", func(subTest *testing.T) {
+		fakeStarter.startError = errors.New("temporal down")
+		statusCode, _ := apiClient.call(http.MethodDelete, "/projects/"+projectID, "")
+		_, getBody := apiClient.call(http.MethodGet, "/projects/"+projectID, "")
+		if statusCode != 500 || getBody["status"] != "delete_failed" {
+			subTest.Errorf("500 で、delete_failed のままのはず: %d %v", statusCode, getBody)
+		}
+	})
+	// 開始できれば、受け付けられて、deleting になる。
+	testingT.Run("もう一度の削除を受け付けて、deleting になる", func(subTest *testing.T) {
+		fakeStarter.startError = nil
+		statusCode, _ := apiClient.call(http.MethodDelete, "/projects/"+projectID, "")
+		_, getBody := apiClient.call(http.MethodGet, "/projects/"+projectID, "")
+		if statusCode != 200 || getBody["status"] != "deleting" {
+			subTest.Errorf("200 で deleting になるはず: %d %v", statusCode, getBody)
+		}
+	})
+}

@@ -13,6 +13,11 @@ tasks:
     cmds:
       - docker compose up -d --build
 
+  up:k8s:
+    desc: 開発環境を起動し、ワーカーを開発用の k8s につなぐ(~/.kube/config を使う。namespace を実際に削除する)
+    cmds:
+      - docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build
+
   down:
     desc: 開発環境を停止する
     cmds:
