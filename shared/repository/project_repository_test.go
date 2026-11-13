@@ -339,3 +339,77 @@ func TestProjectRepositoryMarkDeleting(testingT *testing.T) {
 		}
 	})
 }
+
+// TestProjectRepositoryRevertDeleting は、削除中のプロジェクトを active に戻せ、
+// active のものや他のユーザーのものには何も起きないことを確認する。
+func TestProjectRepositoryRevertDeleting(testingT *testing.T) {
+	// 使い捨てのデータベースに、削除中のプロジェクトを1件作る。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
+	if markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
+		testingT.Fatalf("削除中にできませんでした: %v", markError)
+	}
+
+	// 他のユーザーが戻そうとしても、変わらない。
+	testingT.Run("他のユーザーでは戻らない", func(subTest *testing.T) {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-b", "project-00000001"); revertError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", revertError)
+		}
+		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
+		if project.Status != model.ProjectStatusDeleting {
+			subTest.Errorf("deleting のままのはず: %q", project.Status)
+		}
+	})
+	// 持ち主なら、active に戻る。
+	testingT.Run("持ち主なら active に戻る", func(subTest *testing.T) {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001"); revertError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", revertError)
+		}
+		project, _ := projectRepository.FindByID(context.Background(), "user-a", "project-00000001")
+		if project.Status != model.ProjectStatusActive {
+			subTest.Errorf("active に戻るはず: %q", project.Status)
+		}
+	})
+	// すでに active でも、エラーにならない。
+	testingT.Run("active のものに実行してもエラーにならない", func(subTest *testing.T) {
+		if revertError := projectRepository.RevertDeleting(context.Background(), "user-a", "project-00000001"); revertError != nil {
+			subTest.Errorf("エラーにならないはず: %v", revertError)
+		}
+	})
+}
+
+// TestProjectRepositoryDeleteRecord は、削除中のプロジェクトだけが物理削除され、
+// active のものは消えず、繰り返し実行してもエラーにならないことを確認する。
+func TestProjectRepositoryDeleteRecord(testingT *testing.T) {
+	// active のプロジェクトと、削除中のプロジェクトを1件ずつ作る。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	mustCreate(testingT, database, newTestProject(1, "user-a", time.Now()))
+	mustCreate(testingT, database, newTestProject(2, "user-a", time.Now()))
+	if markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000002"); markError != nil {
+		testingT.Fatalf("削除中にできませんでした: %v", markError)
+	}
+
+	// active のものは、消えない(安全装置)。
+	testingT.Run("active のプロジェクトは消えない", func(subTest *testing.T) {
+		if deleteError := projectRepository.DeleteRecord(context.Background(), "project-00000001"); deleteError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", deleteError)
+		}
+		if _, findError := projectRepository.FindByID(context.Background(), "user-a", "project-00000001"); findError != nil {
+			subTest.Errorf("消えていないはず: %v", findError)
+		}
+	})
+	// 削除中のものは、消える。2回目はすでに無いが、エラーにならない。
+	testingT.Run("削除中のプロジェクトは消え、2回目もエラーにならない", func(subTest *testing.T) {
+		for range 2 {
+			if deleteError := projectRepository.DeleteRecord(context.Background(), "project-00000002"); deleteError != nil {
+				subTest.Fatalf("エラーにならないはず: %v", deleteError)
+			}
+		}
+		_, findError := projectRepository.FindByID(context.Background(), "user-a", "project-00000002")
+		if apperror.KindOf(findError) != apperror.KindNotFound {
+			subTest.Errorf("not_found になるはず: %v", findError)
+		}
+	})
+}
