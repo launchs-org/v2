@@ -36,6 +36,10 @@ type WorkerConfig struct {
 	// LogLevel は、出力するログの最低のレベル(環境変数 LOG_LEVEL)。
 	LogLevel slog.Level
 
+	// RuntimeClass は、deploy の Pod に指定する RuntimeClass の名前(環境変数 RUNTIME_CLASS)。
+	// 空なら指定せず、クラスタの既定のランタイムを使う。
+	RuntimeClass string
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -46,6 +50,7 @@ type WorkerConfig struct {
 //   - DATABASE_URL: app データベースの接続先(必須)。
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
+//   - RUNTIME_CLASS: deploy の Pod に指定する RuntimeClass。省略すると、指定しない(クラスタの既定)。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
@@ -63,6 +68,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
+	runtimeClass := reader.OptionalString("RUNTIME_CLASS", "")
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -89,6 +95,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		TemporalAddress:   temporalAddress,
 		TemporalNamespace: temporalNamespace,
 		LogLevel:          logLevel,
+		RuntimeClass:      runtimeClass,
 		Kubernetes:        kubernetesSettings,
 	}, nil
 }

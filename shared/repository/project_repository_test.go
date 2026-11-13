@@ -548,3 +548,50 @@ func TestProjectRepositoryMarkDeleteFailed(testingT *testing.T) {
 		}
 	})
 }
+
+// TestProjectRepositoryDeleteRecordCascadesToDeploys は、プロジェクトを削除すると、配下の deploy も
+// 同時に消え、他のプロジェクトの deploy は残り、削除中でないプロジェクトの deploy は消えないことを確認する。
+func TestProjectRepositoryDeleteRecordCascadesToDeploys(testingT *testing.T) {
+	// 削除中のプロジェクト(deploy 2件)、他の active なプロジェクト(deploy 1件)、別の active なプロジェクト(deploy 1件)を作る。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	deployRepository := NewDeployRepository(database)
+	for number := 1; number <= 3; number++ {
+		mustCreate(testingT, database, newTestProject(number, "user-a", time.Now()))
+	}
+	deployNumber := 0
+	for _, projectID := range []string{"project-00000001", "project-00000001", "project-00000002", "project-00000003"} {
+		deployNumber++
+		if createError := deployRepository.Create(context.Background(), newTestDeploy(deployNumber, projectID, "user-a")); createError != nil {
+			testingT.Fatalf("deploy を作れませんでした: %v", createError)
+		}
+	}
+	// 1番目だけを削除中にする(deploy の保存は、active のときに済ませてある)。
+	if _, markError := projectRepository.MarkDeleting(context.Background(), "user-a", "project-00000001"); markError != nil {
+		testingT.Fatalf("削除中にできませんでした: %v", markError)
+	}
+
+	// active のプロジェクトを指定しても、配下の deploy は消えない(安全装置)。
+	if deleteError := projectRepository.DeleteRecord(context.Background(), "project-00000002"); deleteError != nil {
+		testingT.Fatalf("エラーにならないはず: %v", deleteError)
+	}
+	var survivingDeploys int64
+	database.Model(&model.Deploy{}).Where("project_id = ?", "project-00000002").Count(&survivingDeploys)
+	if survivingDeploys != 1 {
+		testingT.Errorf("active のプロジェクトの deploy は消えないはず: %d 件", survivingDeploys)
+	}
+
+	// 削除中のプロジェクトを削除すると、行と配下の deploy が消える。2回目もエラーにならない。
+	for range 2 {
+		if deleteError := projectRepository.DeleteRecord(context.Background(), "project-00000001"); deleteError != nil {
+			testingT.Fatalf("エラーにならないはず: %v", deleteError)
+		}
+	}
+	var deletedProjectDeploys, totalDeploys, totalProjects int64
+	database.Model(&model.Deploy{}).Where("project_id = ?", "project-00000001").Count(&deletedProjectDeploys)
+	database.Model(&model.Deploy{}).Count(&totalDeploys)
+	database.Model(&model.Project{}).Count(&totalProjects)
+	if deletedProjectDeploys != 0 || totalDeploys != 2 || totalProjects != 2 {
+		testingT.Errorf("削除したプロジェクトの deploy は 0 件、残りは deploy 2 件・プロジェクト 2 件のはず: %d、%d、%d", deletedProjectDeploys, totalDeploys, totalProjects)
+	}
+}
