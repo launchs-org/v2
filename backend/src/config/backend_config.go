@@ -17,6 +17,12 @@ const (
 	// defaultHTTPPort は、HTTP_PORT が設定されていないときに使うポート番号。
 	defaultHTTPPort = 8080
 
+	// defaultTemporalAddress は、TEMPORAL_ADDRESS が設定されていないときに使う接続先。
+	defaultTemporalAddress = "temporal:7233"
+
+	// defaultTemporalNamespace は、TEMPORAL_NAMESPACE が設定されていないときに使う namespace。
+	defaultTemporalNamespace = "default"
+
 	// defaultLogLevelText は、LOG_LEVEL が設定されていないときに使うログレベル。
 	defaultLogLevelText = "info"
 
@@ -39,6 +45,12 @@ type BackendConfig struct {
 	// DevUserID は、認証のコンテナができるまで、全てのリクエストのユーザーとして扱う ID(環境変数 DEV_USER_ID)。
 	// 省略すると空になり、全ての API が 401 になる。認証のコンテナを作るときに、この設定は無くす。
 	DevUserID string
+
+	// TemporalAddress は、Temporal サーバーの接続先(環境変数 TEMPORAL_ADDRESS)。
+	TemporalAddress string
+
+	// TemporalNamespace は、使う Temporal の namespace(環境変数 TEMPORAL_NAMESPACE)。
+	TemporalNamespace string
 }
 
 // LoadBackendConfig は、環境変数からバックエンドの設定を読む。
@@ -46,6 +58,8 @@ type BackendConfig struct {
 // 読む環境変数:
 //   - DATABASE_URL: app データベースの接続先(必須)。
 //   - DEV_USER_ID: 開発用の仮の認証で使うユーザー ID。省略すると、全ての API が 401 になる。
+//   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
+//   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
 //   - HTTP_PORT: 待ち受けるポート番号(1〜65535)。省略すると 8080。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
@@ -63,6 +77,8 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	// 開発用のユーザー ID を読む。省略は許すので、既定値は空にする。
 	devUserID := reader.OptionalString("DEV_USER_ID", "")
 	// ポート番号を整数で読む。整数でないときは、reader が問題として覚えておく。
+	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
+	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
 	// ログレベルを文字列のまま読む。意味の確認は、あとで ParseLevel で行う。
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
@@ -90,5 +106,5 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 		return BackendConfig{}, loadError
 	}
 	// 問題が無いので、読み込んだ値で設定を作って返す。
-	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID}, nil
+	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace}, nil
 }

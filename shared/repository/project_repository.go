@@ -217,3 +217,51 @@ func (projectRepository *ProjectRepository) explainNoUpdate(requestContext conte
 	// 存在するのに更新されなかったのは、status のためなので、その status を伝える conflict を返す。
 	return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、変更できません")
 }
+
+// RevertDeleting は、削除中(deleting)にしたプロジェクトを、通常(active)に戻す。
+//
+// 削除の Workflow を開始できなかったときに、プロジェクトが削除中のまま残らないよう、
+// 状態を戻すために使う。すでに active のとき、または無いときは、何もしない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - projectID: 状態を戻すプロジェクトの ID。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (projectRepository *ProjectRepository) RevertDeleting(requestContext context.Context, userID string, projectID string) error {
+	// 持ち主の、削除中のプロジェクトだけを対象にして、active に戻す(更新日時は Gorm が更新する)。
+	updateResult := projectRepository.database.WithContext(requestContext).
+		Model(&model.Project{}).
+		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusDeleting}).
+		Updates(&model.Project{Status: model.ProjectStatusActive})
+	// データベースのエラーは、内部エラーにして返す。
+	if updateResult.Error != nil {
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを通常の状態に戻せませんでした", updateResult.Error)
+	}
+	return nil
+}
+
+// DeleteRecord は、プロジェクトの行を物理削除する。削除の Workflow が、最後に使う。
+//
+// 繰り返し実行されても壊れないよう、行がすでに無くてもエラーにしない。
+// 削除中(deleting)でないプロジェクトは、消さない(誤って消さないための安全装置)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - projectID: 削除するプロジェクトの ID。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.Context, projectID string) error {
+	// 削除中のプロジェクトだけを、物理削除する(無ければ 0 件で、エラーにはならない)。
+	deleteError := projectRepository.database.WithContext(requestContext).
+		Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
+		Delete(&model.Project{}).Error
+	// データベースのエラーは、内部エラーにして返す。
+	if deleteError != nil {
+		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除できませんでした", deleteError)
+	}
+	return nil
+}

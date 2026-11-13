@@ -38,17 +38,17 @@ func TestLoadBackendConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけ設定すれば、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db"},
-			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db"},
+			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default"},
 		},
 		{
 			name:           "全て設定すると、その値になる",
-			environment:    map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "9090", "LOG_LEVEL": "debug"},
-			expectedConfig: BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db"},
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "9090", "LOG_LEVEL": "debug", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns"},
+			expectedConfig: BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns"},
 		},
 		{
 			name:           "DEV_USER_ID を設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev"},
-			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", DevUserID: "user-dev"},
+			expectedConfig: BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", DevUserID: "user-dev", TemporalAddress: "temporal:7233", TemporalNamespace: "default"},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
