@@ -21,14 +21,19 @@ import (
 // 戻り値:
 //   - Echo に登録するミドルウェア。
 func NewAccessLogMiddleware(appLogger *slog.Logger) echo.MiddlewareFunc {
+	// Echo のリクエストロガーを、ログに出したい項目を選んで、設定して返す。
 	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		// ログに出す項目(処理時間、メソッド、パス、ステータス、リクエスト ID)を、取得する対象に選ぶ。
 		LogLatency:   true,
 		LogMethod:    true,
 		LogURIPath:   true,
 		LogStatus:    true,
 		LogRequestID: true,
-		HandleError:  true,
+		// エラーのときも、エラーハンドラーを先に呼び、最終的なステータスをログに出す。
+		HandleError: true,
+		// 1リクエストが終わるたびに呼ばれ、集めた値を1行のログにする関数を渡す。
 		LogValuesFunc: func(echoContext *echo.Context, values middleware.RequestLoggerValues) error {
+			// 集めた値を、項目名を付けて、info のログとして1行で出す。処理時間は、読みやすいようにミリ秒にする。
 			appLogger.Info("リクエストを処理した",
 				"request_id", values.RequestID,
 				"method", values.Method,
@@ -36,6 +41,7 @@ func NewAccessLogMiddleware(appLogger *slog.Logger) echo.MiddlewareFunc {
 				"status", values.Status,
 				"latency_ms", values.Latency.Milliseconds(),
 			)
+			// ログを出す処理は失敗しないので、エラーは返さない(返すとリクエストの処理に影響する)。
 			return nil
 		},
 	})

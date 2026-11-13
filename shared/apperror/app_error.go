@@ -28,9 +28,12 @@ type Error struct {
 // 戻り値:
 //   - ログ用の文字列。
 func (appError *Error) Error() string {
+	// 原因が無いときは、種類とメッセージだけの短い形にする。
 	if appError.Cause == nil {
+		// 種類とメッセージを「種類: メッセージ」の形にして返す。
 		return fmt.Sprintf("%s: %s", appError.Kind, appError.Message)
 	}
+	// 原因があるときは、末尾に原因を足して、ログから原因を追えるようにする。
 	return fmt.Sprintf("%s: %s: %s", appError.Kind, appError.Message, appError.Cause)
 }
 
@@ -41,6 +44,7 @@ func (appError *Error) Error() string {
 // 戻り値:
 //   - 原因のエラー。無ければ nil。
 func (appError *Error) Unwrap() error {
+	// errors.Is と errors.As が原因まで辿れるように、原因をそのまま返す。
 	return appError.Cause
 }
 
@@ -53,6 +57,7 @@ func (appError *Error) Unwrap() error {
 // 戻り値:
 //   - 作成した Error。
 func New(kind Kind, message string) *Error {
+	// 原因を持たない(Cause が nil の)Error を組み立てて返す。
 	return &Error{Kind: kind, Message: message}
 }
 
@@ -66,6 +71,7 @@ func New(kind Kind, message string) *Error {
 // 戻り値:
 //   - 作成した Error。
 func Wrap(kind Kind, message string, cause error) *Error {
+	// 原因を保持した Error を組み立てて返す。原因は利用者には返さず、ログにだけ使う。
 	return &Error{Kind: kind, Message: message, Cause: cause}
 }
 
@@ -81,13 +87,19 @@ func Wrap(kind Kind, message string, cause error) *Error {
 //   - Error を含まない通常のエラーは KindInternal。
 //   - err が nil のときは空の Kind。
 func KindOf(err error) Kind {
+	// エラーが無いときは、種類も無いので空の Kind を返す。
 	if err == nil {
+		// 空の Kind を返して、呼び出し側がエラー無しと区別できるようにする。
 		return Kind("")
 	}
 
+	// errors.As の結果を受け取るための変数を用意する。
 	var appError *Error
+	// %w で包まれていても、中にある Error を探し出す。
 	if errors.As(err, &appError) {
+		// 見つかった Error の種類をそのまま返す。
 		return appError.Kind
 	}
+	// Error を含まない通常のエラーは、想定外の失敗として内部エラー扱いにする。
 	return KindInternal
 }

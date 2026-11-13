@@ -20,7 +20,9 @@ import (
 //   - 変換したログレベル。
 //   - エラー。未知の文字列のとき。その場合のログレベルは info。
 func ParseLevel(text string) (slog.Level, error) {
+	// 前後の空白を取り除き、小文字にそろえてから、レベルを判定する。
 	switch strings.ToLower(strings.TrimSpace(text)) {
+	// 文字列と slog のレベルの対応。空文字は、環境変数が未設定のときの既定として info にする。
 	case "debug":
 		return slog.LevelDebug, nil
 	case "", "info":
@@ -29,6 +31,7 @@ func ParseLevel(text string) (slog.Level, error) {
 		return slog.LevelWarn, nil
 	case "error":
 		return slog.LevelError, nil
+	// 未知の文字列は、気づけるようにエラーを返す。ログレベルは安全な既定の info にする。
 	default:
 		return slog.LevelInfo, fmt.Errorf("未知のログレベル %q(debug、info、warn、error のどれか)", text)
 	}
@@ -48,9 +51,11 @@ func ParseLevel(text string) (slog.Level, error) {
 // 戻り値:
 //   - 作成したロガー。
 func New(output io.Writer, component string, level slog.Level) *slog.Logger {
+	// 標準出力などへ JSON で書くハンドラーを作る。レベルの絞り込みと、機密の伏せ字を設定する。
 	handler := slog.NewJSONHandler(output, &slog.HandlerOptions{
 		Level:       level,
 		ReplaceAttr: redactSensitiveAttribute,
 	})
+	// ハンドラーからロガーを作り、全ての行に component を付けて返す。
 	return slog.New(handler).With("component", component)
 }

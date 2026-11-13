@@ -25,6 +25,7 @@ type HealthController struct{}
 // 戻り値:
 //   - 作成した HealthController。
 func NewHealthController() *HealthController {
+	// 状態を持たないので、空の構造体をそのまま返す。
 	return &HealthController{}
 }
 
@@ -39,5 +40,6 @@ func NewHealthController() *HealthController {
 // 戻り値:
 //   - レスポンスを書き込むときのエラー。
 func (healthController *HealthController) Check(echoContext *echo.Context) error {
+	// 外部に問い合わせず、200 と status=ok を JSON で返す。
 	return echoContext.JSON(http.StatusOK, HealthCheckResponse{Status: "ok"})
 }

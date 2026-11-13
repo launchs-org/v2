@@ -11,6 +11,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # 認証のコンテナができるまでの、開発用の仮のユーザー。
+      DEV_USER_ID: user-dev
       # テストが、使い捨てのデータベースを作るための接続先。
       TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:

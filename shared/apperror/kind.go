@@ -41,7 +41,9 @@ const (
 // 戻り値:
 //   - 種類に対応するステータスコード。未知の種類は、サーバー内部のエラーとして 500 を返す。
 func (kind Kind) StatusCode() int {
+	// 種類ごとに、対応する HTTP のステータスコードを選ぶ。
 	switch kind {
+	// 種類とステータスコードの対応。共通ルール(docs/endpoints/common.md)に合わせている。
 	case KindInvalidRequest:
 		return http.StatusBadRequest
 	case KindUnauthorized:
@@ -54,6 +56,7 @@ func (kind Kind) StatusCode() int {
 		return http.StatusRequestEntityTooLarge
 	case KindTooManyRequests:
 		return http.StatusTooManyRequests
+	// 未知の種類は、想定外のエラーとして 500 にする。
 	default:
 		return http.StatusInternalServerError
 	}
