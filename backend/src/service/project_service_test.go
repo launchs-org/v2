@@ -17,6 +17,9 @@ type fakeProjectStore struct {
 	createError    error
 	renameError    error
 	renamedName    string
+	markError      error
+	revertError    error
+	revertCalled   bool
 }
 
 // Create は、受け取ったプロジェクトを覚えて、決めたエラーを返す。
@@ -54,7 +57,7 @@ func TestProjectServiceCreate(testingT *testing.T) {
 		// 何も覚えていない fake の保存先を用意する。
 		fakeStore := &fakeProjectStore{}
 		// fake の保存先を使うサービスを作る。
-		projectService := NewProjectService(fakeStore)
+		projectService := NewProjectService(fakeStore, &fakeDeletionStarter{})
 
 		// 検証対象の作成を呼ぶ。
 		projectID, createError := projectService.Create(context.Background(), "user-a", "my-app")
@@ -77,7 +80,7 @@ func TestProjectServiceCreate(testingT *testing.T) {
 
 	testingT.Run("2回作ると、違う ID になる", func(subTest *testing.T) {
 		// 保存先に何も仕込まないサービスを作る。
-		projectService := NewProjectService(&fakeProjectStore{})
+		projectService := NewProjectService(&fakeProjectStore{}, &fakeDeletionStarter{})
 		// 1つ目のプロジェクトを作る。
 		firstID, _ := projectService.Create(context.Background(), "user-a", "first")
 		// 2つ目のプロジェクトを作る。
@@ -92,7 +95,7 @@ func TestProjectServiceCreate(testingT *testing.T) {
 		// 保存先が返すエラーとして、conflict を用意する。
 		conflictError := apperror.New(apperror.KindConflict, "重複")
 		// 保存が conflict で失敗する保存先を使うサービスを作る。
-		projectService := NewProjectService(&fakeProjectStore{createError: conflictError})
+		projectService := NewProjectService(&fakeProjectStore{createError: conflictError}, &fakeDeletionStarter{})
 
 		// 作成を呼ぶ。
 		projectID, createError := projectService.Create(context.Background(), "user-a", "my-app")
@@ -109,7 +112,7 @@ func TestProjectServiceRename(testingT *testing.T) {
 	// 名前の変更が conflict で失敗する保存先を用意する。
 	fakeStore := &fakeProjectStore{renameError: apperror.New(apperror.KindConflict, "削除中")}
 	// fake の保存先を使うサービスを作る。
-	projectService := NewProjectService(fakeStore)
+	projectService := NewProjectService(fakeStore, &fakeDeletionStarter{})
 
 	// 検証対象の名前の変更を呼ぶ。
 	renameError := projectService.Rename(context.Background(), "user-a", "project-1", "renamed")
@@ -122,4 +125,66 @@ func TestProjectServiceRename(testingT *testing.T) {
 	if apperror.KindOf(renameError) != apperror.KindConflict {
 		testingT.Errorf("conflict を返すはず: %v", renameError)
 	}
+}
+
+// MarkDeleting は、決めたエラーを返す。
+func (fakeStore *fakeProjectStore) MarkDeleting(_ context.Context, _ string, _ string) error {
+	return fakeStore.markError
+}
+
+// RevertDeleting は、呼ばれたことを覚えて、決めたエラーを返す。
+func (fakeStore *fakeProjectStore) RevertDeleting(_ context.Context, _ string, _ string) error {
+	fakeStore.revertCalled = true
+	return fakeStore.revertError
+}
+
+// fakeDeletionStarter は、テスト用の ProjectDeletionStarter。呼ばれたことを覚え、決めたエラーを返す。
+type fakeDeletionStarter struct {
+	startedProjectID string
+	startError       error
+}
+
+// StartProjectDeletion は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeletionStarter) StartProjectDeletion(_ context.Context, projectID string) error {
+	fakeStarter.startedProjectID = projectID
+	return fakeStarter.startError
+}
+
+// TestProjectServiceDelete は、削除の受け付けの、正常・状態の変更に失敗・Workflow の開始に失敗の場合を確認する。
+func TestProjectServiceDelete(testingT *testing.T) {
+	// 削除中にでき、Workflow を開始できる場合。
+	testingT.Run("削除中にして、Workflow を開始する", func(subTest *testing.T) {
+		fakeStarter := &fakeDeletionStarter{}
+		deleteError := NewProjectService(&fakeProjectStore{}, fakeStarter).Delete(context.Background(), "user-a", "project-1")
+		if deleteError != nil || fakeStarter.startedProjectID != "project-1" {
+			subTest.Errorf("成功して、Workflow を開始するはず: エラー %v、開始 %q", deleteError, fakeStarter.startedProjectID)
+		}
+	})
+	// 削除中にできなかった(すでに削除中など)場合は、Workflow を開始しない。
+	testingT.Run("削除中にできなければ、そのエラーを返し、Workflow を開始しない", func(subTest *testing.T) {
+		fakeStarter := &fakeDeletionStarter{}
+		fakeStore := &fakeProjectStore{markError: apperror.New(apperror.KindConflict, "削除中")}
+		deleteError := NewProjectService(fakeStore, fakeStarter).Delete(context.Background(), "user-a", "project-1")
+		if apperror.KindOf(deleteError) != apperror.KindConflict || fakeStarter.startedProjectID != "" {
+			subTest.Errorf("conflict で、開始しないはず: エラー %v、開始 %q", deleteError, fakeStarter.startedProjectID)
+		}
+	})
+	// Workflow を開始できなかった場合は、状態を戻して internal_error にする。
+	testingT.Run("Workflow を開始できなければ、状態を戻して internal_error", func(subTest *testing.T) {
+		fakeStore := &fakeProjectStore{}
+		fakeStarter := &fakeDeletionStarter{startError: errors.New("temporal down")}
+		deleteError := NewProjectService(fakeStore, fakeStarter).Delete(context.Background(), "user-a", "project-1")
+		if apperror.KindOf(deleteError) != apperror.KindInternal || !fakeStore.revertCalled {
+			subTest.Errorf("internal_error で、状態を戻すはず: エラー %v、戻した %v", deleteError, fakeStore.revertCalled)
+		}
+	})
+	// 状態を戻すのにも失敗した場合も、internal_error で返す。
+	testingT.Run("状態を戻すのにも失敗しても、internal_error", func(subTest *testing.T) {
+		fakeStore := &fakeProjectStore{revertError: errors.New("db down")}
+		fakeStarter := &fakeDeletionStarter{startError: errors.New("temporal down")}
+		deleteError := NewProjectService(fakeStore, fakeStarter).Delete(context.Background(), "user-a", "project-1")
+		if apperror.KindOf(deleteError) != apperror.KindInternal {
+			subTest.Errorf("internal_error のはず: %v", deleteError)
+		}
+	})
 }

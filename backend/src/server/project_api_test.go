@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,6 +15,18 @@ import (
 	"launchs/shared/database/testdatabase"
 	"launchs/shared/logger"
 )
+
+// fakeDeletionStarter は、テスト用の ProjectDeletionStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
+type fakeDeletionStarter struct {
+	startedProjectIDs []string
+	startError        error
+}
+
+// StartProjectDeletion は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeletionStarter) StartProjectDeletion(_ context.Context, projectID string) error {
+	fakeStarter.startedProjectIDs = append(fakeStarter.startedProjectIDs, projectID)
+	return fakeStarter.startError
+}
 
 // projectAPIClient は、テスト用に、あるユーザーとして /api/v1/projects を呼ぶ道具。
 type projectAPIClient struct {
@@ -39,6 +53,10 @@ func newProjectAPIClient(testingT *testing.T, devUserID string, dependencies Dep
 	}
 	// このクライアントのユーザーとして扱う ID を設定する。
 	dependencies.DevUserID = devUserID
+	// 削除の開始が指定されていなければ、何もしない fake を使う。
+	if dependencies.ProjectDeletionStarter == nil {
+		dependencies.ProjectDeletionStarter = &fakeDeletionStarter{}
+	}
 	// ログの出力先を、メモリ上に用意する。
 	var logOutput bytes.Buffer
 	// サーバーを組み立て、呼び出す道具として返す。
@@ -165,6 +183,7 @@ func TestProjectAPIRequiresAuthentication(testingT *testing.T) {
 		{http.MethodGet, "/projects", ""},
 		{http.MethodGet, "/projects/project-x", ""},
 		{http.MethodPatch, "/projects/project-x", `{"name":"renamed"}`},
+		{http.MethodDelete, "/projects/project-x", ""},
 	}
 	// API を1つずつ、サブテストとして呼ぶ。
 	for _, request := range requests {
@@ -337,5 +356,81 @@ func TestProjectAPIListPaging(testingT *testing.T) {
 				subTest.Errorf("400 のはずが、違う: %d %v", statusCode, responseBody)
 			}
 		})
+	}
+}
+
+// TestProjectAPIDelete は、削除の受け付け(DELETE /projects/:projectId)で、すぐに 200 を返し、
+// status が deleting になり、Workflow が開始され、以後の変更や再度の削除が 409 になることを確認する。
+func TestProjectAPIDelete(testingT *testing.T) {
+	// 持ち主と他のユーザーが、同じデータベースを使う。削除の開始は、記録する fake にする。
+	database := testdatabase.New(testingT)
+	fakeStarter := &fakeDeletionStarter{}
+	ownerClient := newProjectAPIClient(testingT, "user-a", Dependencies{Database: database, ProjectDeletionStarter: fakeStarter})
+	otherClient := newProjectAPIClient(testingT, "user-b", Dependencies{Database: database, ProjectDeletionStarter: fakeStarter})
+	_, createdBody := ownerClient.call(http.MethodPost, "/projects", `{"name":"to-delete"}`)
+	projectID := createdBody["projectId"].(string)
+
+	// 他のユーザーは、存在しないものとして 404 になり、Workflow も開始されない。
+	testingT.Run("他のユーザーのプロジェクトは 404", func(subTest *testing.T) {
+		statusCode, responseBody := otherClient.call(http.MethodDelete, "/projects/"+projectID, "")
+		if statusCode != 404 || errorCodeOf(responseBody) != "not_found" || len(fakeStarter.startedProjectIDs) != 0 {
+			subTest.Errorf("404 で、開始しないはず: %d %v、開始 %v", statusCode, responseBody, fakeStarter.startedProjectIDs)
+		}
+	})
+	// 存在しない ID は 404。
+	testingT.Run("存在しない projectId は 404", func(subTest *testing.T) {
+		statusCode, _ := ownerClient.call(http.MethodDelete, "/projects/project-nothing", "")
+		if statusCode != 404 {
+			subTest.Errorf("404 のはずが %d", statusCode)
+		}
+	})
+	// 持ち主の削除は、すぐ 200 で、Workflow が1回開始される。
+	testingT.Run("削除を受け付けると 200 で、Workflow が開始される", func(subTest *testing.T) {
+		statusCode, responseBody := ownerClient.call(http.MethodDelete, "/projects/"+projectID, "")
+		if statusCode != 200 || len(responseBody) != 0 {
+			subTest.Fatalf("200 と空のボディのはず: %d %v", statusCode, responseBody)
+		}
+		if len(fakeStarter.startedProjectIDs) != 1 || fakeStarter.startedProjectIDs[0] != projectID {
+			subTest.Errorf("Workflow を1回開始するはず: %v", fakeStarter.startedProjectIDs)
+		}
+	})
+	// 受け付けた直後の GET は、deleting を返す。
+	testingT.Run("直後の取得は status が deleting", func(subTest *testing.T) {
+		statusCode, responseBody := ownerClient.call(http.MethodGet, "/projects/"+projectID, "")
+		if statusCode != 200 || responseBody["status"] != "deleting" {
+			subTest.Errorf("deleting のはず: %d %v", statusCode, responseBody)
+		}
+	})
+	// 削除中は、更新も再度の削除も 409 で、Workflow は増えない。
+	testingT.Run("削除中の更新と再度の削除は 409", func(subTest *testing.T) {
+		patchStatus, patchBody := ownerClient.call(http.MethodPatch, "/projects/"+projectID, `{"name":"renamed"}`)
+		deleteStatus, deleteBody := ownerClient.call(http.MethodDelete, "/projects/"+projectID, "")
+		if patchStatus != 409 || errorCodeOf(patchBody) != "conflict" || deleteStatus != 409 || errorCodeOf(deleteBody) != "conflict" {
+			subTest.Errorf("どちらも 409 のはず: PATCH %d、DELETE %d", patchStatus, deleteStatus)
+		}
+		if len(fakeStarter.startedProjectIDs) != 1 {
+			subTest.Errorf("Workflow は増えないはず: %v", fakeStarter.startedProjectIDs)
+		}
+	})
+}
+
+// TestProjectAPIDeleteWhenWorkflowCannotStart は、Workflow を開始できなかったとき、
+// 500 を返し、プロジェクトが削除中のまま残らず active に戻ることを確認する。
+func TestProjectAPIDeleteWhenWorkflowCannotStart(testingT *testing.T) {
+	// 開始に必ず失敗する fake を使う。
+	fakeStarter := &fakeDeletionStarter{startError: errors.New("temporal down")}
+	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{ProjectDeletionStarter: fakeStarter})
+	_, createdBody := apiClient.call(http.MethodPost, "/projects", `{"name":"keep"}`)
+	projectID := createdBody["projectId"].(string)
+
+	// 削除は 500 になる。
+	statusCode, responseBody := apiClient.call(http.MethodDelete, "/projects/"+projectID, "")
+	if statusCode != 500 || errorCodeOf(responseBody) != "internal_error" {
+		testingT.Fatalf("500 internal_error のはず: %d %v", statusCode, responseBody)
+	}
+	// プロジェクトは active のままで、もう一度削除を試せる(409 にならない)。
+	_, getBody := apiClient.call(http.MethodGet, "/projects/"+projectID, "")
+	if getBody["status"] != "active" {
+		testingT.Errorf("active に戻っているはず: %v", getBody)
 	}
 }

@@ -9,10 +9,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
       # 認証のコンテナができるまでの、開発用の仮のユーザー。
       DEV_USER_ID: user-dev
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
       # テストが、使い捨てのデータベースを作るための接続先。
       TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:
@@ -78,6 +82,26 @@ services:
     ports:
       - "127.0.0.1:8233:8080"
 
+
+  # Temporal のワーカー。削除などの、時間のかかる処理を非同期に実行する。
+  worker:
+    build:
+      context: .
+      dockerfile: worker/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
 
   # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
   migrate-app:

@@ -26,3 +26,6 @@ PATCH {{baseUrl}}/projects/{{projectId}}
 Content-Type: application/json
 
 {"name": "my-app-renamed"}
+
+### プロジェクト削除(すぐ 200 を返す。実体は非同期に削除され、完了すると取得が 404 になる)
+DELETE {{baseUrl}}/projects/{{projectId}}
