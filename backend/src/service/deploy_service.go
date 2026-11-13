@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
@@ -18,6 +19,8 @@ type DeployStore interface {
 	Create(requestContext context.Context, deploy *model.Deploy) error
 	FindByID(requestContext context.Context, userID string, deployID string) (model.Deploy, error)
 	DeleteUnstarted(requestContext context.Context, deployID string) error
+	SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error
+	DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error
 }
 
 // DeployWorkflowStarter は、deploy の起動(k8s への作成)を行う処理(Workflow)を開始する。
@@ -114,4 +117,53 @@ func (deployService *DeployService) Create(requestContext context.Context, userI
 func (deployService *DeployService) Get(requestContext context.Context, userID string, deployID string) (model.Deploy, error) {
 	// ユーザーと deploy ID の両方で探す。他のユーザーのものは、見つからない扱いになる。
 	return deployService.deployStore.FindByID(requestContext, userID, deployID)
+}
+
+// UpdateConfig は、起動設定(環境変数、起動コマンド、起動引数)を、まだ適用しない値として保存する。
+//
+// 3つは、常にまとめて置き換える。コンテナへの反映は、適用(apply)を呼ぶまで行われない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 設定を保存する deploy の ID。
+//   - env: 環境変数。
+//   - command: 起動コマンド。nil ならイメージの既定。
+//   - args: 起動引数。nil ならイメージの既定。
+//
+// 戻り値:
+//   - deploy が無い、または他のユーザーのものなら not_found。反映中や削除の途中なら conflict。
+//   - 保存できなかったときは internal_error。
+func (deployService *DeployService) UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error {
+	// 環境変数を JSON にする。
+	envJSON, envError := json.Marshal(env)
+	if envError != nil {
+		return apperror.Wrap(apperror.KindInternal, "環境変数を保存できませんでした", envError)
+	}
+	// 起動引数は、指定があるときだけ JSON にする(nil はイメージの既定として NULL で保存する)。
+	var argsJSON datatypes.JSON
+	if args != nil {
+		encodedArgs, argsError := json.Marshal(args)
+		if argsError != nil {
+			return apperror.Wrap(apperror.KindInternal, "起動引数を保存できませんでした", argsError)
+		}
+		argsJSON = encodedArgs
+	}
+	// 保存を、保存先に任せる。
+	return deployService.deployStore.SavePendingConfig(requestContext, userID, deployID, envJSON, command, argsJSON)
+}
+
+// DiscardConfig は、まだ適用していない起動設定を、適用せずに破棄する。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 破棄する deploy の ID。
+//
+// 戻り値:
+//   - deploy が無い、または他のユーザーのものなら not_found。
+//     反映中や削除の途中、または破棄する値が無いなら conflict。
+func (deployService *DeployService) DiscardConfig(requestContext context.Context, userID string, deployID string) error {
+	// 破棄を、保存先に任せる。
+	return deployService.deployStore.DiscardPendingConfig(requestContext, userID, deployID)
 }
