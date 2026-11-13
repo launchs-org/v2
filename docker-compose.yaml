@@ -99,6 +99,9 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
+      # 既定では k8s につながず、namespace を削除しない。k8s につなぐときは、
+      # docker-compose.kubernetes.yaml を重ねる(docs/coding-conventions.md を参照)。
+      KUBERNETES_ACCESS: none
     volumes:
       - .:/app
       - go-module-cache:/go/pkg/mod

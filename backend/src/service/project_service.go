@@ -22,8 +22,8 @@ type ProjectStore interface {
 	FindByID(requestContext context.Context, userID string, projectID string) (model.Project, error)
 	ListByUser(requestContext context.Context, userID string, limit int, after *pagination.Position) ([]model.Project, *pagination.Position, error)
 	Rename(requestContext context.Context, userID string, projectID string, newName string) error
-	MarkDeleting(requestContext context.Context, userID string, projectID string) error
-	RevertDeleting(requestContext context.Context, userID string, projectID string) error
+	MarkDeleting(requestContext context.Context, userID string, projectID string) (string, error)
+	RevertDeleting(requestContext context.Context, userID string, projectID string, previousStatus string) error
 }
 
 // ProjectDeletionStarter は、プロジェクトの実体を削除する処理(Workflow)を開始する。
@@ -134,9 +134,11 @@ func (projectService *ProjectService) Rename(requestContext context.Context, use
 // Delete は、プロジェクトの削除を受け付ける。実体の削除は、非同期に行われる。
 //
 // 処理の流れ:
-//  1. プロジェクトの状態を、削除中(deleting)にする(以後の変更は 409 になる)
+//  1. プロジェクトの状態を、削除中(deleting)にする(以後の変更は 409 になる)。
+//     前回の削除に失敗して止まっている(delete_failed)ものも、同じく受け付ける(やり直し)
 //  2. 実体を削除する Workflow を開始する(完了は待たない)
-//  3. 手順 2 に失敗したら、状態を active に戻す(削除中のまま残らないようにする)
+//  3. 手順 2 に失敗したら、状態を受け付ける前の状態(active または delete_failed)に戻す
+//     (削除中のまま残らないようにする)
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -148,7 +150,8 @@ func (projectService *ProjectService) Rename(requestContext context.Context, use
 //   - Workflow を開始できなかったときの internal_error(状態は戻してある)。
 func (projectService *ProjectService) Delete(requestContext context.Context, userID string, projectID string) error {
 	// 1. 状態を削除中にする(無い・他人のもの・すでに削除中は、ここでエラーになる)。
-	if markError := projectService.projectStore.MarkDeleting(requestContext, userID, projectID); markError != nil {
+	previousStatus, markError := projectService.projectStore.MarkDeleting(requestContext, userID, projectID)
+	if markError != nil {
 		return markError
 	}
 
@@ -160,7 +163,7 @@ func (projectService *ProjectService) Delete(requestContext context.Context, use
 
 	// 3. 開始できなかったので、状態を戻す。リクエストが中断されていても戻せるよう、context を切り離す。
 	revertContext := context.WithoutCancel(requestContext)
-	if revertError := projectService.projectStore.RevertDeleting(revertContext, userID, projectID); revertError != nil {
+	if revertError := projectService.projectStore.RevertDeleting(revertContext, userID, projectID, previousStatus); revertError != nil {
 		// 戻すのにも失敗したときは、両方の原因を残す(プロジェクトは削除中のまま残る)。
 		return apperror.Wrap(apperror.KindInternal, "プロジェクトの削除を開始できませんでした", errors.Join(startError, revertError))
 	}

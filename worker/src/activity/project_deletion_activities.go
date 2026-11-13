@@ -5,12 +5,23 @@ package activity
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 
 	"launchs/shared/workflow"
 )
+
+// ErrInvalidNamespaceName は、namespace の名前がプロジェクトの ID の形ではないときのエラー。
+//
+// 何度やり直しても結果は同じなので、Activity は、このエラーをリトライしない。
+var ErrInvalidNamespaceName = errors.New("namespace の名前がプロジェクトの ID の形ではありません")
+
+// defaultNamespacePollInterval は、namespace が消えたかを確かめる、既定の間隔。
+const defaultNamespacePollInterval = 2 * time.Second
 
 // NamespaceDeleter は、プロジェクトの k8s の namespace を削除する。
 //
@@ -19,14 +30,20 @@ import (
 type NamespaceDeleter interface {
 	// DeleteNamespace は、namespace を削除する。すでに無いときは、成功として扱う(冪等)。
 	DeleteNamespace(requestContext context.Context, namespaceName string) error
+
+	// NamespaceExists は、namespace が(削除中のものを含めて)まだ残っているかを返す。
+	NamespaceExists(requestContext context.Context, namespaceName string) (bool, error)
 }
 
-// ProjectRecordDeleter は、プロジェクトのレコードを DB から削除する。
+// ProjectRecordDeleter は、プロジェクトのレコードの削除と、削除失敗の記録を行う。
 //
 // 実体は shared/repository の ProjectRepository。
 type ProjectRecordDeleter interface {
 	// DeleteRecord は、削除中のプロジェクトの行を物理削除する。すでに無いときは、成功として扱う(冪等)。
 	DeleteRecord(requestContext context.Context, projectID string) error
+
+	// MarkDeleteFailed は、削除中のプロジェクトを、削除に失敗した状態(delete_failed)にする。冪等。
+	MarkDeleteFailed(requestContext context.Context, projectID string) error
 }
 
 // ProjectDeletionActivities は、プロジェクト削除の Workflow が呼ぶ Activity をまとめる。
@@ -34,6 +51,8 @@ type ProjectDeletionActivities struct {
 	namespaceDeleter     NamespaceDeleter
 	projectRecordDeleter ProjectRecordDeleter
 	appLogger            *slog.Logger
+	// namespacePollInterval は、namespace が消えたかを確かめる間隔。
+	namespacePollInterval time.Duration
 }
 
 // NewProjectDeletionActivities は、ProjectDeletionActivities を作る。
@@ -47,9 +66,10 @@ type ProjectDeletionActivities struct {
 //   - 作成した ProjectDeletionActivities。
 func NewProjectDeletionActivities(namespaceDeleter NamespaceDeleter, projectRecordDeleter ProjectRecordDeleter, appLogger *slog.Logger) *ProjectDeletionActivities {
 	return &ProjectDeletionActivities{
-		namespaceDeleter:     namespaceDeleter,
-		projectRecordDeleter: projectRecordDeleter,
-		appLogger:            appLogger,
+		namespaceDeleter:      namespaceDeleter,
+		projectRecordDeleter:  projectRecordDeleter,
+		appLogger:             appLogger,
+		namespacePollInterval: defaultNamespacePollInterval,
 	}
 }
 
@@ -68,8 +88,31 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectNamespa
 	// ログに、どの Activity が何のために動いているかを残す。
 	projectDeletionActivities.appLogger.Info("プロジェクトの namespace を削除する",
 		"project_id", input.ProjectID, "activity", workflow.DeleteProjectNamespaceActivityName)
-	// 実際の削除は、namespace を削除するものに任せる(namespace 名は projectId)。
-	return projectDeletionActivities.namespaceDeleter.DeleteNamespace(requestContext, input.ProjectID)
+	// 削除を頼む(namespace 名は projectId)。すでに無ければ、成功として扱われる。
+	if deleteError := projectDeletionActivities.namespaceDeleter.DeleteNamespace(requestContext, input.ProjectID); deleteError != nil {
+		return markNonRetryable(deleteError)
+	}
+
+	// k8s の namespace の削除は非同期なので、配下のリソース(PVC のデータを含む)を含めて、
+	// 完全に消えるまで待つ。待つ間は、Temporal に、生きていることを伝え続ける。
+	for {
+		// namespace がまだ残っているかを確かめる。
+		exists, existsError := projectDeletionActivities.namespaceDeleter.NamespaceExists(requestContext, input.ProjectID)
+		if existsError != nil {
+			return markNonRetryable(existsError)
+		}
+		// 消えていれば、完了。
+		if !exists {
+			return nil
+		}
+		// まだ残っているので、生きていることを伝えて、少し待つ(キャンセルや期限なら、そこで終わる)。
+		activity.RecordHeartbeat(requestContext)
+		select {
+		case <-requestContext.Done():
+			return requestContext.Err()
+		case <-time.After(projectDeletionActivities.namespacePollInterval):
+		}
+	}
 }
 
 // DeleteProjectRecords は、プロジェクトの行を DB から削除する。
@@ -91,6 +134,25 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectRecords
 	activity.RecordHeartbeat(requestContext)
 	// 行の削除は、レコードを削除するものに任せる。
 	return projectDeletionActivities.projectRecordDeleter.DeleteRecord(requestContext, input.ProjectID)
+}
+
+// MarkProjectDeleteFailed は、削除に失敗したプロジェクトを、削除に失敗した状態(delete_failed)にする。
+//
+// 削除の Workflow が、リトライの期限までに削除を終えられなかったときの、補償の処理。
+// この状態になると、利用者は、もう一度削除を呼んでやり直せる。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 削除に失敗したプロジェクトの ID。
+//
+// 戻り値:
+//   - 状態の更新に失敗したときのエラー(Temporal がリトライする)。
+func (projectDeletionActivities *ProjectDeletionActivities) MarkProjectDeleteFailed(requestContext context.Context, input workflow.MarkProjectDeleteFailedInput) error {
+	// 削除に失敗したことを、警告のログに残す(運用で気づけるようにする)。
+	projectDeletionActivities.appLogger.Warn("プロジェクトの削除に失敗したため、delete_failed にする",
+		"project_id", input.ProjectID, "activity", workflow.MarkProjectDeleteFailedActivityName)
+	// 状態の更新は、レコードを扱うものに任せる。
+	return projectDeletionActivities.projectRecordDeleter.MarkDeleteFailed(requestContext, input.ProjectID)
 }
 
 // LoggingNamespaceDeleter は、namespace を削除せず、ログに出すだけの NamespaceDeleter。
@@ -123,4 +185,35 @@ func (loggingNamespaceDeleter *LoggingNamespaceDeleter) DeleteNamespace(_ contex
 	// 実際には削除していないことが分かるよう、警告で出す。
 	loggingNamespaceDeleter.appLogger.Warn("k8s に未接続のため、namespace は削除しない(仮の実装)", "namespace", namespaceName)
 	return nil
+}
+
+// NamespaceExists は、仮の実装なので、何も作っていない・消していないため、常に「無い」を返す。
+//
+// 引数:
+//   - requestContext: 使わない。
+//   - namespaceName: 使わない。
+//
+// 戻り値:
+//   - 常に false と nil。
+func (loggingNamespaceDeleter *LoggingNamespaceDeleter) NamespaceExists(_ context.Context, _ string) (bool, error) {
+	// 何も削除していないので、待つ必要は無く、常に無いものとして扱う。
+	return false, nil
+}
+
+// markNonRetryable は、何度やり直しても同じ結果になるエラー(名前の形が不正)を、リトライしないエラーにする。
+//
+// それ以外のエラー(k8s の一時的な障害など)は、そのまま返し、Temporal にリトライさせる。
+//
+// 引数:
+//   - originalError: Activity で起きたエラー。
+//
+// 戻り値:
+//   - リトライしないエラー、またはそのままのエラー。
+func markNonRetryable(originalError error) error {
+	// 名前の形が不正なら、リトライしても無駄なので、リトライしない印を付ける。
+	if errors.Is(originalError, ErrInvalidNamespaceName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidNamespaceName", originalError)
+	}
+	// それ以外は、一時的な障害の可能性があるので、そのまま返す。
+	return originalError
 }

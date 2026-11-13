@@ -1,0 +1,15 @@
+# ワーカーを、開発用の k8s につなぐための、docker-compose.yaml に重ねる設定。
+#
+# 使い方:
+#   docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build worker
+# (task up:k8s でも同じ)
+#
+# ホストの ~/.kube/config(root 相当)を、読み取り専用でマウントする。
+# このクラスタの namespace のうち、"project-" + UUID の形のものだけを、ワーカーが削除する。
+services:
+  worker:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro

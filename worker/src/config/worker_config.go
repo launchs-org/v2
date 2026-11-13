@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	sharedconfig "launchs/shared/config"
+	"launchs/shared/k8s"
 	"launchs/shared/logger"
 )
 
@@ -34,6 +35,9 @@ type WorkerConfig struct {
 
 	// LogLevel は、出力するログの最低のレベル(環境変数 LOG_LEVEL)。
 	LogLevel slog.Level
+
+	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
+	Kubernetes k8s.Settings
 }
 
 // LoadWorkerConfig は、環境変数からワーカーの設定を読む。
@@ -42,6 +46,7 @@ type WorkerConfig struct {
 //   - DATABASE_URL: app データベースの接続先(必須)。
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
+//   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
 // 設定に問題があっても止まらず、見つかった全ての問題をまとめて報告する。
@@ -58,6 +63,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
+	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
 	loadError := reader.Err()
@@ -66,6 +72,11 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	logLevel, levelError := logger.ParseLevel(logLevelText)
 	if levelError != nil {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
+	}
+
+	// k8s への接続の設定の値を検査し、問題があれば加える。
+	if validateError := kubernetesSettings.Validate(); validateError != nil {
+		loadError = errors.Join(loadError, validateError)
 	}
 
 	// 問題があれば、ゼロ値の設定とエラーを返す。
@@ -78,5 +89,6 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		TemporalAddress:   temporalAddress,
 		TemporalNamespace: temporalNamespace,
 		LogLevel:          logLevel,
+		Kubernetes:        kubernetesSettings,
 	}, nil
 }
