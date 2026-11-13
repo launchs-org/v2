@@ -34,7 +34,27 @@ type WorkerConfig struct {
 
 	// LogLevel は、出力するログの最低のレベル(環境変数 LOG_LEVEL)。
 	LogLevel slog.Level
+
+	// KubernetesAccess は、k8s への接続の方法(環境変数 KUBERNETES_ACCESS)。
+	KubernetesAccess KubernetesAccess
+
+	// KubeconfigPath は、KubernetesAccess が kubeconfig のときに読む kubeconfig のパス(環境変数 KUBECONFIG)。
+	KubeconfigPath string
 }
+
+// KubernetesAccess は、ワーカーが k8s につながる方法。
+type KubernetesAccess string
+
+const (
+	// KubernetesAccessNone は、k8s につながない。namespace の削除などは、行わずにログに出すだけ(開発用)。
+	KubernetesAccessNone KubernetesAccess = "none"
+
+	// KubernetesAccessKubeconfig は、kubeconfig のファイルで接続する(開発用)。
+	KubernetesAccessKubeconfig KubernetesAccess = "kubeconfig"
+
+	// KubernetesAccessInCluster は、Pod の ServiceAccount で接続する(本番)。
+	KubernetesAccessInCluster KubernetesAccess = "in-cluster"
+)
 
 // LoadWorkerConfig は、環境変数からワーカーの設定を読む。
 //
@@ -42,6 +62,9 @@ type WorkerConfig struct {
 //   - DATABASE_URL: app データベースの接続先(必須)。
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
+//   - KUBERNETES_ACCESS: k8s への接続の方法(none、kubeconfig、in-cluster)。必須。
+//     none は何も操作せずログに出すだけなので、本番で誤って使わないよう、省略はできない。
+//   - KUBECONFIG: kubeconfig のパス。KUBERNETES_ACCESS が kubeconfig のとき必須。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
 // 設定に問題があっても止まらず、見つかった全ての問題をまとめて報告する。
@@ -58,6 +81,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
+	kubernetesAccessText := reader.RequiredString("KUBERNETES_ACCESS")
+	kubeconfigPath := reader.OptionalString("KUBECONFIG", "")
 
 	// 読み込み中に見つかった問題を集める。
 	loadError := reader.Err()
@@ -66,6 +91,23 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	logLevel, levelError := logger.ParseLevel(logLevelText)
 	if levelError != nil {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
+	}
+
+	// k8s への接続の方法が、決まった値のどれかであることを確かめる。
+	kubernetesAccess := KubernetesAccess(kubernetesAccessText)
+	switch kubernetesAccess {
+	case KubernetesAccessNone, KubernetesAccessInCluster:
+		// 追加の設定は要らない。
+	case KubernetesAccessKubeconfig:
+		// kubeconfig で接続するときは、そのパスが要る。
+		if kubeconfigPath == "" {
+			loadError = errors.Join(loadError, errors.New("環境変数 KUBERNETES_ACCESS が kubeconfig のときは、環境変数 KUBECONFIG が必要です"))
+		}
+	default:
+		// RequiredString が空を報告済みなので、空のときは重ねて報告しない。
+		if kubernetesAccessText != "" {
+			loadError = errors.Join(loadError, fmt.Errorf("環境変数 KUBERNETES_ACCESS は none、kubeconfig、in-cluster のどれかでなければなりません: %q", kubernetesAccessText))
+		}
 	}
 
 	// 問題があれば、ゼロ値の設定とエラーを返す。
@@ -78,5 +120,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		TemporalAddress:   temporalAddress,
 		TemporalNamespace: temporalNamespace,
 		LogLevel:          logLevel,
+		KubernetesAccess:  kubernetesAccess,
+		KubeconfigPath:    kubeconfigPath,
 	}, nil
 }
