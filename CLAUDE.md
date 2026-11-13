@@ -23,6 +23,7 @@ docs/
   talks/        作業の経緯・設計判断の記録(会話ログ)
   pre-implementation-checklist.md  実装着手前に決める確認項目(回答欄付き)
   coding-conventions.md  コードの書き方とファイルのルール
+  call-flow.md  コードの呼び出しの流れ(どこで何を組み立てるか、リクエストの流れ)
 docker-compose.yaml  開発環境用
 Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実行する)
 ```
