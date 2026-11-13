@@ -35,12 +35,15 @@ type NamespaceDeleter interface {
 	NamespaceExists(requestContext context.Context, namespaceName string) (bool, error)
 }
 
-// ProjectRecordDeleter は、プロジェクトのレコードを DB から削除する。
+// ProjectRecordDeleter は、プロジェクトのレコードの削除と、削除失敗の記録を行う。
 //
 // 実体は shared/repository の ProjectRepository。
 type ProjectRecordDeleter interface {
 	// DeleteRecord は、削除中のプロジェクトの行を物理削除する。すでに無いときは、成功として扱う(冪等)。
 	DeleteRecord(requestContext context.Context, projectID string) error
+
+	// MarkDeleteFailed は、削除中のプロジェクトを、削除に失敗した状態(delete_failed)にする。冪等。
+	MarkDeleteFailed(requestContext context.Context, projectID string) error
 }
 
 // ProjectDeletionActivities は、プロジェクト削除の Workflow が呼ぶ Activity をまとめる。
@@ -131,6 +134,25 @@ func (projectDeletionActivities *ProjectDeletionActivities) DeleteProjectRecords
 	activity.RecordHeartbeat(requestContext)
 	// 行の削除は、レコードを削除するものに任せる。
 	return projectDeletionActivities.projectRecordDeleter.DeleteRecord(requestContext, input.ProjectID)
+}
+
+// MarkProjectDeleteFailed は、削除に失敗したプロジェクトを、削除に失敗した状態(delete_failed)にする。
+//
+// 削除の Workflow が、リトライの期限までに削除を終えられなかったときの、補償の処理。
+// この状態になると、利用者は、もう一度削除を呼んでやり直せる。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 削除に失敗したプロジェクトの ID。
+//
+// 戻り値:
+//   - 状態の更新に失敗したときのエラー(Temporal がリトライする)。
+func (projectDeletionActivities *ProjectDeletionActivities) MarkProjectDeleteFailed(requestContext context.Context, input workflow.MarkProjectDeleteFailedInput) error {
+	// 削除に失敗したことを、警告のログに残す(運用で気づけるようにする)。
+	projectDeletionActivities.appLogger.Warn("プロジェクトの削除に失敗したため、delete_failed にする",
+		"project_id", input.ProjectID, "activity", workflow.MarkProjectDeleteFailedActivityName)
+	// 状態の更新は、レコードを扱うものに任せる。
+	return projectDeletionActivities.projectRecordDeleter.MarkDeleteFailed(requestContext, input.ProjectID)
 }
 
 // LoggingNamespaceDeleter は、namespace を削除せず、ログに出すだけの NamespaceDeleter。

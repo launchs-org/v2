@@ -23,6 +23,14 @@ const (
 	// DeleteProjectRecordsActivityName は、プロジェクトと配下のレコードを DB から削除する Activity の名前。
 	DeleteProjectRecordsActivityName = "DeleteProjectRecords"
 
+	// MarkProjectDeleteFailedActivityName は、削除に失敗したプロジェクトを delete_failed にする Activity の名前。
+	MarkProjectDeleteFailedActivityName = "MarkProjectDeleteFailed"
+
+	// DeleteProjectRetryWindow は、削除の Activity を、失敗してもリトライし続ける最長の時間(具体値は仮)。
+	// リトライの待ち時間も含めた、最初の開始から数えた時間。これを超えたら、Activity は失敗とし、
+	// Workflow は、プロジェクトを delete_failed にして終わる。
+	DeleteProjectRetryWindow = 15 * time.Minute
+
 	// DeleteProjectActivityTimeout は、削除の Activity 1回あたりの最長の実行時間(具体値は仮)。
 	// namespace の削除は、PVC のデータを含めて消えるのを待つので、長めにしてある。
 	DeleteProjectActivityTimeout = 5 * time.Minute
@@ -50,6 +58,12 @@ type DeleteProjectNamespaceInput struct {
 // DeleteProjectRecordsInput は、DeleteProjectRecords Activity の入力。
 type DeleteProjectRecordsInput struct {
 	// ProjectID は、レコードを削除するプロジェクトの ID。
+	ProjectID string
+}
+
+// MarkProjectDeleteFailedInput は、MarkProjectDeleteFailed Activity の入力。
+type MarkProjectDeleteFailedInput struct {
+	// ProjectID は、削除に失敗したプロジェクトの ID。
 	ProjectID string
 }
 

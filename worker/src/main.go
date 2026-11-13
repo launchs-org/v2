@@ -74,6 +74,7 @@ func run() error {
 		appLogger,
 	)
 	generalWorker.RegisterActivityWithOptions(projectDeletionActivities.DeleteProjectNamespace, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteProjectNamespaceActivityName})
+	generalWorker.RegisterActivityWithOptions(projectDeletionActivities.MarkProjectDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkProjectDeleteFailedActivityName})
 	generalWorker.RegisterActivityWithOptions(projectDeletionActivities.DeleteProjectRecords, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteProjectRecordsActivityName})
 
 	// ワーカーを起動し、停止するまで待つ。
