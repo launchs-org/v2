@@ -50,12 +50,50 @@ func (fakeDeleter *fakeNamespaceDeleter) NamespaceExists(_ context.Context, _ st
 type fakeProjectRecordDeleter struct {
 	deletedIDs  []string
 	deleteError error
+	failedIDs   []string
+	failError   error
 }
 
 // DeleteRecord は、ID を覚えて、決めたエラーを返す。
 func (fakeDeleter *fakeProjectRecordDeleter) DeleteRecord(_ context.Context, projectID string) error {
 	fakeDeleter.deletedIDs = append(fakeDeleter.deletedIDs, projectID)
 	return fakeDeleter.deleteError
+}
+
+// MarkDeleteFailed は、ID を覚えて、決めたエラーを返す。
+func (fakeDeleter *fakeProjectRecordDeleter) MarkDeleteFailed(_ context.Context, projectID string) error {
+	fakeDeleter.failedIDs = append(fakeDeleter.failedIDs, projectID)
+	return fakeDeleter.failError
+}
+
+// TestMarkProjectDeleteFailed は、projectId で削除失敗の記録を頼み、そのエラーを返すことを確認する。
+func TestMarkProjectDeleteFailed(testingT *testing.T) {
+	// 成功する場合と、失敗する場合。
+	testCases := []struct {
+		name      string
+		failError error
+	}{
+		{name: "projectId で削除失敗の記録を頼む"},
+		{name: "記録のエラーはそのまま返す", failError: errors.New("db down")},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			// Activity をテスト環境で実行する。
+			fakeDeleter := &fakeProjectRecordDeleter{failError: testCase.failError}
+			activities := NewProjectDeletionActivities(&fakeNamespaceDeleter{}, fakeDeleter, logger.New(&bytes.Buffer{}, "worker", slog.LevelInfo))
+			testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+			testEnvironment.RegisterActivity(activities.MarkProjectDeleteFailed)
+			_, executeError := testEnvironment.ExecuteActivity(activities.MarkProjectDeleteFailed, workflow.MarkProjectDeleteFailedInput{ProjectID: "project-1"})
+
+			// 渡した ID と、エラーの有無を確認する。
+			if len(fakeDeleter.failedIDs) != 1 || fakeDeleter.failedIDs[0] != "project-1" {
+				subTest.Errorf("渡した ID が違う: %v", fakeDeleter.failedIDs)
+			}
+			if (executeError != nil) != (testCase.failError != nil) {
+				subTest.Errorf("エラーの有無が違う: %v", executeError)
+			}
+		})
+	}
 }
 
 // TestDeleteProjectNamespace は、namespace の名前に projectId を渡して削除を頼み、
