@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"launchs/shared/model"
+	"launchs/worker/src/activity"
 )
 
 // projectNamespacePattern は、削除してよい namespace の名前の形("project-" + UUID v4)。
@@ -111,7 +112,7 @@ func (deleter *KubernetesNamespaceDeleter) NamespaceExists(requestContext contex
 func validateProjectNamespace(namespaceName string) error {
 	// プロジェクトの ID の形に一致しなければ、エラーにする。
 	if !projectNamespacePattern.MatchString(namespaceName) {
-		return fmt.Errorf("namespace の名前がプロジェクトの ID の形ではないため、操作を拒否しました: %q", namespaceName)
+		return fmt.Errorf("%w(操作を拒否しました): %q", activity.ErrInvalidNamespaceName, namespaceName)
 	}
 	return nil
 }
