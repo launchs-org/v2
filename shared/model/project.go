@@ -14,6 +14,10 @@ const (
 
 	// ProjectStatusDeleting は、削除を受け付けて、実体を削除している最中のプロジェクト。
 	ProjectStatusDeleting = "deleting"
+
+	// ProjectStatusDeleteFailed は、削除に失敗して止まっているプロジェクト。
+	// リトライの期限までに実体を削除できなかったときの状態で、もう一度の削除を受け付ける。
+	ProjectStatusDeleteFailed = "delete_failed"
 )
 
 // Project は、projects テーブルの1行。build / deploy などは、全ていずれかのプロジェクトに属する。
@@ -27,7 +31,7 @@ type Project struct {
 	// Name は、プロジェクトの名前。英数字とハイフンのみ、1〜64文字。
 	Name string `gorm:"column:name"`
 
-	// Status は、プロジェクトの状態(ProjectStatusActive または ProjectStatusDeleting)。
+	// Status は、プロジェクトの状態(ProjectStatusActive、ProjectStatusDeleting、ProjectStatusDeleteFailed のどれか)。
 	Status string `gorm:"column:status"`
 
 	// CreatedAt は、作成日時。
