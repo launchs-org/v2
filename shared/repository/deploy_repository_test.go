@@ -227,3 +227,104 @@ func TestDeployRepositoryDeleteUnstarted(testingT *testing.T) {
 		}
 	})
 }
+
+// TestDeployRepositoryCommitConfigResult は、反映の結果の確定で、正式な値が pending の内容になり、
+// pending が空に戻り、status が成否と replicas で決まることを確認する。
+func TestDeployRepositoryCommitConfigResult(testingT *testing.T) {
+	// 結果ごとの期待。
+	testCases := []struct {
+		name           string
+		succeeded      bool
+		replicas       int
+		expectedStatus string
+	}{
+		{name: "成功なら active", succeeded: true, replicas: 1, expectedStatus: model.DeployStatusActive},
+		{name: "成功で replicas が 0 なら scaled_zero", succeeded: true, replicas: 0, expectedStatus: model.DeployStatusScaledZero},
+		{name: "失敗でも正式な値は pending の内容になり、failed", succeeded: false, replicas: 1, expectedStatus: model.DeployStatusFailed},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			// active の deploy に、pending を入れて、反映を始める。
+			database, deployRepository := newDeployTestEnvironment(subTest)
+			database.Create(newTestDeploy(1, "project-00000001", "user-a"))
+			database.Exec("UPDATE deploys SET status = 'active', replicas = ? WHERE id = 'deploy-00000001'", testCase.replicas)
+			command := "/app/server"
+			if saveError := deployRepository.SavePendingConfig(context.Background(), "user-a", "deploy-00000001", datatypes.JSON(`{"A":"1"}`), &command, datatypes.JSON(`["x"]`)); saveError != nil {
+				subTest.Fatalf("保存できませんでした: %v", saveError)
+			}
+			if _, beginError := deployRepository.BeginConfigApply(context.Background(), "user-a", "deploy-00000001"); beginError != nil {
+				subTest.Fatalf("開始できませんでした: %v", beginError)
+			}
+
+			// 確定する。
+			committed, commitError := deployRepository.CommitConfigResult(context.Background(), "deploy-00000001", testCase.succeeded)
+			if commitError != nil || !committed {
+				subTest.Fatalf("確定できるはず: %v %v", committed, commitError)
+			}
+
+			// 正式な値が pending の内容になり、pending は空になり、status が決まる。
+			deploy, _ := deployRepository.FindByID(context.Background(), "user-a", "deploy-00000001")
+			if string(deploy.Env) != `{"A": "1"}` && string(deploy.Env) != `{"A":"1"}` {
+				subTest.Errorf("env が pending の内容になっていない: %s", deploy.Env)
+			}
+			if deploy.Command == nil || *deploy.Command != "/app/server" || string(deploy.Args) != `["x"]` {
+				subTest.Errorf("command と args が pending の内容になっていない: %v %s", deploy.Command, deploy.Args)
+			}
+			if len(deploy.PendingEnv) != 0 || deploy.PendingCommand != nil || len(deploy.PendingArgs) != 0 {
+				subTest.Errorf("pending が空に戻っていない: %s %v %s", deploy.PendingEnv, deploy.PendingCommand, deploy.PendingArgs)
+			}
+			if deploy.Status != testCase.expectedStatus {
+				subTest.Errorf("status が違う: 期待 %q、実際 %q", testCase.expectedStatus, deploy.Status)
+			}
+			// もう一度確定しても、何も変わらない(冪等)。
+			if again, _ := deployRepository.CommitConfigResult(context.Background(), "deploy-00000001", !testCase.succeeded); again {
+				subTest.Errorf("applying でないので、確定されないはず")
+			}
+		})
+	}
+}
+
+// TestDeployRepositoryBeginConfigApply は、反映の開始で、状態が applying になり、元の状態が返ることと、
+// 受け付けない状態を確認する。
+func TestDeployRepositoryBeginConfigApply(testingT *testing.T) {
+	// 開始できる状態と、できない状態。
+	testCases := []struct {
+		name          string
+		status        string
+		withPending   bool
+		expectedKind  apperror.Kind
+		expectedError bool
+	}{
+		{name: "active で pending があれば開始できる", status: "active", withPending: true},
+		{name: "failed で pending があれば開始できる", status: "failed", withPending: true},
+		{name: "pending が無ければ conflict", status: "active", withPending: false, expectedError: true, expectedKind: apperror.KindConflict},
+		{name: "applying なら conflict", status: "applying", withPending: true, expectedError: true, expectedKind: apperror.KindConflict},
+		{name: "起動中(pending)なら conflict", status: "pending", withPending: true, expectedError: true, expectedKind: apperror.KindConflict},
+		{name: "deleting なら conflict", status: "deleting", withPending: true, expectedError: true, expectedKind: apperror.KindConflict},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			database, deployRepository := newDeployTestEnvironment(subTest)
+			database.Create(newTestDeploy(1, "project-00000001", "user-a"))
+			database.Exec("UPDATE deploys SET status = ? WHERE id = 'deploy-00000001'", testCase.status)
+			if testCase.withPending {
+				database.Exec(`UPDATE deploys SET pending_env = '{}' WHERE id = 'deploy-00000001'`)
+			}
+
+			previousStatus, beginError := deployRepository.BeginConfigApply(context.Background(), "user-a", "deploy-00000001")
+
+			deploy, _ := deployRepository.FindByID(context.Background(), "user-a", "deploy-00000001")
+			if testCase.expectedError {
+				// 拒否されたときは、状態が変わらない。
+				if apperror.KindOf(beginError) != testCase.expectedKind || deploy.Status != testCase.status {
+					subTest.Errorf("拒否され、状態は変わらないはず: %v %q", beginError, deploy.Status)
+				}
+				return
+			}
+			// 開始できたときは、applying になり、元の状態が返る。
+			if beginError != nil || previousStatus != testCase.status || deploy.Status != model.DeployStatusApplying {
+				subTest.Errorf("applying になり、元の状態が返るはず: %v %q %q", beginError, previousStatus, deploy.Status)
+			}
+		})
+	}
+}

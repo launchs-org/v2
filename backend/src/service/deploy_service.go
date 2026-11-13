@@ -21,6 +21,8 @@ type DeployStore interface {
 	DeleteUnstarted(requestContext context.Context, deployID string) error
 	SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error
 	DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error
+	BeginConfigApply(requestContext context.Context, userID string, deployID string) (string, error)
+	UpdateStatus(requestContext context.Context, deployID string, fromStatus string, toStatus string) (bool, error)
 }
 
 // DeployWorkflowStarter は、deploy の起動(k8s への作成)を行う処理(Workflow)を開始する。
@@ -29,6 +31,9 @@ type DeployStore interface {
 type DeployWorkflowStarter interface {
 	// StartDeployCreation は、deploy の起動の処理を開始する。完了は待たない。
 	StartDeployCreation(requestContext context.Context, deployID string) error
+
+	// StartConfigApply は、起動設定(pending)を反映する処理を開始する。完了は待たない。
+	StartConfigApply(requestContext context.Context, deployID string) error
 }
 
 // DeployService は、deploy に関する操作のビジネスルールを担当する。
@@ -166,4 +171,41 @@ func (deployService *DeployService) UpdateConfig(requestContext context.Context,
 func (deployService *DeployService) DiscardConfig(requestContext context.Context, userID string, deployID string) error {
 	// 破棄を、保存先に任せる。
 	return deployService.deployStore.DiscardPendingConfig(requestContext, userID, deployID)
+}
+
+// ApplyConfig は、まだ適用していない起動設定を、コンテナに反映する処理を開始する。
+//
+// 処理の流れ:
+//  1. deploy の状態を applying にする(適用する値が無い・反映中・削除の途中・起動中なら conflict)
+//  2. 反映の Workflow を開始する(完了は待たない。結果は status で確かめる)
+//  3. 手順 2 に失敗したら、状態を元に戻す(反映されない applying を残さない)
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: 反映する deploy の ID。
+//
+// 戻り値:
+//   - deploy が無い、または他のユーザーのものなら not_found。上記の場合は conflict。
+//   - Workflow を開始できなかったときは internal_error(状態は元に戻してある)。
+func (deployService *DeployService) ApplyConfig(requestContext context.Context, userID string, deployID string) error {
+	// 1. 状態を applying にする。元の状態は、開始に失敗したときの巻き戻しに使う。
+	previousStatus, beginError := deployService.deployStore.BeginConfigApply(requestContext, userID, deployID)
+	if beginError != nil {
+		return beginError
+	}
+
+	// 2. 反映の Workflow を開始する。
+	startError := deployService.deployWorkflowStarter.StartConfigApply(requestContext, deployID)
+	if startError == nil {
+		return nil
+	}
+
+	// 3. 開始できなかったので、状態を元に戻す。リクエストが中断されていても戻せるよう、context を切り離す。
+	revertContext := context.WithoutCancel(requestContext)
+	if _, revertError := deployService.deployStore.UpdateStatus(revertContext, deployID, model.DeployStatusApplying, previousStatus); revertError != nil {
+		// 戻せなかったときは、両方の原因を残す(applying のまま残る)。
+		return apperror.Wrap(apperror.KindInternal, "起動設定の反映を開始できませんでした", joinErrors(startError, revertError))
+	}
+	return apperror.Wrap(apperror.KindInternal, "起動設定の反映を開始できませんでした", startError)
 }

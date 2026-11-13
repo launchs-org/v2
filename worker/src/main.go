@@ -90,6 +90,12 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(createDeployActivities.WaitDeploymentReady, sdkactivity.RegisterOptions{Name: sharedworkflow.WaitDeploymentReadyActivityName})
 	generalWorker.RegisterActivityWithOptions(createDeployActivities.MarkDeployResult, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkDeployResultActivityName})
 
+	// 起動設定(pending)を k8s に反映する Workflow と、その Activity を登録する(起動を待つ Activity は、作成と共通)。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployConfigWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployConfigWorkflowName})
+	applyDeployConfigActivities := activity.NewApplyDeployConfigActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.ApplyPendingConfig, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingConfigActivityName})
+	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.CommitConfigResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitConfigResultActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
