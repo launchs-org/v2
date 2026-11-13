@@ -29,11 +29,16 @@ var sensitiveKeyWords = []string{"password", "secret", "token", "authorization",
 //   - 機密でないときは、そのままのフィールド。
 //   - 機密のときは、同じ名前で、値を伏せ字にしたフィールド。
 func redactSensitiveAttribute(groups []string, attribute slog.Attr) slog.Attr {
+	// 大文字小文字を区別せずに比較するため、フィールドの名前を小文字にする。
 	lowerKey := strings.ToLower(attribute.Key)
+	// 機密を表す語を1つずつ調べる。
 	for _, keyWord := range sensitiveKeyWords {
+		// 名前に機密を表す語が含まれるかを調べる。
 		if strings.Contains(lowerKey, keyWord) {
+			// 値を伏せ字にした、同じ名前のフィールドを返す。値は元の型に関わらず文字列になる。
 			return slog.String(attribute.Key, redactedValue)
 		}
 	}
+	// 機密でないフィールドは、そのまま返す。
 	return attribute
 }

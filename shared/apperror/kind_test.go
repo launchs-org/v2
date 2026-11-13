@@ -8,6 +8,7 @@ import (
 // TestKindStatusCode は、全ての Kind が共通ルールどおりの HTTP ステータスコードに
 // 対応し、未知の Kind は 500 になることを確認する。
 func TestKindStatusCode(testingT *testing.T) {
+	// ケースごとの、Kind と、期待するステータスコードを並べる。
 	testCases := []struct {
 		name           string
 		kind           Kind
@@ -24,9 +25,12 @@ func TestKindStatusCode(testingT *testing.T) {
 		{"空の Kind は 500", Kind(""), http.StatusInternalServerError},
 	}
 
+	// ケースを1つずつ、サブテストとして実行する。
 	for _, testCase := range testCases {
 		testingT.Run(testCase.name, func(subTest *testing.T) {
+			// テスト対象の StatusCode を呼ぶ。
 			actualStatus := testCase.kind.StatusCode()
+			// 期待したステータスコードと違えば、失敗にする。
 			if actualStatus != testCase.expectedStatus {
 				subTest.Errorf("ステータスコードが違う: 期待 %d、実際 %d", testCase.expectedStatus, actualStatus)
 			}

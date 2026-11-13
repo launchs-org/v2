@@ -36,15 +36,22 @@ type ErrorResponse struct {
 //   - HTTP のステータスコード。
 //   - レスポンスのボディ。
 func Describe(err error) (int, ErrorResponse) {
+	// errors.As の結果を受け取るための変数を用意する。
 	var appError *Error
+	// Error を含まない通常のエラーかどうかを調べる。
 	if !errors.As(err, &appError) {
+		// 内部の情報を漏らさないよう、500 と一般的なメッセージだけを返す。
 		return KindInternal.StatusCode(), buildErrorResponse(KindInternal, internalErrorMessage)
 	}
 
+	// 利用者に返すメッセージを、まず Error のメッセージにする。
 	message := appError.Message
+	// メッセージが空だと利用者に何も伝わらないので、一般的なメッセージで補う。
 	if message == "" {
+		// 空のメッセージを一般的なメッセージに置き換える。
 		message = internalErrorMessage
 	}
+	// 種類に対応するステータスコードと、組み立てたボディを返す。
 	return appError.Kind.StatusCode(), buildErrorResponse(appError.Kind, message)
 }
 
@@ -57,5 +64,6 @@ func Describe(err error) (int, ErrorResponse) {
 // 戻り値:
 //   - 組み立てたレスポンスのボディ。
 func buildErrorResponse(kind Kind, message string) ErrorResponse {
+	// code と message を、共通ルールの {"error": {...}} の形に入れて返す。
 	return ErrorResponse{Error: ErrorBody{Code: string(kind), Message: message}}
 }
