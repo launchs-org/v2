@@ -1,0 +1,31 @@
+# deploy 関連の API の動作確認用(VS Code の REST Client 拡張機能で使う)。
+# 開発環境(task up)の nginx 経由で呼ぶ。自己署名の証明書なので、拡張機能の設定で証明書の検証を外す。
+# 既定では、ワーカーは k8s につながない(KUBERNETES_ACCESS=none)ので、deploy は、何も起動せずに active になる。
+# 実際に k8s で起動するときは、task up:k8s で、ワーカーを開発用の k8s につなぐ。
+
+@baseUrl = https://localhost:18443/api/v1
+
+### プロジェクトを作る(deploy は、プロジェクトの配下に作る)
+# @name createProject
+POST {{baseUrl}}/projects
+Content-Type: application/json
+
+{"name": "deploy-sample"}
+
+###
+
+@projectId = {{createProject.response.body.projectId}}
+
+### deploy を作る(spec は small / medium / large)
+# @name createDeploy
+POST {{baseUrl}}/deploy
+Content-Type: application/json
+
+{"projectId": "{{projectId}}", "imageRef": "nginx:1.27-alpine", "spec": "small"}
+
+###
+
+@deployId = {{createDeploy.response.body.deployId}}
+
+### deploy の詳細を取る(status は pending → active。失敗すると failed)
+GET {{baseUrl}}/deploy/{{deployId}}
