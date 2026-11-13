@@ -2,7 +2,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	sdkactivity "go.temporal.io/sdk/activity"
@@ -12,6 +14,7 @@ import (
 
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/database"
+	"launchs/shared/k8s"
 	"launchs/shared/logger"
 	"launchs/shared/repository"
 	sharedworkflow "launchs/shared/workflow"
@@ -63,8 +66,8 @@ func run() error {
 	// 一般の Task Queue を処理するワーカーを作り、Workflow と Activity を登録する。
 	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteProjectWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteProjectWorkflowName})
-	// k8s の namespace を削除するものを、設定に合わせて作る。
-	namespaceDeleter, namespaceDeleterError := cluster.NewNamespaceDeleter(workerConfig, appLogger)
+	// k8s の namespace を削除するものを、設定に合わせて選ぶ。
+	namespaceDeleter, namespaceDeleterError := chooseNamespaceDeleter(workerConfig.Kubernetes, appLogger)
 	if namespaceDeleterError != nil {
 		return namespaceDeleterError
 	}
@@ -84,4 +87,34 @@ func run() error {
 	}
 	appLogger.Info("ワーカーを停止した")
 	return nil
+}
+
+// chooseNamespaceDeleter は、k8s への接続の設定に合わせて、namespace を削除するものを選ぶ。
+//
+// 選び方:
+//   - 接続の方法が none: k8s につながず、削除せずにログだけを出す仮の実装(開発用)。
+//   - それ以外: shared/k8s で作った k8s のクライアントで、実際に削除する実装。
+//
+// 引数:
+//   - kubernetesSettings: k8s への接続の設定。
+//   - appLogger: ログを出すロガー。
+//
+// 戻り値:
+//   - namespace を削除するもの。
+//   - k8s への接続の設定を読めなかったときのエラー。
+func chooseNamespaceDeleter(kubernetesSettings k8s.Settings, appLogger *slog.Logger) (activity.NamespaceDeleter, error) {
+	// k8s のクライアントを作る(クラスタへの通信は、最初の操作まで行われない)。
+	clientset, clientsetError := k8s.NewClientset(kubernetesSettings)
+
+	// 接続しない設定のときは、起動のログでそうなっていることが分かるようにして、仮の実装を使う。
+	if errors.Is(clientsetError, k8s.ErrNotConnected) {
+		appLogger.Warn("KUBERNETES_ACCESS=none のため、k8s の namespace は削除されません(開発用)")
+		return activity.NewLoggingNamespaceDeleter(appLogger), nil
+	}
+	// それ以外のエラーは、起動を止める。
+	if clientsetError != nil {
+		return nil, clientsetError
+	}
+	// 本物のクライアントで、実際に削除する実装を使う。
+	return cluster.NewKubernetesNamespaceDeleter(clientset), nil
 }
