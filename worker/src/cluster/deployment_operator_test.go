@@ -1,0 +1,249 @@
+package cluster
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
+
+	"launchs/worker/src/activity"
+)
+
+// testDeploymentName は、テスト用の Deployment の名前(deploy の ID の形)。
+const testDeploymentName = "deploy-0a1b2c3d-0000-4000-8000-000000000001"
+
+// newTestDefinition は、テスト用の Deployment の内容を作る。
+//
+// 戻り値:
+//   - small 相当の大きさの内容(namespace は validNamespaceName)。
+func newTestDefinition() activity.DeploymentDefinition {
+	return activity.DeploymentDefinition{
+		Namespace:     validNamespaceName,
+		Name:          testDeploymentName,
+		Image:         "registry.example/app:1",
+		Replicas:      2,
+		CPUMillicores: 250,
+		MemoryMiB:     256,
+		Env:           map[string]string{"PORT": "8080", "A_FIRST": "1"},
+	}
+}
+
+// TestKubernetesDeploymentOperatorEnsureNamespace は、namespace を作れ、すでにあっても成功し、
+// プロジェクトの形でない名前は拒否され、k8s の障害はエラーになることを確認する。
+func TestKubernetesDeploymentOperatorEnsureNamespace(testingT *testing.T) {
+	// 無い・すでにある・不正な名前・k8s の障害の場合。
+	testCases := []struct {
+		name               string
+		existing           []runtime.Object
+		namespaceName      string
+		reactorError       error
+		expectError        bool
+		expectInvalidName  bool
+		expectNamespaceNow bool
+	}{
+		{name: "無ければ作る", namespaceName: validNamespaceName, expectNamespaceNow: true},
+		{name: "すでにあっても成功する(冪等)", existing: []runtime.Object{newNamespace(validNamespaceName)}, namespaceName: validNamespaceName, expectNamespaceNow: true},
+		{name: "プロジェクトの形でない名前は拒否する", namespaceName: "kube-system", expectError: true, expectInvalidName: true},
+		{name: "k8s の障害はエラーになる", namespaceName: validNamespaceName, reactorError: apierrors.NewInternalError(errors.New("boom")), expectError: true},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			// fake のクライアントを作り、必要なら、作成の操作が決めたエラーを返すようにする。
+			fakeClientset := fake.NewSimpleClientset(testCase.existing...)
+			if testCase.reactorError != nil {
+				fakeClientset.PrependReactor("create", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, testCase.reactorError
+				})
+			}
+
+			// namespace の用意を頼む。
+			ensureError := NewKubernetesDeploymentOperator(fakeClientset, "").EnsureNamespace(context.Background(), testCase.namespaceName)
+
+			// エラーの有無、不正な名前のエラーかどうか、namespace があるかを確認する。
+			if (ensureError != nil) != testCase.expectError {
+				subTest.Fatalf("エラーの有無が違う: %v", ensureError)
+			}
+			if errors.Is(ensureError, activity.ErrInvalidNamespaceName) != testCase.expectInvalidName {
+				subTest.Errorf("不正な名前のエラーかどうかが違う: %v", ensureError)
+			}
+			_, getError := fakeClientset.CoreV1().Namespaces().Get(context.Background(), testCase.namespaceName, metav1.GetOptions{})
+			if (getError == nil) != testCase.expectNamespaceNow {
+				subTest.Errorf("namespace の有無が違う: %v", getError)
+			}
+		})
+	}
+}
+
+// TestKubernetesDeploymentOperatorApplyDeployment は、Deployment を、スペックの大きさ・環境変数・
+// ラベル・安全の設定つきで作り、すでにあれば更新し、不正な namespace には何も作らないことを確認する。
+func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
+	// 作った Deployment の中身を確認する。
+	testingT.Run("内容どおりの Deployment を作る", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		definition := newTestDefinition()
+		command := "/app/server"
+		definition.Command = &command
+		definition.Args = []string{"--config", "/app/config.yaml"}
+
+		applyError := NewKubernetesDeploymentOperator(fakeClientset, "gvisor").ApplyDeployment(context.Background(), definition)
+		if applyError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", applyError)
+		}
+
+		deployment, getError := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
+		if getError != nil {
+			subTest.Fatalf("Deployment が作られているはず: %v", getError)
+		}
+		// レプリカ数、ラベル、selector。
+		if *deployment.Spec.Replicas != 2 || deployment.Labels[deployIDLabel] != testDeploymentName || deployment.Labels[projectIDLabel] != validNamespaceName {
+			subTest.Errorf("レプリカ数かラベルが違う: %+v", deployment.ObjectMeta)
+		}
+		if deployment.Spec.Selector.MatchLabels[deployIDLabel] != testDeploymentName || deployment.Spec.Template.Labels[deployIDLabel] != testDeploymentName {
+			subTest.Errorf("selector と Pod のラベルが結びついていない")
+		}
+		// コンテナの内容。
+		podSpec := deployment.Spec.Template.Spec
+		container := podSpec.Containers[0]
+		if container.Name != "app" || container.Image != "registry.example/app:1" {
+			subTest.Errorf("コンテナが違う: %+v", container)
+		}
+		if len(container.Command) != 1 || container.Command[0] != "/app/server" || len(container.Args) != 2 || container.Args[0] != "--config" {
+			subTest.Errorf("コマンドと引数が違う: %v %v", container.Command, container.Args)
+		}
+		// 環境変数は、キーの順(A_FIRST が先)。
+		if len(container.Env) != 2 || container.Env[0].Name != "A_FIRST" || container.Env[1].Name != "PORT" || container.Env[1].Value != "8080" {
+			subTest.Errorf("環境変数が違う: %v", container.Env)
+		}
+		// CPU とメモリは、requests と limits が同じ(250m、256Mi)。
+		if container.Resources.Limits.Cpu().MilliValue() != 250 || container.Resources.Requests.Cpu().MilliValue() != 250 ||
+			container.Resources.Limits.Memory().Value() != 256*1024*1024 || container.Resources.Requests.Memory().Value() != 256*1024*1024 {
+			subTest.Errorf("大きさが違う: %+v", container.Resources)
+		}
+		// RuntimeClass と、安全の設定。
+		if podSpec.RuntimeClassName == nil || *podSpec.RuntimeClassName != "gvisor" {
+			subTest.Errorf("RuntimeClass が指定されていない: %v", podSpec.RuntimeClassName)
+		}
+		if podSpec.AutomountServiceAccountToken == nil || *podSpec.AutomountServiceAccountToken || podSpec.EnableServiceLinks == nil || *podSpec.EnableServiceLinks {
+			subTest.Errorf("ServiceAccount のトークンと Service 用の環境変数は、渡さない設定のはず")
+		}
+	})
+
+	// 指定が無いものは、k8s に任せる(上書きしない)。
+	testingT.Run("RuntimeClass・コマンド・引数が未指定なら、指定しない", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		if applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+			subTest.Fatalf("エラーにならないはず: %v", applyError)
+		}
+		deployment, _ := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
+		podSpec := deployment.Spec.Template.Spec
+		if podSpec.RuntimeClassName != nil || podSpec.Containers[0].Command != nil || podSpec.Containers[0].Args != nil {
+			subTest.Errorf("指定しないはず: %v %v %v", podSpec.RuntimeClassName, podSpec.Containers[0].Command, podSpec.Containers[0].Args)
+		}
+	})
+
+	// すでにある Deployment は、更新される(冪等)。
+	testingT.Run("すでにあれば、内容を更新する", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		operator := NewKubernetesDeploymentOperator(fakeClientset, "")
+		if applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+			subTest.Fatalf("1回目: %v", applyError)
+		}
+		changedDefinition := newTestDefinition()
+		changedDefinition.Image = "registry.example/app:2"
+		changedDefinition.Replicas = 3
+		if applyError := operator.ApplyDeployment(context.Background(), changedDefinition); applyError != nil {
+			subTest.Fatalf("2回目: %v", applyError)
+		}
+		deployment, _ := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
+		if deployment.Spec.Template.Spec.Containers[0].Image != "registry.example/app:2" || *deployment.Spec.Replicas != 3 {
+			subTest.Errorf("更新されているはず: %+v", deployment.Spec)
+		}
+	})
+
+	// プロジェクトの形でない namespace には、何も作らない。
+	testingT.Run("プロジェクトの形でない namespace には作らない", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		definition := newTestDefinition()
+		definition.Namespace = "kube-system"
+
+		applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), definition)
+
+		if !errors.Is(applyError, activity.ErrInvalidNamespaceName) {
+			subTest.Errorf("不正な名前のエラーのはず: %v", applyError)
+		}
+		if deployments, _ := fakeClientset.AppsV1().Deployments("kube-system").List(context.Background(), metav1.ListOptions{}); len(deployments.Items) != 0 {
+			subTest.Errorf("何も作られていないはず")
+		}
+	})
+
+	// k8s の障害は、エラーになる。
+	testingT.Run("k8s の障害はエラーになる", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		fakeClientset.PrependReactor("create", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewInternalError(errors.New("boom"))
+		})
+		if applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError == nil {
+			subTest.Errorf("エラーになるはず")
+		}
+	})
+}
+
+// TestKubernetesDeploymentOperatorDeploymentReady は、Ready の判定(設定の処理済み、希望数の Pod が使える状態)を確認する。
+func TestKubernetesDeploymentOperatorDeploymentReady(testingT *testing.T) {
+	// 希望するレプリカ数が2の Deployment を作る関数。状態は、テストごとに決める。
+	newDeployment := func(generation int64, status appsv1.DeploymentStatus, desiredReplicas int32) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: testDeploymentName, Namespace: validNamespaceName, Generation: generation},
+			Spec:       appsv1.DeploymentSpec{Replicas: &desiredReplicas},
+			Status:     status,
+		}
+	}
+	// Ready になる・ならない場合。
+	testCases := []struct {
+		name          string
+		existing      []runtime.Object
+		reactorError  error
+		expectedReady bool
+		expectError   bool
+	}{
+		{name: "Deployment がまだ無ければ、Ready ではない", expectedReady: false},
+		{name: "希望数が全て使える状態なら Ready", existing: []runtime.Object{newDeployment(1, appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, UpdatedReplicas: 2, AvailableReplicas: 2}, 2)}, expectedReady: true},
+		{name: "使える Pod が足りなければ Ready ではない", existing: []runtime.Object{newDeployment(1, appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, UpdatedReplicas: 2, AvailableReplicas: 1}, 2)}, expectedReady: false},
+		{name: "古い設定の Pod が残っていれば Ready ではない", existing: []runtime.Object{newDeployment(2, appsv1.DeploymentStatus{ObservedGeneration: 2, Replicas: 3, UpdatedReplicas: 2, AvailableReplicas: 3}, 2)}, expectedReady: false},
+		{name: "最新の設定を k8s が処理する前は Ready ではない", existing: []runtime.Object{newDeployment(2, appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, UpdatedReplicas: 2, AvailableReplicas: 2}, 2)}, expectedReady: false},
+		{name: "希望数が 0 で、Pod が無ければ Ready", existing: []runtime.Object{newDeployment(1, appsv1.DeploymentStatus{ObservedGeneration: 1}, 0)}, expectedReady: true},
+		{name: "k8s の障害はエラーになる", reactorError: apierrors.NewInternalError(errors.New("boom")), expectError: true},
+	}
+	for _, testCase := range testCases {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			// fake のクライアントを作り、必要なら、取得の操作が決めたエラーを返すようにする。
+			fakeClientset := fake.NewSimpleClientset(testCase.existing...)
+			if testCase.reactorError != nil {
+				fakeClientset.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, testCase.reactorError
+				})
+			}
+
+			// Ready かを確かめる。
+			ready, readyError := NewKubernetesDeploymentOperator(fakeClientset, "").DeploymentReady(context.Background(), validNamespaceName, testDeploymentName)
+
+			// 結果とエラーの有無を確認する。
+			if ready != testCase.expectedReady || (readyError != nil) != testCase.expectError {
+				subTest.Errorf("期待 %v(エラー %v)、実際 %v(エラー %v)", testCase.expectedReady, testCase.expectError, ready, readyError)
+			}
+		})
+	}
+	// プロジェクトの形でない namespace は、問い合わせない。
+	testingT.Run("プロジェクトの形でない namespace は拒否する", func(subTest *testing.T) {
+		_, readyError := NewKubernetesDeploymentOperator(fake.NewSimpleClientset(), "").DeploymentReady(context.Background(), "kube-system", "x")
+		if !errors.Is(readyError, activity.ErrInvalidNamespaceName) {
+			subTest.Errorf("不正な名前のエラーのはず: %v", readyError)
+		}
+	})
+}
