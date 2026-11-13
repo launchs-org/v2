@@ -106,23 +106,29 @@ func NewCreateDeployActivities(deployStore DeployStore, deploymentOperator Deplo
 	}
 }
 
-// EnsureProjectNamespace は、プロジェクトの k8s の namespace を、無ければ作る。
+// EnsureProjectNamespace は、deploy が属するプロジェクトの k8s の namespace を、無ければ作る。
 //
 // namespace の名前は projectId と同じ。プロジェクトの最初の deploy のときに作られ、
 // 2つ目以降は、すでにあるので何もしない。
 //
 // 引数:
 //   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
-//   - input: namespace を用意するプロジェクトの ID。
+//   - input: これから起動する deploy の ID。
 //
 // 戻り値:
-//   - namespace を作れなかったとき、または名前の形が不正なときのエラー(後者はリトライしない)。
+//   - deploy を読めなかったとき、namespace を作れなかったとき、名前の形が不正なとき(リトライしない)のエラー。
 func (createDeployActivities *CreateDeployActivities) EnsureProjectNamespace(requestContext context.Context, input workflow.EnsureProjectNamespaceInput) error {
 	// どの Activity が何のために動いているかを、ログに残す。
 	createDeployActivities.appLogger.Info("プロジェクトの namespace を用意する",
-		"project_id", input.ProjectID, "activity", workflow.EnsureProjectNamespaceActivityName)
+		"deploy_id", input.DeployID, "activity", workflow.EnsureProjectNamespaceActivityName)
+
+	// deploy から、属するプロジェクトの ID(namespace の名前)を調べる。
+	deploy, findError := createDeployActivities.deployStore.FindForWorker(requestContext, input.DeployID)
+	if findError != nil {
+		return findError
+	}
 	// 用意は、k8s を操作するものに任せる。名前の形の不正は、リトライしても無駄なので、その印を付ける。
-	return markNonRetryable(createDeployActivities.deploymentOperator.EnsureNamespace(requestContext, input.ProjectID))
+	return markNonRetryable(createDeployActivities.deploymentOperator.EnsureNamespace(requestContext, deploy.ProjectID))
 }
 
 // ApplyDeployment は、deploy に対応する k8s の Deployment を作る。すでにあれば更新する。

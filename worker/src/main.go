@@ -66,13 +66,13 @@ func run() error {
 	// 一般の Task Queue を処理するワーカーを作り、Workflow と Activity を登録する。
 	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteProjectWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteProjectWorkflowName})
-	// k8s の namespace を削除するものを、設定に合わせて選ぶ。
-	namespaceDeleter, namespaceDeleterError := chooseNamespaceDeleter(workerConfig.Kubernetes, appLogger)
-	if namespaceDeleterError != nil {
-		return namespaceDeleterError
+	// k8s を操作する役を、設定に合わせて選ぶ。
+	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, workerConfig.RuntimeClass, appLogger)
+	if operatorsError != nil {
+		return operatorsError
 	}
 	projectDeletionActivities := activity.NewProjectDeletionActivities(
-		namespaceDeleter,
+		operators.namespaceDeleter,
 		repository.NewProjectRepository(appDatabase),
 		appLogger,
 	)
@@ -81,6 +81,15 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(projectDeletionActivities.DeleteProjectRecords, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteProjectRecordsActivityName})
 
 	// ワーカーを起動し、停止するまで待つ。
+
+	// deploy を k8s に作る Workflow と、その Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.CreateDeployWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.CreateDeployWorkflowName})
+	createDeployActivities := activity.NewCreateDeployActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(createDeployActivities.EnsureProjectNamespace, sdkactivity.RegisterOptions{Name: sharedworkflow.EnsureProjectNamespaceActivityName})
+	generalWorker.RegisterActivityWithOptions(createDeployActivities.ApplyDeployment, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyDeploymentActivityName})
+	generalWorker.RegisterActivityWithOptions(createDeployActivities.WaitDeploymentReady, sdkactivity.RegisterOptions{Name: sharedworkflow.WaitDeploymentReadyActivityName})
+	generalWorker.RegisterActivityWithOptions(createDeployActivities.MarkDeployResult, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkDeployResultActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
@@ -89,32 +98,49 @@ func run() error {
 	return nil
 }
 
-// chooseNamespaceDeleter は、k8s への接続の設定に合わせて、namespace を削除するものを選ぶ。
+// clusterOperators は、k8s を操作する役の一式。
+type clusterOperators struct {
+	// namespaceDeleter は、プロジェクトの namespace を削除する役。
+	namespaceDeleter activity.NamespaceDeleter
+
+	// deploymentOperator は、namespace と Deployment を作る・確かめる役。
+	deploymentOperator activity.DeploymentOperator
+}
+
+// chooseClusterOperators は、k8s への接続の設定に合わせて、k8s を操作する役を選ぶ。
 //
 // 選び方:
-//   - 接続の方法が none: k8s につながず、削除せずにログだけを出す仮の実装(開発用)。
-//   - それ以外: shared/k8s で作った k8s のクライアントで、実際に削除する実装。
+//   - 接続の方法が none: k8s につながず、何も操作せずログだけを出す仮の実装(開発用)。
+//   - それ以外: shared/k8s で作った k8s のクライアントで、実際に操作する実装。
+//     クライアントは1つだけ作り、全ての役で共有する。
 //
 // 引数:
 //   - kubernetesSettings: k8s への接続の設定。
+//   - runtimeClass: deploy の Pod に指定する RuntimeClass(空なら指定しない)。
 //   - appLogger: ログを出すロガー。
 //
 // 戻り値:
-//   - namespace を削除するもの。
+//   - k8s を操作する役の一式。
 //   - k8s への接続の設定を読めなかったときのエラー。
-func chooseNamespaceDeleter(kubernetesSettings k8s.Settings, appLogger *slog.Logger) (activity.NamespaceDeleter, error) {
+func chooseClusterOperators(kubernetesSettings k8s.Settings, runtimeClass string, appLogger *slog.Logger) (clusterOperators, error) {
 	// k8s のクライアントを作る(クラスタへの通信は、最初の操作まで行われない)。
 	clientset, clientsetError := k8s.NewClientset(kubernetesSettings)
 
 	// 接続しない設定のときは、起動のログでそうなっていることが分かるようにして、仮の実装を使う。
 	if errors.Is(clientsetError, k8s.ErrNotConnected) {
-		appLogger.Warn("KUBERNETES_ACCESS=none のため、k8s の namespace は削除されません(開発用)")
-		return activity.NewLoggingNamespaceDeleter(appLogger), nil
+		appLogger.Warn("KUBERNETES_ACCESS=none のため、k8s は操作されません(namespace は削除されず、deploy は起動を確かめずに active になります。開発用)")
+		return clusterOperators{
+			namespaceDeleter:   activity.NewLoggingNamespaceDeleter(appLogger),
+			deploymentOperator: activity.NewLoggingDeploymentOperator(appLogger),
+		}, nil
 	}
 	// それ以外のエラーは、起動を止める。
 	if clientsetError != nil {
-		return nil, clientsetError
+		return clusterOperators{}, clientsetError
 	}
-	// 本物のクライアントで、実際に削除する実装を使う。
-	return cluster.NewKubernetesNamespaceDeleter(clientset), nil
+	// 本物のクライアントで、実際に操作する実装を使う。
+	return clusterOperators{
+		namespaceDeleter:   cluster.NewKubernetesNamespaceDeleter(clientset),
+		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, runtimeClass),
+	}, nil
 }

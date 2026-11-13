@@ -41,8 +41,9 @@ type CreateDeployInput struct {
 
 // EnsureProjectNamespaceInput は、EnsureProjectNamespace Activity の入力。
 type EnsureProjectNamespaceInput struct {
-	// ProjectID は、namespace を用意するプロジェクトの ID(namespace の名前と同じ)。
-	ProjectID string
+	// DeployID は、これから起動する deploy の ID。属するプロジェクトの namespace を用意する。
+	// プロジェクトの ID は、Activity が DB から読む(Workflow は deploy の ID だけを知っていればよい)。
+	DeployID string
 }
 
 // ApplyDeploymentInput は、ApplyDeployment Activity の入力。
