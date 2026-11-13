@@ -48,7 +48,7 @@ jobs:
 
       - name: 整形されているか確認する(gofmt)
         run: |
-          unformatted="$(gofmt -l backend shared worker)"
+          unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
             echo "gofmt で整形されていないファイル:"
             echo "$unformatted"
