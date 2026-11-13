@@ -34,28 +34,48 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 	}{
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
-			environment:    map[string]string{"DATABASE_URL": "postgres://db"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo},
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, KubernetesAccess: KubernetesAccessNone},
 		},
 		{
 			name:           "全て設定すると、その値になる",
-			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug},
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config"},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, KubernetesAccess: KubernetesAccessKubeconfig, KubeconfigPath: "/kube/config"},
+		},
+		{
+			name:           "in-cluster も指定できる",
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, KubernetesAccess: KubernetesAccessInCluster},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
-			environment:         map[string]string{},
+			environment:         map[string]string{"KUBERNETES_ACCESS": "none"},
 			expectedErrorPieces: []string{"DATABASE_URL"},
 		},
 		{
+			name:                "KUBERNETES_ACCESS が無いとエラー(何も消さないまま動くのを防ぐ)",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db"},
+			expectedErrorPieces: []string{"KUBERNETES_ACCESS"},
+		},
+		{
+			name:                "KUBERNETES_ACCESS が未知の値だとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "yes"},
+			expectedErrorPieces: []string{"KUBERNETES_ACCESS"},
+		},
+		{
+			name:                "kubeconfig なのに KUBECONFIG が無いとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "kubeconfig"},
+			expectedErrorPieces: []string{"KUBECONFIG"},
+		},
+		{
 			name:                "ログレベルが未知だとエラー",
-			environment:         map[string]string{"DATABASE_URL": "postgres://db", "LOG_LEVEL": "verbose"},
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "LOG_LEVEL": "verbose"},
 			expectedErrorPieces: []string{"LOG_LEVEL"},
 		},
 		{
 			name:                "問題が複数あると、全てまとめて報告する",
 			environment:         map[string]string{"LOG_LEVEL": "verbose"},
-			expectedErrorPieces: []string{"DATABASE_URL", "LOG_LEVEL"},
+			expectedErrorPieces: []string{"DATABASE_URL", "KUBERNETES_ACCESS", "LOG_LEVEL"},
 		},
 	}
 
