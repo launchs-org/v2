@@ -23,11 +23,16 @@ const (
 	// DeleteProjectRecordsActivityName は、プロジェクトと配下のレコードを DB から削除する Activity の名前。
 	DeleteProjectRecordsActivityName = "DeleteProjectRecords"
 
-	// DeleteProjectActivityTimeout は、削除の Activity 1回あたりの最長の実行時間。
-	DeleteProjectActivityTimeout = 2 * time.Minute
+	// DeleteProjectActivityTimeout は、削除の Activity 1回あたりの最長の実行時間(具体値は仮)。
+	// namespace の削除は、PVC のデータを含めて消えるのを待つので、長めにしてある。
+	DeleteProjectActivityTimeout = 5 * time.Minute
+
+	// DeleteProjectActivityHeartbeatTimeout は、Activity が生きていることを伝える間隔の上限。
+	// これを超えて連絡が無いと、Activity は止まったとみなされ、リトライされる。
+	DeleteProjectActivityHeartbeatTimeout = 30 * time.Second
 
 	// DeleteProjectWorkflowTimeout は、削除の Workflow 全体の最長の実行時間(具体値は仮)。
-	DeleteProjectWorkflowTimeout = 30 * time.Minute
+	DeleteProjectWorkflowTimeout = 45 * time.Minute
 )
 
 // DeleteProjectInput は、DeleteProjectWorkflow の入力。

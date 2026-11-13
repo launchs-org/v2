@@ -40,6 +40,7 @@ func DeleteProjectWorkflow(workflowContext sdkworkflow.Context, input sharedwork
 	// Activity の実行時間の上限とリトライの方針を決める。
 	activityContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
 		StartToCloseTimeout: sharedworkflow.DeleteProjectActivityTimeout,
+		HeartbeatTimeout:    sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			MaximumAttempts:    activityMaximumAttempts,
 			InitialInterval:    activityInitialRetryInterval,
