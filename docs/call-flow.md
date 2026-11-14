@@ -234,11 +234,25 @@ watcher(リーダーだけ)
 | ワーカーの組み立て | `worker/src/main.go` |
 | URL とハンドラーの対応 | `backend/src/server/route_registration.go` |
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
-| ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
-| DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
+| ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`(作成・取得)と、操作ごとの `deploy_config_service.go`、`deploy_scale_service.go`、`deploy_deletion_service.go`、`temporal_*_starter.go`) |
+| DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`。deploy は操作ごとに分かれている: `deploy_repository.go`(作成・取得)、`deploy_config_repository.go`、`deploy_scale_repository.go`、`deploy_deletion_repository.go`、`deploy_crash_loop_repository.go`) |
 | Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go`、`crash_loop.go` |
 | Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go` |
 | Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`、`crash_loop_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント、ラベル名 | `shared/k8s/` |
-| watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/deploy_observation_repository.go`、`pod_event_diff.go` |
+| watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/`(`deploy_observation_repository.go`、`deploy_pod_observation_repository.go`、`crash_loop_candidate_repository.go`、`pod_event_retention_repository.go`)、`pod_event_diff.go` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |
+
+### ファイルの分け方
+
+大きくなりすぎないよう、deploy に関するファイルは、**層ごとに、操作(役割)ごとのファイル**に分けてある。同じ型のメソッドが、複数のファイルにまたがる(Go では、同じパッケージなら、問題ない)。
+
+| 層 | 作成・取得(核) | 操作ごと |
+|---|---|---|
+| controller | `deploy_controller.go`、`deploy_response.go`(レスポンスの形) | `deploy_config_controller.go`、`deploy_scale_controller.go`、`deploy_deletion_controller.go` |
+| service | `deploy_service.go`(interface、作成・取得・Pod の一覧) | `deploy_config_service.go`、`deploy_scale_service.go`、`deploy_deletion_service.go` |
+| repository | `deploy_repository.go`(作成・取得・状態の更新・行のロック) | `deploy_config_repository.go`、`deploy_scale_repository.go`、`deploy_deletion_repository.go`、`deploy_crash_loop_repository.go` |
+| activity | `create_deploy_activities.go` | `deployment_ready_activities.go`(起動待ち)、`deployment_operator.go`(k8s を操作する interface)、`logging_deployment_operator.go` |
+| watcher | `observer.go`(Run と準備) | `observer_sync.go`(1つずつ DB に反映)、`observer_workers.go`(キューの処理と心拍) |
+
+テストも、同じ単位のファイルに分けてある(`xxx_test.go`)。
