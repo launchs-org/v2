@@ -152,6 +152,7 @@
 - Note: deploy の status が "applying" の間は 409 を返す(進行中の apply を中断して削除することはしない)
 - Note: 配下の service も連鎖して削除される(service は "deleting" になる)。ボリュームのマウント設定も削除されるが、マウントされていた volume 自体は残る(volume は project に属するため)
 - Note: deploy のログも deploy の削除と一緒に削除される
+- Note: 起動中("pending")の間も 409 を返す。削除に失敗した("delete_failed")deploy は、もう一度削除を呼んでやり直せる(リトライの期限は 15 分で、超えると "delete_failed" になる)
 
 ### デプロイ ログ取得
 - Get: /deploy/:deployId/logs
