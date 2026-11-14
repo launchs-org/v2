@@ -279,8 +279,7 @@ func lockEditableDeploy(transaction *gorm.DB, userID string, deployID string) (m
 		return model.Deploy{}, lockError
 	}
 	// 反映中や削除の途中は、起動設定を変えられない。
-	switch deploy.Status {
-	case model.DeployStatusApplying, model.DeployStatusDeleting, model.DeployStatusDeleteFailed:
+	if !deploy.CanEditSettings() {
 		return model.Deploy{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、起動設定を操作できません")
 	}
 	return deploy, nil

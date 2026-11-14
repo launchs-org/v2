@@ -43,8 +43,7 @@ func lockDeployAndActiveService(transaction *gorm.DB, userID string, deployID st
 		return model.Deploy{}, model.Service{}, apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", deployError)
 	}
 	// 反映中や削除の途中は、操作できない(排他制御)。
-	switch deploy.Status {
-	case model.DeployStatusApplying, model.DeployStatusDeleting, model.DeployStatusDeleteFailed:
+	if !deploy.CanEditSettings() {
 		return model.Deploy{}, model.Service{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、service のポートを操作できません")
 	}
 	// service を、ロックして読む。
@@ -58,7 +57,7 @@ func lockDeployAndActiveService(transaction *gorm.DB, userID string, deployID st
 		return model.Deploy{}, model.Service{}, apperror.Wrap(apperror.KindInternal, "service を取得できませんでした", serviceError)
 	}
 	// active でない service は、ポートを変えられない。
-	if service.Status != model.ServiceStatusActive {
+	if !service.CanChangePorts() {
 		return model.Deploy{}, model.Service{}, apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、ポートを操作できません")
 	}
 	return deploy, service, nil
@@ -166,7 +165,7 @@ func (serviceRepository *ServiceRepository) BeginPortsApply(requestContext conte
 			return lockError
 		}
 		// 作成の起動中(pending)の deploy は、作成の処理が状態を決めるので、反映は始められない。
-		if deploy.Status == model.DeployStatusPending {
+		if deploy.IsStarting() {
 			return apperror.New(apperror.KindConflict, "deploy は起動中のため、ポートを適用できません")
 		}
 		// 適用する値が無いときは、反映する意味が無い。
@@ -261,7 +260,7 @@ func (serviceRepository *ServiceRepository) CommitPortsApply(requestContext cont
 		if deployError != nil {
 			return deployError
 		}
-		if deploy.Status != model.DeployStatusApplying {
+		if !deploy.IsApplying() {
 			return nil
 		}
 
