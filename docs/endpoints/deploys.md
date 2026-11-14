@@ -234,6 +234,7 @@
 ```
 - Note: env/command/args は個別key単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)
 - Note: この時点ではまだコンテナには反映されない。pending_env/pending_command/pending_args として保存され、/apply を呼ぶまで env/command/args(現在反映されている値)は変わらない
+- Note: 送った内容が現在の env/command/args と同じ(変更が無い)場合は、pending_* を保存せず null にする(以前の pending_* も消える)。そのため、同じ設定を apply し直すことはできない(409)
 - Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はconfigに対する変更・apply・discardを排他制御する)。"deleting" の間も 409 を返す
 
 ### デプロイ 起動設定 適用
@@ -247,7 +248,7 @@
 {}
 ```
 - Note: pending_env/pending_command/pending_args の内容を env/command/args に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ env/command/args は更新されていない。pending_env/pending_command/pending_args が全て null(何も更新していない)の場合は 409 を返す
-- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_env/pending_command/pending_args はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_* の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて env/command/args を pending_* の内容に更新し、pending_env/pending_command/pending_args は null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる(env/command/args の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_env/pending_command/pending_args はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_* の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果が確定した時点で、成功なら env/command/args を pending_* の内容に更新して pending_* を null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる。env/command/args は常に「いま動いている値」を表すので、成功したときだけ pending_* の内容に更新し、pending_* を null に戻す。失敗したときは、Kubernetes の Deployment を元の値(env/command/args)に戻した上で、env/command/args も pending_* も変えず(試して失敗した値は pending_* に残る)、status だけを "failed" にする。利用者は pending_* を直して PUT し直すか、そのまま再度 apply するか、discard で破棄できる([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
 - Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)。"deleting" の間も 409 を返す
 - Note: deploy の replicas が 0(status が "scaled_zero")のときは、再起動する Pod が無いのですぐに完了し、成功しても status は "active" ではなく "scaled_zero" に戻る。
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)

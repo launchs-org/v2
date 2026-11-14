@@ -20,6 +20,7 @@ type DeployUseCase interface {
 	Get(requestContext context.Context, userID string, deployID string) (model.Deploy, error)
 	UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error
 	DiscardConfig(requestContext context.Context, userID string, deployID string) error
+	ApplyConfig(requestContext context.Context, userID string, deployID string) error
 }
 
 // UpdateDeployConfigRequest は、起動設定の更新のリクエストのボディ。3つとも、常に全件を送って置き換える。
@@ -307,6 +308,29 @@ func (deployController *DeployController) DiscardConfig(echoContext *echo.Contex
 	// 破棄を、ビジネスルールに任せる。
 	if discardError := deployController.deployUseCase.DiscardConfig(echoContext.Request().Context(), userID, echoContext.Param("deployId")); discardError != nil {
 		return discardError
+	}
+	// 空のオブジェクトを返す。
+	return echoContext.JSON(http.StatusOK, struct{}{})
+}
+
+// ApplyConfig は、まだ適用していない起動設定の反映を開始する(POST /deploy/:deployId/config/apply)。
+//
+// 反映の完了は待たず、すぐに応答する。結果は、deploy の status(applying → active か failed)で確かめる。
+//
+// 引数:
+//   - echoContext: Echo のリクエストのコンテキスト。
+//
+// 戻り値:
+//   - 無い・他人のものなら not_found、適用する値が無い・反映中・起動中・削除の途中なら conflict、未認証なら unauthorized。
+func (deployController *DeployController) ApplyConfig(echoContext *echo.Context) error {
+	// 認証したユーザーの ID を取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+	// 反映の開始を、ビジネスルールに任せる。
+	if applyError := deployController.deployUseCase.ApplyConfig(echoContext.Request().Context(), userID, echoContext.Param("deployId")); applyError != nil {
+		return applyError
 	}
 	// 空のオブジェクトを返す。
 	return echoContext.JSON(http.StatusOK, struct{}{})
