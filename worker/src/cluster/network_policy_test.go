@@ -30,7 +30,7 @@ func getIsolationPolicy(clientset *fake.Clientset, namespaceName string) (*netwo
 // TestBuildIsolationPolicy は、隔離の NetworkPolicy が、入る通信・出ていく通信の規則を、期待どおりに持つことを確認する。
 func TestBuildIsolationPolicy(testingT *testing.T) {
 	testingT.Run("全ての Pod に、入る通信と出ていく通信の両方を適用する", func(subTest *testing.T) {
-		policy := buildIsolationPolicy(validNamespaceName, "")
+		policy := buildIsolationPolicy(validNamespaceName, "", nil)
 		if policy.Name != isolationPolicyName || policy.Namespace != validNamespaceName || len(policy.Spec.PodSelector.MatchLabels) != 0 || len(policy.Spec.PodSelector.MatchExpressions) != 0 {
 			subTest.Errorf("名前と、全ての Pod を選ぶ空のセレクターのはず: %+v", policy)
 		}
@@ -43,7 +43,7 @@ func TestBuildIsolationPolicy(testingT *testing.T) {
 	})
 
 	testingT.Run("入る通信は、同じ namespace だけ(外の中継の namespace が無ければ)", func(subTest *testing.T) {
-		policy := buildIsolationPolicy(validNamespaceName, "")
+		policy := buildIsolationPolicy(validNamespaceName, "", nil)
 		if len(policy.Spec.Ingress) != 1 || len(policy.Spec.Ingress[0].From) != 1 {
 			subTest.Fatalf("規則は1つで、相手も1つのはず: %+v", policy.Spec.Ingress)
 		}
@@ -54,7 +54,7 @@ func TestBuildIsolationPolicy(testingT *testing.T) {
 	})
 
 	testingT.Run("外の中継の namespace(Traefik など)を指定すると、そこからの通信も許可する", func(subTest *testing.T) {
-		policy := buildIsolationPolicy(validNamespaceName, "traefik")
+		policy := buildIsolationPolicy(validNamespaceName, "traefik", nil)
 		peers := policy.Spec.Ingress[0].From
 		if len(peers) != 2 || peers[1].NamespaceSelector == nil || peers[1].NamespaceSelector.MatchLabels[namespaceNameLabel] != "traefik" || peers[1].PodSelector != nil {
 			subTest.Errorf("traefik の namespace 全体を、2つ目の相手に足すはず: %+v", peers)
@@ -62,7 +62,7 @@ func TestBuildIsolationPolicy(testingT *testing.T) {
 	})
 
 	testingT.Run("出ていく通信は、同じ namespace・DNS(UDP と TCP の 53)・インターネットだけ", func(subTest *testing.T) {
-		policy := buildIsolationPolicy(validNamespaceName, "")
+		policy := buildIsolationPolicy(validNamespaceName, "", nil)
 		if len(policy.Spec.Egress) != 3 {
 			subTest.Fatalf("規則は3つのはず: %d", len(policy.Spec.Egress))
 		}
@@ -95,10 +95,24 @@ func TestBuildIsolationPolicy(testingT *testing.T) {
 		}
 	})
 
+	testingT.Run("除くネットワークを指定すると、既定ではなく、その一覧になる", func(subTest *testing.T) {
+		policy := buildIsolationPolicy(validNamespaceName, "", []string{"192.168.0.0/16", "203.0.113.0/24"})
+		except := policy.Spec.Egress[2].To[0].IPBlock.Except
+		if len(except) != 2 || except[0] != "192.168.0.0/16" || except[1] != "203.0.113.0/24" {
+			subTest.Errorf("指定した2つだけのはず: %v", except)
+		}
+	})
+	testingT.Run("除くネットワークが空(nil)なら、既定になる(隔離が外れた状態にならない)", func(subTest *testing.T) {
+		for _, empty := range [][]string{nil, {}} {
+			if except := buildIsolationPolicy(validNamespaceName, "", empty).Spec.Egress[2].To[0].IPBlock.Except; len(except) != 5 {
+				subTest.Errorf("既定の5つのはず: %v", except)
+			}
+		}
+	})
 	testingT.Run("呼ぶたびに別のオブジェクトで、除外の一覧を共有しない(書き換えの影響が出ない)", func(subTest *testing.T) {
-		first := buildIsolationPolicy(validNamespaceName, "")
+		first := buildIsolationPolicy(validNamespaceName, "", nil)
 		first.Spec.Egress[2].To[0].IPBlock.Except[0] = "changed"
-		if second := buildIsolationPolicy(validNamespaceName, ""); second.Spec.Egress[2].To[0].IPBlock.Except[0] != "10.0.0.0/8" {
+		if second := buildIsolationPolicy(validNamespaceName, "", nil); second.Spec.Egress[2].To[0].IPBlock.Except[0] != "10.0.0.0/8" {
 			subTest.Errorf("共有してはいけない: %v", second.Spec.Egress[2].To[0].IPBlock.Except)
 		}
 	})
@@ -111,7 +125,7 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 
 	testingT.Run("新しい namespace には、namespace と NetworkPolicy の両方が作られる", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, "", "").EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
 			subTest.Fatalf("成功するはず: %v", ensureError)
 		}
 		if _, getError := getIsolationPolicy(fakeClientset, validNamespaceName); getError != nil {
@@ -120,7 +134,7 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 	})
 	testingT.Run("繰り返し呼んでも、成功し、NetworkPolicy は1つのまま", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		operator := NewKubernetesDeploymentOperator(fakeClientset, "", "")
+		operator := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{})
 		for attempt := 0; attempt < 3; attempt++ {
 			if ensureError := operator.EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
 				subTest.Fatalf("%d回目も成功するはず: %v", attempt+1, ensureError)
@@ -134,7 +148,7 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 	testingT.Run("NetworkPolicy が無かった既存の namespace にも、次の呼び出しで、NetworkPolicy が作られる", func(subTest *testing.T) {
 		existing := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: validNamespaceName}}
 		fakeClientset := fake.NewSimpleClientset(existing)
-		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, "", "").EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
 			subTest.Fatalf("成功するはず: %v", ensureError)
 		}
 		if _, getError := getIsolationPolicy(fakeClientset, validNamespaceName); getError != nil {
@@ -143,7 +157,7 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 	})
 	testingT.Run("手で書き換えられた NetworkPolicy は、期待する内容に戻る", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		operator := NewKubernetesDeploymentOperator(fakeClientset, "", "")
+		operator := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{})
 		_ = operator.EnsureNamespace(ctx, validNamespaceName)
 		// 全て許可する規則に書き換える(隔離が外れた状態)。
 		tampered, _ := getIsolationPolicy(fakeClientset, validNamespaceName)
@@ -158,15 +172,32 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 			subTest.Errorf("3つの規則に戻るはず: %+v", restored.Spec.Egress)
 		}
 	})
+	testingT.Run("除くネットワークの設定を変えると、次の呼び出しで、NetworkPolicy に反映される", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		_ = NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, validNamespaceName)
+		before, _ := getIsolationPolicy(fakeClientset, validNamespaceName)
+		if len(before.Spec.Egress[2].To[0].IPBlock.Except) != 5 {
+			subTest.Fatalf("最初は、既定の5つのはず")
+		}
+
+		custom := OperatorSettings{BlockedNetworks: []string{"192.168.0.0/16"}}
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, custom).EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
+			subTest.Fatalf("成功するはず: %v", ensureError)
+		}
+		after, _ := getIsolationPolicy(fakeClientset, validNamespaceName)
+		if except := after.Spec.Egress[2].To[0].IPBlock.Except; len(except) != 1 || except[0] != "192.168.0.0/16" {
+			subTest.Errorf("1つに変わるはず: %v", except)
+		}
+	})
 	testingT.Run("外の中継の namespace の設定を変えると、次の呼び出しで、NetworkPolicy に反映される", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		_ = NewKubernetesDeploymentOperator(fakeClientset, "", "").EnsureNamespace(ctx, validNamespaceName)
+		_ = NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, validNamespaceName)
 		before, _ := getIsolationPolicy(fakeClientset, validNamespaceName)
 		if len(before.Spec.Ingress[0].From) != 1 {
 			subTest.Fatalf("最初は、同じ namespace だけのはず")
 		}
 
-		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, "", "traefik").EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{IngressNamespace: "traefik"}).EnsureNamespace(ctx, validNamespaceName); ensureError != nil {
 			subTest.Fatalf("成功するはず: %v", ensureError)
 		}
 		after, _ := getIsolationPolicy(fakeClientset, validNamespaceName)
@@ -179,13 +210,13 @@ func TestEnsureNamespaceAppliesIsolationPolicy(testingT *testing.T) {
 		fakeClientset.PrependReactor("create", "networkpolicies", func(clienttesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("api down")
 		})
-		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, "", "").EnsureNamespace(ctx, validNamespaceName); ensureError == nil {
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, validNamespaceName); ensureError == nil {
 			subTest.Errorf("エラーのはず")
 		}
 	})
 	testingT.Run("プロジェクトの形でない namespace には、NetworkPolicy も作らず、k8s に触れない", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, "", "").EnsureNamespace(ctx, "kube-system"); ensureError == nil || len(fakeClientset.Actions()) != 0 {
+		if ensureError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).EnsureNamespace(ctx, "kube-system"); ensureError == nil || len(fakeClientset.Actions()) != 0 {
 			subTest.Errorf("拒否され、k8s は呼ばれないはず: %v %v", ensureError, fakeClientset.Actions())
 		}
 	})

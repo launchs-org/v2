@@ -44,6 +44,10 @@ type WorkerConfig struct {
 	// プロジェクトの namespace の隔離の NetworkPolicy で、ここからの通信を許可する。空なら、許可しない。
 	IngressNamespace string
 
+	// BlockedNetworks は、プロジェクトの namespace から、インターネットへの出口の許可から除く、内部のネットワーク(CIDR)
+	// (環境変数 EGRESS_BLOCKED_NETWORKS。カンマ区切り)。省略すると、既定(k8s.DefaultBlockedNetworks)。
+	BlockedNetworks []string
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -55,6 +59,8 @@ type WorkerConfig struct {
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
 //   - RUNTIME_CLASS: deploy の Pod に指定する RuntimeClass。省略すると、指定しない(クラスタの既定)。
+//   - EGRESS_BLOCKED_NETWORKS: プロジェクトの namespace から、出ていく通信を許可しない内部のネットワーク(CIDR のカンマ区切り。IPv4)。
+//     省略すると、既定(10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10)。何も除かない設定は、できない。
 //   - INGRESS_NAMESPACE: 外からの通信を中継する namespace(Traefik など)。省略すると、その namespace からの通信は許可しない。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
@@ -75,6 +81,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
 	runtimeClass := reader.OptionalString("RUNTIME_CLASS", "")
 	ingressNamespace := reader.OptionalString("INGRESS_NAMESPACE", "")
+	blockedNetworksText := reader.OptionalString("EGRESS_BLOCKED_NETWORKS", "")
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -84,6 +91,12 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	logLevel, levelError := logger.ParseLevel(logLevelText)
 	if levelError != nil {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
+	}
+
+	// 除く内部のネットワークを検査し、問題があれば、環境変数の名前を付けて加える。
+	blockedNetworks, blockedError := k8s.ParseBlockedNetworks(blockedNetworksText)
+	if blockedError != nil {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 EGRESS_BLOCKED_NETWORKS: %w", blockedError))
 	}
 
 	// k8s への接続の設定の値を検査し、問題があれば加える。
@@ -103,6 +116,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		LogLevel:          logLevel,
 		RuntimeClass:      runtimeClass,
 		IngressNamespace:  ingressNamespace,
+		BlockedNetworks:   blockedNetworks,
 		Kubernetes:        kubernetesSettings,
 	}, nil
 }

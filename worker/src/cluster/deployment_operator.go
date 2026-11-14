@@ -43,20 +43,37 @@ type KubernetesDeploymentOperator struct {
 	runtimeClassName string
 	// ingressNamespace は、外からの通信を中継する namespace(Traefik など)。隔離の NetworkPolicy で、ここからの通信を許可する。空なら許可しない。
 	ingressNamespace string
+	// blockedNetworks は、隔離の NetworkPolicy で、インターネットへの出口の許可から除く、内部のネットワーク(CIDR)。
+	blockedNetworks []string
+}
+
+// OperatorSettings は、KubernetesDeploymentOperator の設定。
+type OperatorSettings struct {
+	// RuntimeClass は、Pod に指定する RuntimeClass(環境変数 RUNTIME_CLASS)。空なら指定しない。
+	RuntimeClass string
+
+	// IngressNamespace は、外からの通信を中継する namespace(環境変数 INGRESS_NAMESPACE。Traefik など)。空なら許可しない。
+	IngressNamespace string
+
+	// BlockedNetworks は、インターネットへの出口の許可から除く、内部のネットワーク(環境変数 EGRESS_BLOCKED_NETWORKS)。
+	// 空なら、既定(k8s.DefaultBlockedNetworks)。
+	BlockedNetworks []string
 }
 
 // NewKubernetesDeploymentOperator は、KubernetesDeploymentOperator を作る。
 //
 // 引数:
 //   - clientset: k8s のクライアント。
-//   - runtimeClassName: Pod に指定する RuntimeClass(環境変数 RUNTIME_CLASS)。空なら指定しない。
-//   - ingressNamespace: 外からの通信を中継する namespace(環境変数 INGRESS_NAMESPACE。Traefik など)。空なら許可しない。
+//   - settings: 設定(RuntimeClass、外からの通信を中継する namespace、除くネットワーク)。
 //
 // 戻り値:
 //   - 作成した KubernetesDeploymentOperator。
-func NewKubernetesDeploymentOperator(clientset kubernetes.Interface, runtimeClassName string, ingressNamespace string) *KubernetesDeploymentOperator {
+func NewKubernetesDeploymentOperator(clientset kubernetes.Interface, settings OperatorSettings) *KubernetesDeploymentOperator {
 	// 依存するものを持たせて返す。
-	return &KubernetesDeploymentOperator{clientset: clientset, runtimeClassName: runtimeClassName, ingressNamespace: ingressNamespace}
+	return &KubernetesDeploymentOperator{
+		clientset: clientset, runtimeClassName: settings.RuntimeClass,
+		ingressNamespace: settings.IngressNamespace, blockedNetworks: settings.BlockedNetworks,
+	}
 }
 
 // EnsureNamespace は、namespace が無ければ作り、隔離の NetworkPolicy を適用する。すでにあれば、足りないものだけを揃える(冪等)。
