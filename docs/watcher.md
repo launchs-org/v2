@@ -6,7 +6,7 @@ k8s の Pod と Deployment の変化を受け取り、**実際の状態**を DB 
 
 1. **実際の k8s の状態(観測値)を DB に書くのは、watcher だけ。** バックエンドとワーカーは、観測値のテーブルに書かない。
 2. watcher は、**同時に1つだけ**動く。複数起動しても、PostgreSQL の advisory lock(`shared/leader`)で、リーダーになった1つだけが観測する。リーダーが止まる(プロセスの終了、DB の接続の切断)と、ロックが外れ、待っていた別の watcher が引き継ぐ。Raft は使わない(3台以上のクラスターと永続化が要るため、重い)。
-3. 起動したとき(引き継いだときも同じ)は、**先に全件を読み込み、DB との差分を反映**してから、イベントの受け取り(watch)に入る。止まっていた間の変化は、この差分で拾う。
+3. **k8s が正で、DB は k8s の写し。** 起動したとき(引き継いだときも同じ)は、先に k8s の全件を読み込み、**DB を k8s の値で上書き**する(DB の古い値は使わない)。DB にあって k8s に無いものは削除する。そのあと、イベントの受け取り(watch)に入る。
 4. watcher は、k8s を**読み取るだけ**。必要な権限は、全 namespace の `pods` と `deployments` の `get` / `list` / `watch` だけ(本番の ServiceAccount は、この ClusterRole にする)。
 
 ## 観測するもの
@@ -42,12 +42,15 @@ CrashLoopBackOff の間は、再起動のたびに、`waiting`、`ready`、`rest
 watcher/src/main.go
   └─ leader.Elector.Run            advisory lock を取れたものだけが、次へ進む(取れなければ待つ)
        └─ observer.Observer.Run
-            1. informer を始める(deploy-id のラベルがある Pod と Deployment を、全 namespace で)
-            2. 全件の読み込みを待つ
-            3. DB にあって k8s に無い Pod・観測値を削除する(引き継ぎの片付け)
-            4. イベントを、作業キューに入れて、順に DB へ反映する
-                 (失敗したものは、間隔を空けてやり直す。同じものは1つにまとまる)
+            1. 準備       informer(k8s の写し)と作業キューを作る
+                          対象: deploy-id のラベルがある Pod と Deployment(全 namespace)
+            2. 全件の読み込み   いまの k8s の全件を読み込む。読み込んだものは、「追加」のイベントとしてキューに入る
+            3. 後片付け   DB にあって k8s に無い Pod・観測値を削除する(止まっていた間に消えたもの)
+            4. 反映       キューのものを順に DB へ反映する(DB を k8s の値で上書き)。以降の変化も同じ道
+                          (失敗したものは、間隔を空けてやり直す。同じものは1つにまとまる)
 ```
+
+状態の上書きに、DB の前の値は使わない。前の値を使うのは、**イベントのログを作るときだけ**(前の状態との差から、ready や restarted を決める)。
 
 - 状態の組み立ては `observer.BuildPodSnapshot` / `BuildDeploymentSnapshot`(k8s の型から DB の行を作る、副作用の無い関数)。
 - DB の読み書きは `repository.DeployObservationRepository`。Pod は、行をロックして前の状態を読み、イベントを同じトランザクションで追記する。
