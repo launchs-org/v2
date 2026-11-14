@@ -67,9 +67,11 @@ watcher は、Pod の保存のたびに、`deploy_pods.unhealthy_since`(安定�
 次を **全て** 満たす deploy を、1 分ごとに探す(`crashloop.Monitor`)。
 - `status` が `active` で、希望するレプリカ数が 1 以上(作成中・反映中・削除中・すでに止まっているものには、触らない。作成と反映には、300 秒の期限がある)
 - 終了処理中でない Pod の中に、**安定して動いている Pod が 1 つも無い**(3 台のうち 1 台だけ不調で、他が正常なら、止めない)
-- Pod のどれかが、次のどちらかを満たす
-  - 安定して動いていない状態が **30 分以上**続いている(`CRASH_LOOP_UNHEALTHY_FOR`)
-  - コンテナの再起動が **20 回以上**で、安定していない状態が **10 分以上**続いている(`CRASH_LOOP_MAX_RESTARTS`、`CRASH_LOOP_RESTART_MIN_UNHEALTHY`)。`restart_count` は累積なので、何日も安定して動いてきた Pod が、一度クラッシュしただけでは、止まらないようにする
+- Pod のどれかが、**安定して動いていない状態が 10 分以上**続いている(`CRASH_LOOP_UNHEALTHY_FOR`)
+
+**猶予を 10 分にしている理由**: CrashLoopBackOff は、最初の数回のクラッシュ(約 1 分)で、もう出る。出た瞬間に止めると、依存先(DB など)が短く止まっただけで、全部の deploy が `failed` になり、利用者が手で戻すことになる。k8s の再起動の間隔は 10 秒から最大 5 分まで延びる(10 分で、およそ 6〜7 回の再起動)ので、短い障害は乗り越え、本当に壊れているものだけを止める。
+
+**再起動の回数では止めない**: `restart_count` は累積の値で、何日も安定して動いてきた Pod が、一度クラッシュしただけで止まってしまう。また、再起動の間隔が延びるため、10 回に達するのは約 20 分後で、時間の条件のほうが、いつも先に満たされる。
 
 ### 止める処理(`StopCrashLoopWorkflow`。ワーカーが実行)
 ```
@@ -117,9 +119,7 @@ watcher/src/main.go
 | `DATABASE_URL` | app データベース | 必須 |
 | `KUBERNETES_ACCESS`、`KUBECONFIG` | k8s への接続 | 必須(`none` なら観測しない) |
 | `TEMPORAL_ADDRESS`、`TEMPORAL_NAMESPACE` | 止める Workflow の開始に使う | `temporal:7233`、`default` |
-| `CRASH_LOOP_UNHEALTHY_FOR` | 安定していない状態が、これだけ続いたら止める | `30m` |
-| `CRASH_LOOP_MAX_RESTARTS` | 再起動がこの回数に達し、不健全が続いたら止める | `20` |
-| `CRASH_LOOP_RESTART_MIN_UNHEALTHY` | 再起動の回数で止めるときの、最低限の不健全の長さ | `10m` |
+| `CRASH_LOOP_UNHEALTHY_FOR` | 安定していない状態が、これだけ続いたら止める | `10m` |
 
 `CRASH_LOOP_UNHEALTHY_FOR` は、安定の判定(5 分)より長くする(短いと、起動したばかりの正常な Pod を止めてしまう)。0 以下の値は、全ての deploy を止めてしまうので、起動時に拒否する。
 

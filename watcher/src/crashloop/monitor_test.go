@@ -70,7 +70,7 @@ func TestNewStopInput(testingT *testing.T) {
 // TestMonitorRun は、始めに1回、間隔ごとに、候補を探して Workflow を開始し、渡された上限を使い、
 // 開始に失敗した deploy があっても他の deploy は続け、探すのに失敗しても止まらず、止める合図で戻ることを確認する。
 func TestMonitorRun(testingT *testing.T) {
-	limits := repository.CrashLoopLimits{UnhealthyFor: 30 * time.Minute, MaxRestarts: 20, RestartMinUnhealthy: 10 * time.Minute}
+	limits := repository.CrashLoopLimits{UnhealthyFor: 10 * time.Minute}
 	run := func(subTest *testing.T, fakeStore *fakeCandidateStore, starter *fakeStarter, rounds int) {
 		monitor := NewMonitor(fakeStore, starter, limits, 10*time.Millisecond, logger.New(&bytes.Buffer{}, "test", slog.LevelInfo))
 		ctx, cancel := context.WithCancel(context.Background())

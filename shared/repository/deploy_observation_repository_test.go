@@ -500,7 +500,7 @@ func TestDeployObservationRepositoryApplyPodTracksUnhealthySince(testingT *testi
 // TestDeployObservationRepositoryListCrashLoopCandidates は、止めるべき deploy だけが候補になること
 // (時間・再起動の回数・状態・他に正常な Pod があるか)を、境界を含めて確認する。
 func TestDeployObservationRepositoryListCrashLoopCandidates(testingT *testing.T) {
-	limits := CrashLoopLimits{UnhealthyFor: 30 * time.Minute, MaxRestarts: 20, RestartMinUnhealthy: 10 * time.Minute}
+	limits := CrashLoopLimits{UnhealthyFor: 10 * time.Minute}
 	now := time.Now()
 	// 1つの deploy に、Pod を1つ(または複数)入れて、候補になるかを確かめる。
 	type podSpec struct {
@@ -518,24 +518,22 @@ func TestDeployObservationRepositoryListCrashLoopCandidates(testingT *testing.T)
 		pods         []podSpec
 		expected     bool
 	}{
-		{name: "30分以上、安定していなければ候補", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 31 * time.Minute, waitingReason: "CrashLoopBackOff"}}, expected: true},
-		{name: "29分なら、まだ候補ではない", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 29 * time.Minute}}, expected: false},
-		{name: "再起動が20回で、10分以上不健全なら候補(30分未満でも)", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 20, unhealthyAgo: 11 * time.Minute}}, expected: true},
-		{name: "再起動が19回なら、30分未満は候補ではない", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 19, unhealthyAgo: 11 * time.Minute}}, expected: false},
-		{name: "再起動が多くても、不健全になって10分未満なら候補ではない(一度のクラッシュで止めない)", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 50, unhealthyAgo: 5 * time.Minute}}, expected: false},
-		{name: "再起動が多くても、安定して動いている(不健全の印が NULL)なら候補ではない", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 50, ready: true, startedAgo: time.Hour}}, expected: false},
+		{name: "10分以上、安定していなければ候補", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 11 * time.Minute, waitingReason: "CrashLoopBackOff"}}, expected: true},
+		{name: "9分なら、まだ候補ではない(一時的な障害は、k8s のバックオフに乗り越えさせる)", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 9 * time.Minute}}, expected: false},
+		{name: "再起動が100回でも、不健全が3分なら候補ではない(時間だけで判断する。一度のクラッシュで止めない)", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 100, unhealthyAgo: 3 * time.Minute}}, expected: false},
+		{name: "再起動が多くても、安定して動いている(不健全の印が NULL)なら候補ではない(再起動の回数では止めない)", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 50, ready: true, startedAgo: time.Hour}}, expected: false},
 		{name: "不健全の印が古く残っていても、いま安定していれば候補ではない", deployStatus: "active", replicas: 1, pods: []podSpec{{restarts: 50, unhealthyAgo: 3 * time.Hour, ready: true, startedAgo: 10 * time.Minute}}, expected: false},
-		{name: "一瞬 Ready でも、起動から日が浅ければ(クラッシュの繰り返し)候補", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute, ready: true, startedAgo: 3 * time.Second}}, expected: true},
+		{name: "一瞬 Ready でも、起動から日が浅ければ(クラッシュの繰り返し)候補", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute, ready: true, startedAgo: 3 * time.Second}}, expected: true},
 		{name: "他に、安定して動いている Pod があれば、不調な Pod があっても候補ではない", deployStatus: "active", replicas: 2,
-			pods: []podSpec{{unhealthyAgo: 40 * time.Minute, waitingReason: "Unschedulable"}, {ready: true, startedAgo: time.Hour}}, expected: false},
-		{name: "終了処理中の Pod は数えない(ローリング更新で消える古い Pod)", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute, podStatus: "terminating"}}, expected: false},
+			pods: []podSpec{{unhealthyAgo: 15 * time.Minute, waitingReason: "Unschedulable"}, {ready: true, startedAgo: time.Hour}}, expected: false},
+		{name: "終了処理中の Pod は数えない(ローリング更新で消える古い Pod)", deployStatus: "active", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute, podStatus: "terminating"}}, expected: false},
 		{name: "終了処理中の Pod が安定していても、それでは「正常な Pod がある」とはみなさない", deployStatus: "active", replicas: 1,
-			pods: []podSpec{{unhealthyAgo: 40 * time.Minute}, {ready: true, startedAgo: time.Hour, podStatus: "terminating"}}, expected: true},
-		{name: "active でなければ候補ではない(反映中)", deployStatus: "applying", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute}}, expected: false},
-		{name: "active でなければ候補ではない(起動中)", deployStatus: "pending", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute}}, expected: false},
-		{name: "active でなければ候補ではない(すでに failed)", deployStatus: "failed", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute}}, expected: false},
-		{name: "active でなければ候補ではない(削除中)", deployStatus: "deleting", replicas: 1, pods: []podSpec{{unhealthyAgo: 40 * time.Minute}}, expected: false},
-		{name: "希望するレプリカが 0 なら候補ではない", deployStatus: "active", replicas: 0, pods: []podSpec{{unhealthyAgo: 40 * time.Minute}}, expected: false},
+			pods: []podSpec{{unhealthyAgo: 15 * time.Minute}, {ready: true, startedAgo: time.Hour, podStatus: "terminating"}}, expected: true},
+		{name: "active でなければ候補ではない(反映中)", deployStatus: "applying", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute}}, expected: false},
+		{name: "active でなければ候補ではない(起動中)", deployStatus: "pending", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute}}, expected: false},
+		{name: "active でなければ候補ではない(すでに failed)", deployStatus: "failed", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute}}, expected: false},
+		{name: "active でなければ候補ではない(削除中)", deployStatus: "deleting", replicas: 1, pods: []podSpec{{unhealthyAgo: 15 * time.Minute}}, expected: false},
+		{name: "希望するレプリカが 0 なら候補ではない", deployStatus: "active", replicas: 0, pods: []podSpec{{unhealthyAgo: 15 * time.Minute}}, expected: false},
 	}
 	for _, testCase := range testCases {
 		testingT.Run(testCase.name, func(subTest *testing.T) {
@@ -575,7 +573,7 @@ func TestDeployObservationRepositoryListCrashLoopCandidates(testingT *testing.T)
 
 	testingT.Run("複数の Pod が不健全なら、最も長く不健全な Pod を根拠に、deploy ごとに1件だけ返す", func(subTest *testing.T) {
 		database, observationRepository := newObservationTestEnvironment(subTest)
-		for index, minutes := range []int{35, 90, 50} {
+		for index, minutes := range []int{15, 90, 25} {
 			pod := newTestPod(now)
 			pod.PodUID, pod.PodName, pod.Status = fmt.Sprintf("uid-%d", index), fmt.Sprintf("pod-%d", index), model.PodStatusRunning
 			unhealthySince := now.Add(-time.Duration(minutes) * time.Minute)
@@ -591,7 +589,7 @@ func TestDeployObservationRepositoryListCrashLoopCandidates(testingT *testing.T)
 	})
 	testingT.Run("不正な上限は拒否する(全ての deploy を止めてしまうため)", func(subTest *testing.T) {
 		_, observationRepository := newObservationTestEnvironment(subTest)
-		for _, invalid := range []CrashLoopLimits{{}, {UnhealthyFor: time.Minute, MaxRestarts: 0, RestartMinUnhealthy: time.Minute}, {UnhealthyFor: 0, MaxRestarts: 1, RestartMinUnhealthy: time.Minute}} {
+		for _, invalid := range []CrashLoopLimits{{}, {UnhealthyFor: 0}, {UnhealthyFor: -time.Minute}} {
 			if _, listError := observationRepository.ListCrashLoopCandidates(context.Background(), invalid); listError == nil {
 				subTest.Errorf("拒否されるはず: %+v", invalid)
 			}

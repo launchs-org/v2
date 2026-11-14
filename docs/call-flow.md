@@ -216,7 +216,7 @@ ApplyDeployment / ApplyPendingConfig / ApplyScale   Deployment を作る・更�
 ```
 watcher(リーダーだけ)
   ├─ Pod の保存のたびに、unhealthy_since(安定して動いていない状態が始まった時刻)を更新
-  └─ crashloop.Monitor(1分ごと)  止めるべき deploy を探す(安定した Pod が無く、30分(または再起動20回かつ10分)以上不健全)
+  └─ crashloop.Monitor(1分ごと)  止めるべき deploy を探す(安定した Pod が無く、10分以上不健全)
        → Temporal に StopCrashLoopWorkflow の開始を頼む
   ↓ worker が実行
   StopCrashLoopWorkflow

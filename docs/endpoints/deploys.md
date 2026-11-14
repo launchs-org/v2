@@ -106,7 +106,7 @@
 }
 ```
 - Note: status は "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" のいずれか。"停止"という状態はなく、replicas を 0 にスケールすることで表現する
-- Note: "active" の deploy でも、Pod が異常な状態(CrashLoopBackOff など)のまま、安定して動かない状態が上限(30分。または再起動 20 回かつ 10 分)を超えて続くと、自動で止まる。k8s のレプリカが 0 になり、status は "failed" になる(replicas の値は、希望する数のまま変わらない)。同じ数でスケールし直すか、設定を直して適用すると、やり直せる。他に安定して動いている Pod がある間は、止めない
+- Note: "active" の deploy でも、Pod が異常な状態(CrashLoopBackOff など)のまま、安定して動かない状態が上限(10分)を超えて続くと、自動で止まる。k8s のレプリカが 0 になり、status は "failed" になる(replicas の値は、希望する数のまま変わらない)。同じ数でスケールし直すか、設定を直して適用すると、やり直せる。他に安定して動いている Pod がある間は、止めない
 - Note: "起動指示が完了したか"はこの status で確認する(別途ヘルスチェック専用endpointは用意しない)
 - Note: config/volumes/service いずれかの apply を呼ぶと、コンテナの再起動が完了するまで status は "applying" になる。再起動が成功すれば "active" に、失敗すれば "failed" に遷移する(applyの呼び出し自体は即時応答するが、反映の完了はこの status のポーリングで確認する)
 - Note: applying→running/failed の判定は、バックエンドが Kubernetes の Deployment/Pod の conditions(Progressing, Ready など)を監視して行う(実装詳細は別途)

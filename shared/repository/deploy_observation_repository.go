@@ -420,12 +420,9 @@ type CrashLoopCandidate struct {
 // CrashLoopLimits は、異常な状態が続く deploy を止める判断の上限。
 type CrashLoopLimits struct {
 	// UnhealthyFor は、Pod が安定して動いていない状態が、この時間以上続いたら、止める。
+	// 一時的な障害(依存先の短い停止など)は、k8s のバックオフに乗り越えさせ、本当に壊れているものだけを止めるための猶予。
+	// 「安定して動いている」の判定(model.PodStableAfter)より、長くすること(短いと、起動したばかりの正常な Pod を止めてしまう)。
 	UnhealthyFor time.Duration
-	// MaxRestarts は、コンテナの再起動がこの回数以上になり、かつ RestartMinUnhealthy 以上、不健全が続いたら、止める。
-	MaxRestarts int
-	// RestartMinUnhealthy は、再起動の回数で止めるときに、最低限必要な、不健全が続いた時間。
-	// 何日も安定して動いてきた Pod が、一度クラッシュしただけで、止まらないようにするため。
-	RestartMinUnhealthy time.Duration
 }
 
 // ListCrashLoopCandidates は、異常な状態が続いていて、止めるべき deploy を、1つにつき1件返す。
@@ -433,8 +430,7 @@ type CrashLoopLimits struct {
 // 対象は、次を全て満たす deploy。
 //   - status が active で、希望するレプリカ数が 1 以上(作成中・反映中・削除中などには、触らない)
 //   - 終了処理中でない Pod の中に、安定して動いている Pod が1つも無い(一部の Pod だけが不調で、他が正常なら、止めない)
-//   - Pod のどれかが、安定して動いていない状態が、limits.UnhealthyFor 以上続いている、または、
-//     再起動が limits.MaxRestarts 回以上で、limits.RestartMinUnhealthy 以上続いている
+//   - Pod のどれかが、安定して動いていない状態が、limits.UnhealthyFor 以上続いている
 //
 // 時間の判定は、データベースの時計で行う。
 //
@@ -447,7 +443,7 @@ type CrashLoopLimits struct {
 //   - 上限が不正なとき(0 以下)、またはデータベースのエラー。
 func (observationRepository *DeployObservationRepository) ListCrashLoopCandidates(requestContext context.Context, limits CrashLoopLimits) ([]CrashLoopCandidate, error) {
 	// 0 以下の上限だと、全ての deploy が対象になってしまうので、先に拒否する。
-	if limits.UnhealthyFor <= 0 || limits.MaxRestarts < 1 || limits.RestartMinUnhealthy <= 0 {
+	if limits.UnhealthyFor <= 0 {
 		return nil, newEmptyConditionError()
 	}
 	// 結果の1行分。
@@ -472,10 +468,7 @@ func (observationRepository *DeployObservationRepository) ListCrashLoopCandidate
 		  AND pod.status <> 'terminating'
 		  AND pod.unhealthy_since IS NOT NULL
 		  AND NOT (pod.ready AND pod.started_at IS NOT NULL AND pod.started_at <= now() - make_interval(secs => ?))
-		  AND (
-		        pod.unhealthy_since <= now() - make_interval(secs => ?)
-		     OR (pod.restart_count >= ? AND pod.unhealthy_since <= now() - make_interval(secs => ?))
-		  )
+		  AND pod.unhealthy_since <= now() - make_interval(secs => ?)
 		  AND NOT EXISTS (
 		        SELECT 1 FROM deploy_pods healthy
 		        WHERE healthy.deploy_id = pod.deploy_id
@@ -484,7 +477,7 @@ func (observationRepository *DeployObservationRepository) ListCrashLoopCandidate
 		          AND healthy.started_at <= now() - make_interval(secs => ?)
 		  )
 		ORDER BY pod.deploy_id, pod.unhealthy_since`,
-		model.PodStableAfter.Seconds(), limits.UnhealthyFor.Seconds(), limits.MaxRestarts, limits.RestartMinUnhealthy.Seconds(), model.PodStableAfter.Seconds(),
+		model.PodStableAfter.Seconds(), limits.UnhealthyFor.Seconds(), model.PodStableAfter.Seconds(),
 	).Scan(&rows).Error
 	if queryError != nil {
 		return nil, apperror.Wrap(apperror.KindInternal, "止める候補の deploy を取得できませんでした", queryError)
