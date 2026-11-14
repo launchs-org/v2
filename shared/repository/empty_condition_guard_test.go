@@ -60,6 +60,10 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 		{name: "スケーリングの巻き戻し: ID が空", call: func() error {
 			return deployRepository.RevertScale(requestContext, "", ScaleStart{PreviousStatus: "active"})
 		}, expectedKind: apperror.KindInternal},
+		{name: "deploy 削除受付: ID が空", call: func() error { _, err := deployRepository.MarkDeleting(requestContext, "user-a", ""); return err }, expectedKind: apperror.KindNotFound},
+		{name: "deploy 削除の巻き戻し: ID が空", call: func() error { return deployRepository.RevertDeleting(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "deploy 削除失敗の記録: ID が空", call: func() error { return deployRepository.MarkDeleteFailed(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "deploy レコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return deployRepository.DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 状態変更: ID が空", call: func() error {
 			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")

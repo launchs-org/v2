@@ -50,3 +50,6 @@ POST {{baseUrl}}/deploy/{{deployId}}/scale
 Content-Type: application/json
 
 {"replicas": 2}
+
+### deploy を削除する(すぐ 200。status は deleting になり、完了すると GET が 404 になる。delete_failed からのやり直しも同じ)
+DELETE {{baseUrl}}/deploy/{{deployId}}

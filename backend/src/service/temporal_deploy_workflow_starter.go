@@ -96,3 +96,28 @@ func (starter *TemporalDeployWorkflowStarter) StartScale(requestContext context.
 	}
 	return nil
 }
+
+// StartDeletion は、DeleteDeployWorkflow を開始する。完了は待たない。
+//
+// Workflow ID は「delete-{deployId}-{uuid}」。実行するのは、ワーカーの一般の Task Queue。
+// 全体のタイムアウトは、プロジェクトの削除と同じ(リトライの期限に、補償の時間を足した長さ)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 削除する deploy の ID。
+//
+// 戻り値:
+//   - Temporal に開始を頼めなかったときのエラー。
+func (starter *TemporalDeployWorkflowStarter) StartDeletion(requestContext context.Context, deployID string) error {
+	// Workflow ID、Task Queue、全体のタイムアウトを決めて、開始を頼む。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewDeleteDeployWorkflowID(deployID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.DeleteProjectWorkflowTimeout,
+	}, sharedworkflow.DeleteDeployWorkflowName, sharedworkflow.DeleteDeployInput{DeployID: deployID})
+	// 開始できなかったときは、原因を包んで返す。
+	if executeError != nil {
+		return fmt.Errorf("deploy の削除の Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}
