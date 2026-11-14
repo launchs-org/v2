@@ -44,3 +44,9 @@ POST {{baseUrl}}/deploy/{{deployId}}/config/discard
 
 ### 保存した起動設定をコンテナに反映する(すぐ 200。結果は deploy の status で確かめる: applying → active / failed)
 POST {{baseUrl}}/deploy/{{deployId}}/config/apply
+
+### レプリカ数を変える(0〜10。0 で停止相当。すぐ 200。結果は status で確かめる: applying → active / scaled_zero)
+POST {{baseUrl}}/deploy/{{deployId}}/scale
+Content-Type: application/json
+
+{"replicas": 2}

@@ -97,6 +97,12 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.RollbackDeploymentConfig, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentConfigActivityName})
 	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.CommitConfigResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitConfigResultActivityName})
 
+	// レプリカ数を k8s に反映する Workflow と、その Activity を登録する(起動を待つ Activity は、作成と共通)。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ScaleDeployWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ScaleDeployWorkflowName})
+	scaleDeployActivities := activity.NewScaleDeployActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(scaleDeployActivities.ApplyScale, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyScaleActivityName})
+	generalWorker.RegisterActivityWithOptions(scaleDeployActivities.MarkScaleResult, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkScaleResultActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
