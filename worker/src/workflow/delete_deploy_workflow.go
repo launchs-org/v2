@@ -12,8 +12,9 @@ import (
 // DeleteDeployWorkflow は、deploy の実体を削除する。
 //
 // 処理の順序:
-//  1. k8s の Deployment を削除する(Pod も消える)
-//  2. DB のレコードを削除する(これが終わると、deploy の GET は 404 になる)
+//  1. deploy の service の、k8s の Service を削除する(service が無ければ、何もしない)
+//  2. k8s の Deployment を削除する(Pod も消える)
+//  3. DB のレコードを削除する(service の行も、CASCADE で一緒に消える)(これが終わると、deploy の GET は 404 になる)
 //
 // どちらの Activity も冪等で、失敗したときは、リトライの期限(DeleteProjectRetryWindow)までリトライする。
 // 期限までに終わらなかったとき、または、リトライしても無駄なエラー(名前の形の不正)のときは、
@@ -47,7 +48,7 @@ func DeleteDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 	return deleteError
 }
 
-// deleteDeployEntities は、Deployment、レコードの順に、deploy の実体を削除する。
+// deleteDeployEntities は、Service、Deployment、レコードの順に、deploy の実体を削除する。
 //
 // 引数:
 //   - workflowContext: Temporal の Workflow の context。
@@ -58,12 +59,18 @@ func DeleteDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 func deleteDeployEntities(workflowContext sdkworkflow.Context, input sharedworkflow.DeleteDeployInput) error {
 	// Activity の実行時間の上限とリトライの方針を決める。期限までは、復旧を待ってリトライし続ける。
 	activityContext := sdkworkflow.WithActivityOptions(workflowContext, retryUntil(sharedworkflow.DeleteProjectRetryWindow))
-	// 1. k8s の Deployment を削除する。
+	// 1. deploy の service の、k8s の Service を削除する(service が無ければ、何もしない)。DB の service の行は、
+	//    deploy の行を消すときに、一緒に消える。
+	if serviceError := sdkworkflow.ExecuteActivity(activityContext, sharedworkflow.DeleteDeployServiceActivityName,
+		sharedworkflow.DeleteDeployServiceInput{DeployID: input.DeployID}).Get(activityContext, nil); serviceError != nil {
+		return fmt.Errorf("Service を削除できませんでした: %w", serviceError)
+	}
+	// 2. k8s の Deployment を削除する。
 	if deploymentError := sdkworkflow.ExecuteActivity(activityContext, sharedworkflow.DeleteDeploymentActivityName,
 		sharedworkflow.DeleteDeploymentInput{DeployID: input.DeployID}).Get(activityContext, nil); deploymentError != nil {
 		return fmt.Errorf("Deployment を削除できませんでした: %w", deploymentError)
 	}
-	// 2. DB のレコードを削除する。
+	// 3. DB のレコードを削除する。
 	if recordError := sdkworkflow.ExecuteActivity(activityContext, sharedworkflow.DeleteDeployRecordActivityName,
 		sharedworkflow.DeleteDeployRecordInput{DeployID: input.DeployID}).Get(activityContext, nil); recordError != nil {
 		return fmt.Errorf("レコードを削除できませんでした: %w", recordError)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/k8s"
@@ -20,7 +21,23 @@ const (
 
 	// defaultLogLevelText は、LOG_LEVEL が無いときに使うログレベル。
 	defaultLogLevelText = "info"
+
+	// defaultServiceType は、SERVICE_TYPE が無いときに使う、k8s の Service の種類。クラスター内だけに公開する。
+	defaultServiceType = "ClusterIP"
+
+	// defaultClusterDomain は、CLUSTER_DOMAIN が無いときに使う、クラスターのドメイン(k8s の既定)。
+	defaultClusterDomain = "cluster.local"
+
+	// maxClusterDomainLength は、クラスターのドメインの最大の長さ(DNS 名の長さの上限 253 から、
+	// "<serviceId>.<projectId>.svc." の分を引いた余裕)。
+	maxClusterDomainLength = 150
 )
+
+// validServiceTypes は、SERVICE_TYPE に指定できる、k8s の Service の種類。
+var validServiceTypes = map[string]bool{"ClusterIP": true, "NodePort": true, "LoadBalancer": true}
+
+// clusterDomainPattern は、クラスターのドメインとして正しい形(小文字の英数字とハイフンを、ドットで区切る)。
+var clusterDomainPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
 // WorkerConfig は、ワーカーの設定。
 type WorkerConfig struct {
@@ -48,6 +65,14 @@ type WorkerConfig struct {
 	// (環境変数 EGRESS_BLOCKED_NETWORKS。カンマ区切り)。省略すると、既定(k8s.DefaultBlockedNetworks)。
 	BlockedNetworks []string
 
+	// ServiceType は、deploy の service として作る k8s の Service の種類(環境変数 SERVICE_TYPE)。
+	// ClusterIP(既定)、NodePort、LoadBalancer のどれか。
+	ServiceType string
+
+	// ClusterDomain は、クラスターのドメイン(環境変数 CLUSTER_DOMAIN。既定 cluster.local)。
+	// service の DNS 名("<serviceId>.<projectId>.svc.<ドメイン>")の最後の部分になる。
+	ClusterDomain string
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -59,6 +84,9 @@ type WorkerConfig struct {
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
 //   - RUNTIME_CLASS: deploy の Pod に指定する RuntimeClass。省略すると、指定しない(クラスタの既定)。
+//   - SERVICE_TYPE: service として作る k8s の Service の種類(ClusterIP、NodePort、LoadBalancer)。省略すると ClusterIP。
+//     LoadBalancer は、deploy ごとに外部 IP を使い、利用者のポート(UDP を含む)を、LAN に公開する。
+//   - CLUSTER_DOMAIN: クラスターのドメイン。省略すると cluster.local(クラスターごとに違う。CoreDNS の設定で確かめる)。
 //   - EGRESS_BLOCKED_NETWORKS: プロジェクトの namespace から、出ていく通信を許可しない内部のネットワーク(CIDR のカンマ区切り。IPv4)。
 //     省略すると、既定(10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10)。何も除かない設定は、できない。
 //   - INGRESS_NAMESPACE: 外からの通信を中継する namespace(Traefik など)。省略すると、その namespace からの通信は許可しない。
@@ -82,6 +110,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	runtimeClass := reader.OptionalString("RUNTIME_CLASS", "")
 	ingressNamespace := reader.OptionalString("INGRESS_NAMESPACE", "")
 	blockedNetworksText := reader.OptionalString("EGRESS_BLOCKED_NETWORKS", "")
+	serviceType := reader.OptionalString("SERVICE_TYPE", defaultServiceType)
+	clusterDomain := reader.OptionalString("CLUSTER_DOMAIN", defaultClusterDomain)
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -91,6 +121,15 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	logLevel, levelError := logger.ParseLevel(logLevelText)
 	if levelError != nil {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
+	}
+
+	// Service の種類を検査する。
+	if !validServiceTypes[serviceType] {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 SERVICE_TYPE は ClusterIP、NodePort、LoadBalancer のどれかでなければなりません: %q", serviceType))
+	}
+	// クラスターのドメインを検査する(DNS 名として正しい形)。
+	if !clusterDomainPattern.MatchString(clusterDomain) || len(clusterDomain) > maxClusterDomainLength {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 CLUSTER_DOMAIN は、小文字の英数字とハイフンを、ドットで区切った DNS 名でなければなりません: %q", clusterDomain))
 	}
 
 	// 除く内部のネットワークを検査し、問題があれば、環境変数の名前を付けて加える。
@@ -117,6 +156,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		RuntimeClass:      runtimeClass,
 		IngressNamespace:  ingressNamespace,
 		BlockedNetworks:   blockedNetworks,
+		ServiceType:       serviceType,
+		ClusterDomain:     clusterDomain,
 		Kubernetes:        kubernetesSettings,
 	}, nil
 }
