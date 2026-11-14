@@ -21,6 +21,9 @@ services:
       SERVICE_TYPE: ${SERVICE_TYPE:-ClusterIP}
       # クラスターのドメイン(service の DNS 名の最後の部分)。クラスターごとに違う(CoreDNS の Corefile の kubernetes の行で確かめる)。
       CLUSTER_DOMAIN: ${CLUSTER_DOMAIN:-cluster.local}
+      # Traefik の IngressRoute の apiVersion と、受け付ける entryPoint の名前(カンマ区切り)。
+      TRAEFIK_API_VERSION: ${TRAEFIK_API_VERSION:-traefik.io/v1alpha1}
+      TRAEFIK_ENTRY_POINTS: ${TRAEFIK_ENTRY_POINTS:-web}
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
   # watcher は、k8s を読み取るだけ(Pod と Deployment の get / list / watch)。
