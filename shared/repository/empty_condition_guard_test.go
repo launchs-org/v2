@@ -101,6 +101,38 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 			_, err := NewServiceRepository(database).CommitPortsApply(requestContext, "", true)
 			return err
 		}, expectedKind: apperror.KindInternal},
+		{name: "ingress 取得: ユーザー ID が空", call: func() error {
+			_, err := NewIngressRepository(database).FindByID(requestContext, "", "project-00000001", "ingress-1")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress 取得(ワーカー): ID が空(先頭の1件を返さない)", call: func() error { _, err := NewIngressRepository(database).FindForWorker(requestContext, ""); return err }, expectedKind: apperror.KindNotFound},
+		{name: "ingress の一覧: プロジェクトの ID が空", call: func() error {
+			_, _, err := NewIngressRepository(database).ListByProject(requestContext, "user-a", "", 20, nil)
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress の作成: ID が空", call: func() error { return NewIngressRepository(database).Create(requestContext, &model.Ingress{}) }, expectedKind: apperror.KindInternal},
+		{name: "ingress の削除の受付: ingress の ID が空", call: func() error {
+			_, err := NewIngressRepository(database).MarkDeleting(requestContext, "user-a", "project-00000001", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress のレコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return NewIngressRepository(database).DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "ingress の削除の巻き戻し: ID が空", call: func() error { return NewIngressRepository(database).RevertDeleting(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "ingress の削除失敗の記録: ID が空(削除中の全ての行を変えない)", call: func() error { return NewIngressRepository(database).MarkDeleteFailed(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "ingress のルールの保存: ingress の ID が空", call: func() error {
+			return NewIngressRepository(database).SavePendingRules(requestContext, "user-a", "project-00000001", "", nil)
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress のルールの破棄: ユーザー ID が空", call: func() error {
+			return NewIngressRepository(database).DiscardPendingRules(requestContext, "", "project-00000001", "ingress-1")
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress の反映の開始: ingress の ID が空", call: func() error {
+			_, err := NewIngressRepository(database).BeginRulesApply(requestContext, "user-a", "project-00000001", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "ingress の反映の巻き戻し: ID が空(applying の全ての行を変えない)", call: func() error { return NewIngressRepository(database).RevertApply(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "ingress の反映の確定: ID が空", call: func() error {
+			_, err := NewIngressRepository(database).CommitRulesApply(requestContext, "", true)
+			return err
+		}, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 作成の確定: ID が空", call: func() error {
 			_, err := deployRepository.CompleteCreation(requestContext, "", true)

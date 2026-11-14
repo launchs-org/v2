@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/logger"
@@ -26,10 +28,19 @@ const (
 	// defaultLogLevelText は、LOG_LEVEL が設定されていないときに使うログレベル。
 	defaultLogLevelText = "info"
 
+	// defaultIngressBaseDomain は、INGRESS_BASE_DOMAIN が設定されていないときに使う、ホスト名のベースドメイン。
+	defaultIngressBaseDomain = "launchs.org"
+
+	// defaultIngressReservedSubdomains は、INGRESS_RESERVED_SUBDOMAINS が設定されていないときに使う、払い出さないサブドメイン。
+	defaultIngressReservedSubdomains = "www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard"
+
 	// minimumPort と maximumPort は、ポート番号として使える範囲。
 	minimumPort = 1
 	maximumPort = 65535
 )
+
+// ingressDomainPattern は、ベースドメインとして受け付ける形。
+var ingressDomainPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$`)
 
 // BackendConfig は、バックエンドの設定。
 type BackendConfig struct {
@@ -51,6 +62,13 @@ type BackendConfig struct {
 
 	// TemporalNamespace は、使う Temporal の namespace(環境変数 TEMPORAL_NAMESPACE)。
 	TemporalNamespace string
+
+	// IngressBaseDomain は、ingress に払い出すホスト名の、後ろに付けるドメイン(環境変数 INGRESS_BASE_DOMAIN)。
+	IngressBaseDomain string
+
+	// IngressReservedSubdomains は、ingress に払い出さないサブドメイン(環境変数 INGRESS_RESERVED_SUBDOMAINS。カンマ区切り)。
+	// 指定すると、既定の一覧を置き換える。ホスト名のどれか1つの単語が、これに含まれると、その名前は払い出されない。
+	IngressReservedSubdomains []string
 }
 
 // LoadBackendConfig は、環境変数からバックエンドの設定を読む。
@@ -82,6 +100,9 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
 	// ログレベルを文字列のまま読む。意味の確認は、あとで ParseLevel で行う。
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
+	// ingress のホスト名に関する設定を読む。
+	ingressBaseDomain := reader.OptionalString("INGRESS_BASE_DOMAIN", defaultIngressBaseDomain)
+	reservedSubdomainsText := reader.OptionalString("INGRESS_RESERVED_SUBDOMAINS", defaultIngressReservedSubdomains)
 
 	// ここまでの読み込みで見つかった問題を取り出し、以降の確認の問題と、まとめて報告できるようにする。
 	loadError := reader.Err()
@@ -101,10 +122,35 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
 	}
 
+	// ベースドメインは、DNS 名の形(小文字の英数字とハイフンを、ドットで区切ったもの)でなければならない。
+	if !ingressDomainPattern.MatchString(ingressBaseDomain) {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 INGRESS_BASE_DOMAIN は、小文字の英数字とハイフンを、ドットで区切った DNS 名でなければなりません: %q", ingressBaseDomain))
+	}
+
 	// 1つでも問題があれば、中途半端な設定を使わせないため、ゼロ値とエラーを返す。
 	if loadError != nil {
 		return BackendConfig{}, loadError
 	}
 	// 問題が無いので、読み込んだ値で設定を作って返す。
-	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace}, nil
+	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace,
+		IngressBaseDomain: ingressBaseDomain, IngressReservedSubdomains: splitCommaSeparated(reservedSubdomainsText)}, nil
+}
+
+// splitCommaSeparated は、カンマ区切りの文字列を、前後の空白を除いて分け、空の要素を捨てる。
+//
+// 引数:
+//   - text: カンマ区切りの文字列。
+//
+// 戻り値:
+//   - 要素の一覧。
+func splitCommaSeparated(text string) []string {
+	// カンマで分けて、前後の空白を除き、空でないものだけを集める。
+	items := []string{}
+	for _, item := range strings.Split(text, ",") {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
 }
