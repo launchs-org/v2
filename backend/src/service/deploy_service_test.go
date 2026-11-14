@@ -53,6 +53,16 @@ func (fakeStore *fakeDeployStore) DiscardPendingConfig(_ context.Context, _ stri
 	return nil
 }
 
+// BeginConfigApply は、何もせず成功する。
+func (fakeStore *fakeDeployStore) BeginConfigApply(_ context.Context, _ string, _ string) (string, error) {
+	return model.DeployStatusActive, nil
+}
+
+// UpdateStatus は、何もせず成功する。
+func (fakeStore *fakeDeployStore) UpdateStatus(_ context.Context, _ string, _ string, _ string) (bool, error) {
+	return true, nil
+}
+
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
@@ -62,6 +72,11 @@ type fakeDeployWorkflowStarter struct {
 // StartDeployCreation は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartDeployCreation(_ context.Context, deployID string) error {
 	fakeStarter.startedDeployIDs = append(fakeStarter.startedDeployIDs, deployID)
+	return fakeStarter.startError
+}
+
+// StartConfigApply は、何もせず、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context, _ string) error {
 	return fakeStarter.startError
 }
 

@@ -44,5 +44,6 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.GET("/deploy/:deployId", deployController.Get)
 	apiGroup.GET("/deploy/:deployId/config", deployController.GetConfig)
 	apiGroup.PUT("/deploy/:deployId/config", deployController.UpdateConfig)
+	apiGroup.POST("/deploy/:deployId/config/apply", deployController.ApplyConfig)
 	apiGroup.POST("/deploy/:deployId/config/discard", deployController.DiscardConfig)
 }

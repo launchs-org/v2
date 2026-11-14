@@ -48,3 +48,27 @@ func (starter *TemporalDeployWorkflowStarter) StartDeployCreation(requestContext
 	}
 	return nil
 }
+
+// StartConfigApply は、ApplyDeployConfigWorkflow を開始する。完了は待たない。
+//
+// Workflow ID は「apply-config-{deployId}-{uuid}」。実行するのは、ワーカーの一般の Task Queue。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 反映する deploy の ID。
+//
+// 戻り値:
+//   - Temporal に開始を頼めなかったときのエラー。
+func (starter *TemporalDeployWorkflowStarter) StartConfigApply(requestContext context.Context, deployID string) error {
+	// Workflow ID、Task Queue、全体のタイムアウトを決めて、開始を頼む。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewApplyDeployConfigWorkflowID(deployID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.ApplyDeployConfigWorkflowTimeout,
+	}, sharedworkflow.ApplyDeployConfigWorkflowName, sharedworkflow.ApplyDeployConfigInput{DeployID: deployID})
+	// 開始できなかったときは、原因を包んで返す。
+	if executeError != nil {
+		return fmt.Errorf("起動設定の反映の Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}

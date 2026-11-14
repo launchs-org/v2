@@ -14,12 +14,19 @@ import (
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
+	appliedDeployIDs []string
 	startError       error
 }
 
 // StartDeployCreation は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartDeployCreation(_ context.Context, deployID string) error {
 	fakeStarter.startedDeployIDs = append(fakeStarter.startedDeployIDs, deployID)
+	return fakeStarter.startError
+}
+
+// StartConfigApply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context, deployID string) error {
+	fakeStarter.appliedDeployIDs = append(fakeStarter.appliedDeployIDs, deployID)
 	return fakeStarter.startError
 }
 
@@ -269,10 +276,10 @@ func TestDeployAPIConfigPutGetDiscard(testingT *testing.T) {
 	})
 	// 再度 PUT すると、前回の pending は、新しい内容で上書きされる(command と args は null に戻せる)。
 	testingT.Run("再度 PUT すると pending が全て上書きされる", func(subTest *testing.T) {
-		ownerClient.call(http.MethodPut, configPath, `{"env":{}}`)
+		ownerClient.call(http.MethodPut, configPath, `{"env":{"B":"2"}}`)
 		_, configBody := ownerClient.call(http.MethodGet, configPath, "")
 		pendingEnv, isObject := configBody["pending_env"].(map[string]any)
-		if !isObject || len(pendingEnv) != 0 || configBody["pending_command"] != nil || configBody["pending_args"] != nil {
+		if !isObject || len(pendingEnv) != 1 || pendingEnv["B"] != "2" || configBody["pending_command"] != nil || configBody["pending_args"] != nil {
 			subTest.Errorf("上書きされていない: %v", configBody)
 		}
 	})
@@ -374,5 +381,137 @@ func TestDeployAPIConfigRejectsByStatusAndOwner(testingT *testing.T) {
 				subTest.Errorf("全て 404 のはず: GET %d、PUT %d、discard %d", getStatus, putStatus, discardStatus)
 			}
 		})
+	}
+}
+
+// TestDeployAPIConfigApply は、起動設定の適用(POST .../config/apply)の、受け付けと拒否を確認する。
+func TestDeployAPIConfigApply(testingT *testing.T) {
+	// 持ち主が deploy を作る。作成直後(pending)は、起動中なので、active にしてから使う。
+	database := testdatabase.New(testingT)
+	fakeStarter := &fakeDeployWorkflowStarter{}
+	ownerClient := newProjectAPIClient(testingT, "user-a", Dependencies{Database: database, DeployWorkflowStarter: fakeStarter})
+	otherClient := newProjectAPIClient(testingT, "user-b", Dependencies{Database: database, DeployWorkflowStarter: fakeStarter})
+	deployID := createDeployFor(ownerClient, createProjectFor(ownerClient, "my-app"))
+	configPath := "/deploy/" + deployID + "/config"
+	applyPath := configPath + "/apply"
+	statusOf := func() string {
+		_, body := ownerClient.call(http.MethodGet, "/deploy/"+deployID, "")
+		return body["status"].(string)
+	}
+
+	// 起動中(pending)は、反映を始められない。
+	testingT.Run("起動中(pending)の deploy は 409", func(subTest *testing.T) {
+		ownerClient.call(http.MethodPut, configPath, `{"env":{"A":"1"}}`)
+		statusCode, body := ownerClient.call(http.MethodPost, applyPath, "")
+		if statusCode != 409 || errorCodeOf(body) != "conflict" {
+			subTest.Errorf("409 のはず: %d %v", statusCode, body)
+		}
+	})
+	database.Exec("UPDATE deploys SET status = 'active' WHERE id = ?", deployID)
+
+	// 他人と存在しない ID は 404。
+	testingT.Run("他人・存在しない deploy は 404", func(subTest *testing.T) {
+		otherStatus, _ := otherClient.call(http.MethodPost, applyPath, "")
+		missingStatus, _ := ownerClient.call(http.MethodPost, "/deploy/deploy-nothing/config/apply", "")
+		if otherStatus != 404 || missingStatus != 404 {
+			subTest.Errorf("どちらも 404 のはず: %d %d", otherStatus, missingStatus)
+		}
+	})
+	// pending を破棄して、適用する値が無い状態では 409。
+	testingT.Run("適用する値が無いと 409 で、Workflow は開始されない", func(subTest *testing.T) {
+		ownerClient.call(http.MethodPost, configPath+"/discard", "")
+		statusCode, _ := ownerClient.call(http.MethodPost, applyPath, "")
+		if statusCode != 409 || len(fakeStarter.appliedDeployIDs) != 0 {
+			subTest.Errorf("409 で、開始されないはず: %d %v", statusCode, fakeStarter.appliedDeployIDs)
+		}
+	})
+	// 正常。applying になり、Workflow が開始され、pending は保持される。
+	testingT.Run("適用できると、applying になり、Workflow が開始され、pending は保持される", func(subTest *testing.T) {
+		ownerClient.call(http.MethodPut, configPath, `{"env":{"PORT":"8080"}}`)
+		statusCode, body := ownerClient.call(http.MethodPost, applyPath, "")
+		if statusCode != 200 || len(body) != 0 {
+			subTest.Fatalf("200 と空のオブジェクトのはず: %d %v", statusCode, body)
+		}
+		if statusOf() != "applying" || len(fakeStarter.appliedDeployIDs) != 1 || fakeStarter.appliedDeployIDs[0] != deployID {
+			subTest.Errorf("applying で、1回開始されるはず: %s %v", statusOf(), fakeStarter.appliedDeployIDs)
+		}
+		_, configBody := ownerClient.call(http.MethodGet, configPath, "")
+		if pendingEnv, _ := configBody["pending_env"].(map[string]any); pendingEnv["PORT"] != "8080" {
+			subTest.Errorf("pending が保持されていない: %v", configBody)
+		}
+	})
+	// 反映中の再度の apply は 409(多重 apply 不可)で、Workflow は増えない。
+	testingT.Run("applying 中の apply は 409", func(subTest *testing.T) {
+		statusCode, _ := ownerClient.call(http.MethodPost, applyPath, "")
+		if statusCode != 409 || len(fakeStarter.appliedDeployIDs) != 1 {
+			subTest.Errorf("409 で、増えないはず: %d %v", statusCode, fakeStarter.appliedDeployIDs)
+		}
+	})
+	// 削除の途中は 409。
+	for _, blockedStatus := range []string{"deleting", "delete_failed"} {
+		testingT.Run(blockedStatus+" の apply は 409", func(subTest *testing.T) {
+			database.Exec("UPDATE deploys SET status = ? WHERE id = ?", blockedStatus, deployID)
+			if statusCode, _ := ownerClient.call(http.MethodPost, applyPath, ""); statusCode != 409 {
+				subTest.Errorf("409 のはず: %d", statusCode)
+			}
+		})
+	}
+	// failed と scaled_zero の deploy は、適用できる。
+	for _, allowedStatus := range []string{"failed", "scaled_zero"} {
+		testingT.Run(allowedStatus+" の deploy は適用できる", func(subTest *testing.T) {
+			database.Exec("UPDATE deploys SET status = ? WHERE id = ?", allowedStatus, deployID)
+			if statusCode, _ := ownerClient.call(http.MethodPost, applyPath, ""); statusCode != 200 {
+				subTest.Errorf("200 のはず: %d", statusCode)
+			}
+		})
+	}
+}
+
+// TestDeployAPIConfigApplyRevertsWhenWorkflowCannotStart は、Workflow を開始できなかったとき、
+// 500 を返し、状態が元に戻る(applying のまま残らない)ことを確認する。
+func TestDeployAPIConfigApplyRevertsWhenWorkflowCannotStart(testingT *testing.T) {
+	// deploy の作成は成功させ、そのあとから、開始に失敗する状態にする。
+	database := testdatabase.New(testingT)
+	fakeStarter := &fakeDeployWorkflowStarter{}
+	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{Database: database, DeployWorkflowStarter: fakeStarter})
+	deployID := createDeployFor(apiClient, createProjectFor(apiClient, "my-app"))
+	// deploy を failed にして、pending を入れる。
+	database.Exec("UPDATE deploys SET status = 'failed' WHERE id = ?", deployID)
+	apiClient.call(http.MethodPut, "/deploy/"+deployID+"/config", `{"env":{"A":"1"}}`)
+	fakeStarter.startError = errors.New("temporal down")
+
+	// 適用は 500 になり、状態は failed に戻り、pending は残る。
+	statusCode, body := apiClient.call(http.MethodPost, "/deploy/"+deployID+"/config/apply", "")
+	if statusCode != 500 || errorCodeOf(body) != "internal_error" {
+		testingT.Fatalf("500 internal_error のはず: %d %v", statusCode, body)
+	}
+	_, deployBody := apiClient.call(http.MethodGet, "/deploy/"+deployID, "")
+	config, _ := deployBody["config"].(map[string]any)
+	if deployBody["status"] != "failed" || config["pending_env"] == nil {
+		testingT.Errorf("failed に戻り、pending が残るはず: %v", deployBody)
+	}
+}
+
+// TestDeployAPIConfigSameAsCurrentIsNotPending は、現在の値と同じ設定を PUT しても、pending にならず、
+// apply も 409 になる(同じ設定の再適用はできない)ことを確認する。
+func TestDeployAPIConfigSameAsCurrentIsNotPending(testingT *testing.T) {
+	// active の deploy を用意する(現在の値は、env が空、command と args が null)。
+	database := testdatabase.New(testingT)
+	fakeStarter := &fakeDeployWorkflowStarter{}
+	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{Database: database, DeployWorkflowStarter: fakeStarter})
+	deployID := createDeployFor(apiClient, createProjectFor(apiClient, "my-app"))
+	database.Exec("UPDATE deploys SET status = 'active' WHERE id = ?", deployID)
+	configPath := "/deploy/" + deployID + "/config"
+
+	// 現在と同じ内容を PUT すると、200 だが pending は null のまま。
+	statusCode, _ := apiClient.call(http.MethodPut, configPath, `{"env":{}}`)
+	_, configBody := apiClient.call(http.MethodGet, configPath, "")
+	if statusCode != 200 || configBody["pending_env"] != nil {
+		testingT.Fatalf("200 で、pending は null のはず: %d %v", statusCode, configBody)
+	}
+	// apply は 409 で、Workflow は開始されない。
+	applyStatus, _ := apiClient.call(http.MethodPost, configPath+"/apply", "")
+	if applyStatus != 409 || len(fakeStarter.appliedDeployIDs) != 0 {
+		testingT.Errorf("409 で、開始されないはず: %d %v", applyStatus, fakeStarter.appliedDeployIDs)
 	}
 }

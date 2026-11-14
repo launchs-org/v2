@@ -41,3 +41,6 @@ Content-Type: application/json
 
 ### 適用していない起動設定を破棄する(pending が無いと 409)
 POST {{baseUrl}}/deploy/{{deployId}}/config/discard
+
+### 保存した起動設定をコンテナに反映する(すぐ 200。結果は deploy の status で確かめる: applying → active / failed)
+POST {{baseUrl}}/deploy/{{deployId}}/config/apply
