@@ -46,12 +46,12 @@ func (deployRepository *DeployRepository) BeginScale(requestContext context.Cont
 			return lockError
 		}
 		// 作成の起動中(pending)は、作成の処理が状態を決めるので、スケーリングは始められない。
-		if deploy.Status == model.DeployStatusPending {
+		if deploy.IsStarting() {
 			return apperror.New(apperror.KindConflict, "deploy は起動中のため、スケーリングできません")
 		}
 		start = ScaleStart{PreviousReplicas: deploy.Replicas, PreviousStatus: deploy.Status}
 		// 同じ数で、失敗してもいないなら、何も変えない。
-		if deploy.Replicas == replicas && deploy.Status != model.DeployStatusFailed {
+		if deploy.Replicas == replicas && !deploy.IsFailed() {
 			return nil
 		}
 		// replicas と status を更新する(0 も書くので、列を指定する。更新日時は Gorm が更新する)。

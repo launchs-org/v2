@@ -47,7 +47,7 @@ func (deployRepository *DeployRepository) BeginCrashLoopStop(requestContext cont
 		if findError != nil {
 			return findError
 		}
-		if deploy.Status != model.DeployStatusActive {
+		if !deploy.CanStopForCrashLoop() {
 			return nil
 		}
 		// 状態を applying にして、止める理由のイベントを記録する。

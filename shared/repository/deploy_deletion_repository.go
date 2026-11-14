@@ -33,8 +33,7 @@ func (deployRepository *DeployRepository) MarkDeleting(requestContext context.Co
 			return lockError
 		}
 		// 反映中、起動中、削除中は、削除を受け付けられない。
-		switch deploy.Status {
-		case model.DeployStatusApplying, model.DeployStatusPending, model.DeployStatusDeleting:
+		if !deploy.CanDelete() {
 			return apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、削除できません")
 		}
 		// 状態を deleting にする(更新日時は Gorm が更新する)。

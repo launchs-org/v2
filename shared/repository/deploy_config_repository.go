@@ -120,7 +120,7 @@ func (deployRepository *DeployRepository) BeginConfigApply(requestContext contex
 			return lockError
 		}
 		// 作成の起動中(pending)は、作成の処理が状態を決めるので、反映は始められない。
-		if deploy.Status == model.DeployStatusPending {
+		if deploy.IsStarting() {
 			return apperror.New(apperror.KindConflict, "deploy は起動中のため、起動設定を適用できません")
 		}
 		// 適用する値が無いときは、反映する意味が無い。
@@ -181,7 +181,7 @@ func (deployRepository *DeployRepository) CommitConfigResult(requestContext cont
 			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
 		}
 		// applying でなければ、別の処理が先に確定している(または削除が始まっている)ので、何もしない。
-		if deploy.Status != model.DeployStatusApplying {
+		if !deploy.IsApplying() {
 			return nil
 		}
 		// 失敗のときは、status だけを failed にする(正式な値と pending は、そのまま)。

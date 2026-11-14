@@ -61,7 +61,7 @@ func (serviceRepository *ServiceRepository) Create(requestContext context.Contex
 			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
 		}
 		// 削除の途中の deploy には、作れない。
-		if deploy.Status == model.DeployStatusDeleting || deploy.Status == model.DeployStatusDeleteFailed {
+		if deploy.IsBeingDeleted() {
 			return apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、service を作れません")
 		}
 		// 1 deploy につき、service は1つだけ。
@@ -301,7 +301,7 @@ func (serviceRepository *ServiceRepository) MarkDeleting(requestContext context.
 			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", deployError)
 		}
 		// deploy が削除の途中なら、deploy の削除が、service も片付けるので、受け付けない。
-		if deploy.Status == model.DeployStatusDeleting || deploy.Status == model.DeployStatusDeleteFailed {
+		if deploy.IsBeingDeleted() {
 			return apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、service を削除できません")
 		}
 		// service を、ロックして読む。
@@ -315,7 +315,7 @@ func (serviceRepository *ServiceRepository) MarkDeleting(requestContext context.
 			return apperror.Wrap(apperror.KindInternal, "service を取得できませんでした", serviceError)
 		}
 		// 作成中と削除中は、受け付けない。
-		if service.Status == model.ServiceStatusPending || service.Status == model.ServiceStatusDeleting {
+		if !service.CanDelete() {
 			return apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、削除できません")
 		}
 		// 状態を deleting にする(更新日時は Gorm が更新する)。

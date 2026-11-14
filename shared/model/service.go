@@ -74,3 +74,23 @@ type Service struct {
 	// UpdatedAt は、更新日時。
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
+
+// CanChangePorts は、service のポートを更新・適用・破棄できるかどうかを返す。
+//
+// 戻り値:
+//   - active の service なら true。
+func (service Service) CanChangePorts() bool {
+	// active でない service は、ポートを変えられない。
+	return service.Status == ServiceStatusActive
+}
+
+// CanDelete は、service の削除を受け付けられるかどうかを返す。
+//
+// 作成中(pending)と削除中(deleting)は受け付けない。active と failed は受け付ける。
+//
+// 戻り値:
+//   - 受け付けられるなら true。
+func (service Service) CanDelete() bool {
+	// 作成中と削除中のどちらでもなければ受け付ける。
+	return service.Status != ServiceStatusPending && service.Status != ServiceStatusDeleting
+}
