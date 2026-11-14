@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.temporal.io/sdk/client"
+
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/database"
 	"launchs/shared/k8s"
@@ -18,6 +20,7 @@ import (
 	"launchs/shared/logger"
 	"launchs/shared/repository"
 	"launchs/watcher/src/config"
+	"launchs/watcher/src/crashloop"
 	"launchs/watcher/src/observer"
 	"launchs/watcher/src/retention"
 )
@@ -76,6 +79,13 @@ func run() error {
 	}
 	defer func() { _ = database.Close(appDatabase) }()
 
+	// Temporal に接続する(異常な状態が続く deploy を止める Workflow の開始に使う)。
+	temporalClient, temporalError := client.Dial(client.Options{HostPort: watcherConfig.TemporalAddress, Namespace: watcherConfig.TemporalNamespace})
+	if temporalError != nil {
+		return fmt.Errorf("Temporal に接続できませんでした: %w", temporalError)
+	}
+	defer temporalClient.Close()
+
 	// リーダー選出を作り、リーダーになったときだけ観測する。
 	elector, electorError := leader.NewElector(appDatabase, leaderLockKey, leaderRetryInterval, leaderHeartbeatInterval, appLogger)
 	if electorError != nil {
@@ -89,6 +99,10 @@ func run() error {
 		defer stopWork()
 		pruner := retention.NewPruner(observationRepository, retention.PodEventRetention, retention.MaxPodEventsPerDeploy, retention.PruneInterval, appLogger)
 		go pruner.Run(workContext)
+
+		// ----- 異常な状態が続く deploy を探して、止める Workflow を開始する(リーダーの間だけ) -----
+		crashLoopMonitor := crashloop.NewMonitor(observationRepository, crashloop.NewTemporalStarter(temporalClient), watcherConfig.CrashLoop, crashloop.CheckInterval, appLogger)
+		go crashLoopMonitor.Run(workContext)
 
 		// ----- 観測する(リーダーになるたびに、新しい Observer で、全件の読み込みからやり直す。引き継ぎと同じ手順) -----
 		return observer.New(clientset, observationRepository, appLogger).Run(workContext)

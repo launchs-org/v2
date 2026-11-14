@@ -117,8 +117,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # 異常な状態が続く deploy を止める Workflow の開始に使う。
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      # 異常な状態が続く deploy を止める上限。試すときだけ、短くする(例: CRASH_LOOP_MAX_RESTARTS=3)。
+      CRASH_LOOP_UNHEALTHY_FOR: ${CRASH_LOOP_UNHEALTHY_FOR:-30m}
+      CRASH_LOOP_MAX_RESTARTS: ${CRASH_LOOP_MAX_RESTARTS:-20}
+      CRASH_LOOP_RESTART_MIN_UNHEALTHY: ${CRASH_LOOP_RESTART_MIN_UNHEALTHY:-10m}
       # 既定では k8s につながず、何も観測しない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
       KUBERNETES_ACCESS: none
     volumes:
