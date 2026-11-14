@@ -10,6 +10,7 @@ import (
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
+	"launchs/shared/repository"
 )
 
 // fakeDeployStore は、テスト用の DeployStore。受け取った引数を覚え、決めたエラーを返す。
@@ -63,6 +64,16 @@ func (fakeStore *fakeDeployStore) UpdateStatus(_ context.Context, _ string, _ st
 	return true, nil
 }
 
+// BeginScale は、何もせず、変更ありとして成功する。
+func (fakeStore *fakeDeployStore) BeginScale(_ context.Context, _ string, _ string, _ int) (repository.ScaleStart, error) {
+	return repository.ScaleStart{Changed: true, PreviousReplicas: 1, PreviousStatus: model.DeployStatusActive}, nil
+}
+
+// RevertScale は、何もせず成功する。
+func (fakeStore *fakeDeployStore) RevertScale(_ context.Context, _ string, _ repository.ScaleStart) error {
+	return nil
+}
+
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
@@ -77,6 +88,11 @@ func (fakeStarter *fakeDeployWorkflowStarter) StartDeployCreation(_ context.Cont
 
 // StartConfigApply は、何もせず、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context, _ string) error {
+	return fakeStarter.startError
+}
+
+// StartScale は、何もせず、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartScale(_ context.Context, _ string) error {
 	return fakeStarter.startError
 }
 

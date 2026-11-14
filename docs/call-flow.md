@@ -144,6 +144,23 @@ curl → ... → DeployController.ApplyConfig
 
 **実際の反映を先に試み、結果が確定してから** DB の正式な値を更新する。正式な値(env など)は常に「いま動いている値」で、失敗した値は pending に残る。PUT した内容が現在の値と同じなら、pending にならない(同じ設定の再適用はできない)。
 
+## 5.2 スケーリング: `POST /deploy/:deployId/scale`
+
+`config/apply` と同じ形。違いは、DB に**新しい replicas を先に保存**すること(replicas は「希望する数」なので、失敗しても戻さない)と、k8s を更新するときに、pending ではなく**現在の値**を使うこと。
+
+```
+DeployService.Scale
+  ├─ DeployRepository.BeginScale   行をロックして、replicas を新しい値にし、status を applying にする
+  │     (今と同じ数で failed でもなければ、何もせず 200。反映中・起動中・削除の途中なら 409)
+  ├─ Temporal に ScaleDeployWorkflow の開始を頼む(開始できなければ、replicas と status を元に戻す)
+  └─ すぐ 200 {deployId, replicas}
+        ↓ worker が非同期に実行
+  ScaleDeployWorkflow
+   ├─ Activity: ApplyScale          現在の値で Deployment を更新する(replicas が変わる)
+   ├─ Activity: WaitDeploymentReady  作成と同じ Activity
+   └─ Activity: MarkScaleResult     成功なら active(replicas 0 なら scaled_zero)、失敗なら failed
+```
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -154,8 +171,8 @@ curl → ... → DeployController.ApplyConfig
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント | `shared/k8s/` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |

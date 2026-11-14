@@ -24,7 +24,8 @@ deploy のレプリカ数を変更するエンドポイント。"停止"/"再開
 - `status` が `"deleting"` の間はスケーリングを受け付けず 409 が返ること
 
 ### 境界値
-- `replicas` の上限値(仕様未確定のため別途定義する)
+- `replicas` の上限値は 10(仮)。10 は成功し、11 は 400 になること
+- 今と同じ `replicas` を指定した場合は、何も変えずに 200 が返ること
 - `status` が `"applying"` または `"deleting"` の間は、スケーリングが 409 で拒否されること
 
 ## 仕様
@@ -44,6 +45,10 @@ deploy のレプリカ数を変更するエンドポイント。"停止"/"再開
 ```
 - Note: replicas を 0 にすると status は "scaled_zero" になる。1以上にすると "active" に戻る("停止"/"再開"という別APIは用意しない)
 - Note: deploy の status が "applying" または "deleting" の間は 409 を返す(他の apply 操作と同様に排他制御する)
+- Note: replicas は 0〜10(上限 10 は仮)。範囲外や未指定は 400
+- Note: 呼び出すと replicas を新しい値にして、status は "applying" になり、反映(Pod の増減)の完了は status のポーリングで確認する。完了すると "active"(0 のときは "scaled_zero")になり、300秒で完了しなければ "failed" になる。replicas は「希望する数」なので、失敗しても元には戻さない。"failed" の deploy は、同じ数でもスケーリングし直せる
+- Note: 今と同じ replicas(failed 以外)なら、何も変えずに 200 を返す。起動中("pending")の間と "delete_failed" の間は 409 を返す
+- Note: 未適用の起動設定(pending_*)は、スケーリングでは反映されない
 
 ## 参照
 
