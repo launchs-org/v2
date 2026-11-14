@@ -91,9 +91,10 @@ func runConfigApply(workflowContext sdkworkflow.Context, input sharedworkflow.Ap
 			BackoffCoefficient: 2,
 		},
 	})
-	// 1. pending の値で、Deployment を更新する。
+	// 1. pending の値で、Deployment を更新する。更新後の設定の世代を受け取り、起動を待つときの下限にする。
+	var generation int64
 	if applyError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.ApplyPendingConfigActivityName,
-		sharedworkflow.ApplyPendingConfigInput{DeployID: input.DeployID}).Get(infrastructureContext, nil); applyError != nil {
+		sharedworkflow.ApplyPendingConfigInput{DeployID: input.DeployID}).Get(infrastructureContext, &generation); applyError != nil {
 		return fmt.Errorf("Deployment を更新できませんでした: %w", applyError)
 	}
 
@@ -109,7 +110,7 @@ func runConfigApply(workflowContext sdkworkflow.Context, input sharedworkflow.Ap
 		},
 	})
 	if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
-		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID}).Get(waitContext, nil); waitError != nil {
+		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 		return fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)
 	}
 	return nil

@@ -40,6 +40,9 @@ type ObservationStore interface {
 
 	// ListPods は、保存してある Pod の状態を全て返す。
 	ListPods(requestContext context.Context) ([]model.DeployPod, error)
+
+	// TouchHeartbeat は、watcher が生きていることを示す、心拍を書く。
+	TouchHeartbeat(requestContext context.Context) error
 }
 
 // Observer は、k8s の Pod と Deployment のイベントを受け取り、実際の状態を DB に反映する。
@@ -98,6 +101,8 @@ type watchSet struct {
 //     読み込んだ全件は、「追加」のイベントとして、キューに入る(→ 4 で、DB を k8s の値で上書きする)
 //  3. 後片付け: DB にあって、いまの k8s に無いもの(止まっていた間に消えたもの)を削除する
 //  4. 反映: キューのものを、順に DB へ反映する。以降の変化も、同じ道を通る
+//     あわせて、生きていることを示す心拍を、一定の間隔で DB に書く(全件の反映を始めたあとから。
+//     ワーカーは、心拍が新しいときだけ、観測値を信用する)
 //
 // 引数:
 //   - ctx: 止めるための context。
@@ -128,6 +133,7 @@ func (observer *Observer) Run(ctx context.Context) error {
 
 	// ===== 4. 反映 =====
 	observer.startWorkers(ctx, set)
+	go observer.sendHeartbeats(ctx)
 	// 止める合図を待つ。
 	<-ctx.Done()
 	return nil
@@ -168,6 +174,29 @@ func (observer *Observer) newWatchSet() (*watchSet, error) {
 		}
 	}
 	return set, nil
+}
+
+// sendHeartbeats は、生きていることを示す心拍を、すぐに1回、そのあとは一定の間隔で、DB に書く。ctx がキャンセルされるまで続ける。
+//
+// 書けなくても止まらない(次の間隔でやり直す)。書けない状態が続くと、ワーカーは、心拍が古いとみなして、
+// 観測値を信用せず、k8s に直接問い合わせる(安全な側に倒れる)。
+//
+// 引数:
+//   - ctx: 止めるための context。
+func (observer *Observer) sendHeartbeats(ctx context.Context) {
+	// 一定の間隔で書く。始めに1回、すぐに書く。
+	ticker := time.NewTicker(model.WatcherHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		if touchError := observer.store.TouchHeartbeat(ctx); touchError != nil && ctx.Err() == nil {
+			observer.appLogger.Warn("心拍を書けませんでした", "error", touchError)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // startWorkers は、Pod と Deployment のキューを、それぞれ別に、順番に処理し始める。

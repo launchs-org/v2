@@ -228,3 +228,24 @@ func TestObserverTakeover(testingT *testing.T) {
 		testingT.Errorf("古い行は片付き、deleted が残るはず: pod=%d 観測値=%d deleted=%d", goneCount, observationCount, deletedEvents)
 	}
 }
+
+// TestObserverSendsHeartbeat は、最初の全件の反映が終わったあと、心拍が DB に書かれることを確認する。
+// 心拍は、ワーカーが、観測値を信用してよいかの判断に使う。
+func TestObserverSendsHeartbeat(testingT *testing.T) {
+	database, _, observer := newObserverTestEnvironment(testingT)
+	// 起動前は、心拍が無い。
+	var before int64
+	database.Table("watcher_heartbeats").Count(&before)
+	if before != 0 {
+		testingT.Fatalf("起動前は心拍が無いはず: %d", before)
+	}
+
+	runObserver(testingT, observer)
+
+	// 全件の反映が終わると、すぐに、心拍が書かれる。
+	waitFor(testingT, "心拍が書かれる", func() bool {
+		var count int64
+		database.Table("watcher_heartbeats").Count(&count)
+		return count == 1
+	})
+}
