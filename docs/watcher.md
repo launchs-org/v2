@@ -36,6 +36,15 @@ DB に保存してある前の状態と、観測した今の状態の差から�
 
 CrashLoopBackOff の間は、再起動のたびに、`waiting`、`ready`、`restarted`、`not_ready` が繰り返し記録される。
 
+## イベントの保存期間(上限)
+
+`deploy_pod_events` は追記だけなので、上限を超えたものを、リーダーの watcher が削除する(`retention.Pruner`)。始めに1回、そのあとは1時間ごと。
+
+- **期間**: 30 日より古いもの(`retention.PodEventRetention`)。
+- **件数**: 1つの deploy につき、新しい順に 1000 件まで(`retention.MaxPodEventsPerDeploy`)。CrashLoopBackOff の間は、再起動のたびに数件ずつ増えるので、期間だけでは足りない。
+- deploy の行を消すと、イベントは CASCADE で一緒に消える。
+- 削除に失敗しても止まらず、次の間隔でやり直す。
+
 ## 処理の流れ
 
 ```

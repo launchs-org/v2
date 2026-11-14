@@ -19,6 +19,7 @@ import (
 	"launchs/shared/repository"
 	"launchs/watcher/src/config"
 	"launchs/watcher/src/observer"
+	"launchs/watcher/src/retention"
 )
 
 const (
@@ -83,7 +84,13 @@ func run() error {
 	observationRepository := repository.NewDeployObservationRepository(appDatabase)
 	appLogger.Info("watcher を起動する(リーダーになるまで待つ)")
 	return elector.Run(ctx, func(leaderContext context.Context) error {
-		// リーダーになるたびに、新しい Observer で、全件の読み込みからやり直す(引き継ぎと同じ手順)。
-		return observer.New(clientset, observationRepository, appLogger).Run(leaderContext)
+		// ----- 上限を超えた Pod のイベントを、一定の間隔で削除する(リーダーの間だけ。観測が終わったら止める) -----
+		workContext, stopWork := context.WithCancel(leaderContext)
+		defer stopWork()
+		pruner := retention.NewPruner(observationRepository, retention.PodEventRetention, retention.MaxPodEventsPerDeploy, retention.PruneInterval, appLogger)
+		go pruner.Run(workContext)
+
+		// ----- 観測する(リーダーになるたびに、新しい Observer で、全件の読み込みからやり直す。引き継ぎと同じ手順) -----
+		return observer.New(clientset, observationRepository, appLogger).Run(workContext)
 	})
 }
