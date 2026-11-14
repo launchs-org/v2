@@ -82,9 +82,10 @@ func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.Creat
 		return fmt.Errorf("namespace を用意できませんでした: %w", namespaceError)
 	}
 
-	// 2. Deployment を作る。
+	// 2. Deployment を作る。作った Deployment の設定の世代を受け取り、起動を待つときの下限にする。
+	var generation int64
 	if applyError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.ApplyDeploymentActivityName,
-		sharedworkflow.ApplyDeploymentInput{DeployID: input.DeployID}).Get(infrastructureContext, nil); applyError != nil {
+		sharedworkflow.ApplyDeploymentInput{DeployID: input.DeployID}).Get(infrastructureContext, &generation); applyError != nil {
 		return fmt.Errorf("Deployment を作れませんでした: %w", applyError)
 	}
 
@@ -102,7 +103,7 @@ func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.Creat
 		},
 	})
 	if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
-		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID}).Get(waitContext, nil); waitError != nil {
+		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 		return fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)
 	}
 	return nil

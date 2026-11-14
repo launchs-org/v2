@@ -91,7 +91,7 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 		definition.Command = &command
 		definition.Args = []string{"--config", "/app/config.yaml"}
 
-		applyError := NewKubernetesDeploymentOperator(fakeClientset, "gvisor").ApplyDeployment(context.Background(), definition)
+		_, applyError := NewKubernetesDeploymentOperator(fakeClientset, "gvisor").ApplyDeployment(context.Background(), definition)
 		if applyError != nil {
 			subTest.Fatalf("エラーにならないはず: %v", applyError)
 		}
@@ -141,7 +141,7 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 	// 指定が無いものは、k8s に任せる(上書きしない)。
 	testingT.Run("RuntimeClass・コマンド・引数が未指定なら、指定しない", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		if applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+		if _, applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
 			subTest.Fatalf("エラーにならないはず: %v", applyError)
 		}
 		deployment, _ := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
@@ -155,13 +155,13 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 	testingT.Run("すでにあれば、内容を更新する", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
 		operator := NewKubernetesDeploymentOperator(fakeClientset, "")
-		if applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+		if _, applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
 			subTest.Fatalf("1回目: %v", applyError)
 		}
 		changedDefinition := newTestDefinition()
 		changedDefinition.Image = "registry.example/app:2"
 		changedDefinition.Replicas = 3
-		if applyError := operator.ApplyDeployment(context.Background(), changedDefinition); applyError != nil {
+		if _, applyError := operator.ApplyDeployment(context.Background(), changedDefinition); applyError != nil {
 			subTest.Fatalf("2回目: %v", applyError)
 		}
 		deployment, _ := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
@@ -176,7 +176,7 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 		definition := newTestDefinition()
 		definition.Namespace = "kube-system"
 
-		applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), definition)
+		_, applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), definition)
 
 		if !errors.Is(applyError, activity.ErrInvalidNamespaceName) {
 			subTest.Errorf("不正な名前のエラーのはず: %v", applyError)
@@ -192,7 +192,7 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 		fakeClientset.PrependReactor("create", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewInternalError(errors.New("boom"))
 		})
-		if applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError == nil {
+		if _, applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition()); applyError == nil {
 			subTest.Errorf("エラーになるはず")
 		}
 	})
@@ -258,7 +258,7 @@ func TestKubernetesDeploymentOperatorDeleteDeployment(testingT *testing.T) {
 	testingT.Run("Deployment を削除できる", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
 		operator := NewKubernetesDeploymentOperator(fakeClientset, "")
-		if applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+		if _, applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
 			subTest.Fatalf("作成できるはず: %v", applyError)
 		}
 
@@ -304,4 +304,36 @@ func TestKubernetesDeploymentOperatorDeleteDeployment(testingT *testing.T) {
 			}
 		})
 	}
+}
+
+// TestKubernetesDeploymentOperatorApplyDeploymentGeneration は、作成と更新のどちらでも、k8s が返した
+// Deployment の設定の世代(generation)を返すことを確認する。
+func TestKubernetesDeploymentOperatorApplyDeploymentGeneration(testingT *testing.T) {
+	// 作成のとき: k8s が、世代 1 の Deployment を返す(fake は世代を付けないので、返すオブジェクトを差し替える)。
+	testingT.Run("作成のときは、作った Deployment の世代を返す", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		fakeClientset.PrependReactor("create", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
+			created := action.(clienttesting.CreateAction).GetObject().(*appsv1.Deployment).DeepCopy()
+			created.Generation = 1
+			return true, created, nil
+		})
+		generation, applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition())
+		if applyError != nil || generation != 1 {
+			subTest.Errorf("世代 1 のはず: %d %v", generation, applyError)
+		}
+	})
+	// 更新のとき: すでに Deployment があり、k8s が、世代 5 の Deployment を返す。
+	testingT.Run("更新のときは、更新後の Deployment の世代を返す", func(subTest *testing.T) {
+		existing := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: testDeploymentName, Namespace: validNamespaceName, Generation: 4}}
+		fakeClientset := fake.NewSimpleClientset(existing)
+		fakeClientset.PrependReactor("update", "deployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
+			updated := action.(clienttesting.UpdateAction).GetObject().(*appsv1.Deployment).DeepCopy()
+			updated.Generation = 5
+			return true, updated, nil
+		})
+		generation, applyError := NewKubernetesDeploymentOperator(fakeClientset, "").ApplyDeployment(context.Background(), newTestDefinition())
+		if applyError != nil || generation != 5 {
+			subTest.Errorf("世代 5 のはず: %d %v", generation, applyError)
+		}
+	})
 }

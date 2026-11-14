@@ -94,37 +94,39 @@ func (operator *KubernetesDeploymentOperator) EnsureNamespace(requestContext con
 //   - definition: 作る Deployment の内容。
 //
 // 戻り値:
+//   - 更新後の Deployment の generation(設定の世代)。
 //   - namespace の名前の形が不正なとき、または k8s への依頼に失敗したときのエラー。
-func (operator *KubernetesDeploymentOperator) ApplyDeployment(requestContext context.Context, definition activity.DeploymentDefinition) error {
+func (operator *KubernetesDeploymentOperator) ApplyDeployment(requestContext context.Context, definition activity.DeploymentDefinition) (int64, error) {
 	// プロジェクトのものではない namespace には、何も作らない。
 	if validateError := validateProjectNamespace(definition.Namespace); validateError != nil {
-		return validateError
+		return 0, validateError
 	}
 
 	// 内容から、k8s の Deployment を組み立てる。
 	desiredDeployment := operator.buildDeployment(definition)
 	deployments := operator.clientset.AppsV1().Deployments(definition.Namespace)
 
-	// まず作ってみる。
-	_, createError := deployments.Create(requestContext, desiredDeployment, metav1.CreateOptions{})
+	// まず作ってみる。作れたら、その Deployment の世代を返す。
+	created, createError := deployments.Create(requestContext, desiredDeployment, metav1.CreateOptions{})
 	if createError == nil {
-		return nil
+		return created.Generation, nil
 	}
 	// すでにあるとき以外の失敗は、原因を包んで返す。
 	if !apierrors.IsAlreadyExists(createError) {
-		return fmt.Errorf("Deployment %s を作れませんでした: %w", definition.Name, createError)
+		return 0, fmt.Errorf("Deployment %s を作れませんでした: %w", definition.Name, createError)
 	}
 
-	// すでにあるときは、今の Deployment を読んで、バージョンを引き継いで更新する。
+	// すでにあるときは、今の Deployment を読んで、バージョンを引き継いで更新し、更新後の世代を返す。
 	existingDeployment, getError := deployments.Get(requestContext, definition.Name, metav1.GetOptions{})
 	if getError != nil {
-		return fmt.Errorf("Deployment %s を取得できませんでした: %w", definition.Name, getError)
+		return 0, fmt.Errorf("Deployment %s を取得できませんでした: %w", definition.Name, getError)
 	}
 	desiredDeployment.ResourceVersion = existingDeployment.ResourceVersion
-	if _, updateError := deployments.Update(requestContext, desiredDeployment, metav1.UpdateOptions{}); updateError != nil {
-		return fmt.Errorf("Deployment %s を更新できませんでした: %w", definition.Name, updateError)
+	updated, updateError := deployments.Update(requestContext, desiredDeployment, metav1.UpdateOptions{})
+	if updateError != nil {
+		return 0, fmt.Errorf("Deployment %s を更新できませんでした: %w", definition.Name, updateError)
 	}
-	return nil
+	return updated.Generation, nil
 }
 
 // DeleteDeployment は、Deployment を削除する。Pod は、k8s が後から片付ける(バックグラウンドの削除)。

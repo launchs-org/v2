@@ -84,7 +84,7 @@ func run() error {
 
 	// deploy を k8s に作る Workflow と、その Activity を登録する。
 	generalWorker.RegisterWorkflowWithOptions(workflow.CreateDeployWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.CreateDeployWorkflowName})
-	createDeployActivities := activity.NewCreateDeployActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	createDeployActivities := activity.NewCreateDeployActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, repository.NewDeployObservationRepository(appDatabase), appLogger)
 	generalWorker.RegisterActivityWithOptions(createDeployActivities.EnsureProjectNamespace, sdkactivity.RegisterOptions{Name: sharedworkflow.EnsureProjectNamespaceActivityName})
 	generalWorker.RegisterActivityWithOptions(createDeployActivities.ApplyDeployment, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyDeploymentActivityName})
 	generalWorker.RegisterActivityWithOptions(createDeployActivities.WaitDeploymentReady, sdkactivity.RegisterOptions{Name: sharedworkflow.WaitDeploymentReadyActivityName})
