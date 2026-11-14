@@ -28,7 +28,9 @@ deploy のコンテナが持つポートをクラスタ内(および必要なら
 - 同一 `ports` 配列内で `name` が重複した場合 400 が返ること
 
 ### 境界値
-- 同一 `ports` 配列内で `port` 番号が重複した場合(同じport番号でprotocolが異なる場合は許可するか等)は仕様未確定のため別途定義する
+- 同一 `ports` 配列内で、同じ `port` と `protocol` の組が重複した場合 400 が返ること。同じ `port` 番号でも `protocol` が違えば許可すること(DNS の 53 番など。決定)
+- `ports` が 20 個なら成功し、21 個なら 400 が返ること(上限 20。決定)
+- `name` は、小文字の英数字とハイフン、15文字まで。先頭・末尾のハイフン、連続するハイフン、英字を含まないもの(数字だけ)は 400 が返ること(k8s のポート名の規則)
 - `port` 番号の範囲(1-65535)外を指定した場合 400 が返ること
 
 ## 仕様
@@ -65,7 +67,7 @@ deploy のコンテナが持つポートをクラスタ内(および必要なら
 - Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
 - Note: service はコンテナ内の複数ポートを、クラスタ内(および必要ならingressのpath ruleから参照されて外部)へ公開する単位。ports配列の各要素でport番号ごとにprotocol("tcp"|"udp")を選べる
 - Note: HTTPという制約はここには無い(TCP/UDPどちらのポートも登録できる)。「HTTPのみ対応」の制約は[イングレス](../ingresses/README.md)側にあり、ingressのpath ruleはprotocol "tcp" のポートのみ参照できる
-- Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName("<name>.svc.cluster.local" 形式、nameはdeployごとに割り当てられるサービス名)と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
+- Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName(`<serviceId>.<projectId>.svc.<クラスターのドメイン>` の形)と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
 
 ## 参照
 

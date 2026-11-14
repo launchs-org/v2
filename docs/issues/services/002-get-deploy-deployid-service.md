@@ -41,7 +41,7 @@ deploy に紐づく service の現在の状態を取得するエンドポイン�
   ],
   "pending_ports": null,
   "status": "active",
-  "dnsName": "web.svc.cluster.local",
+  "dnsName": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.svc.cluster.local",
   "clusterIP": "10.43.12.7"
 }
 ```
@@ -58,7 +58,7 @@ deploy に紐づく service の現在の状態を取得するエンドポイン�
     {"name": "game", "port": 27015, "protocol": "udp"}
   ],
   "status": "active",
-  "dnsName": "web.svc.cluster.local",
+  "dnsName": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.svc.cluster.local",
   "clusterIP": "10.43.12.7"
 }
 ```

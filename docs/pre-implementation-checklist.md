@@ -597,6 +597,8 @@ lint / test / build を CI で回すか(使用サービス含む)。
     - **決定(2026-11-14)**: 区切りのゴールは「任意のイメージを、デプロイして管理できる」こと。build・upload・レジストリは後回しにするので、この確認は、いまは不要(どんなイメージも起動できるのが、意図した仕様)。そのかわり、認証とクォータが、公開前の必須条件になる
   - `pods`(稼働中の Pod の一覧)は、watcher が DB に書いた観測値(`deploy_pods`)を返す。podId は「pod-」+ k8s の Pod の UID。解決済み([docs/watcher.md](watcher.md))
   - **隔離(解決済み)**: namespace は、NetworkPolicy で隔離する([docs/network-isolation.md](network-isolation.md))。実機で、隔離が無いと、別のプロジェクトとシステムの Pod に届くことを確認した。インターネットへの出口は、全て許可(ポートを絞るかは、未決)
+  - **service の DNS 名(決定)**: `<serviceId>.<projectId>.svc.<CLUSTER_DOMAIN>`。このクラスターのドメインは `test-cluster.local`(`cluster.local` ではなかった)ので、環境変数で指定する。仕様の `<name>.svc.cluster.local` は、namespace が無く、そのままでは引けないため、直した
+  - **service の種類(決定)**: 環境変数 `SERVICE_TYPE`(既定 `ClusterIP`)。`LoadBalancer` は、deploy ごとに外部 IP を使い、ポートを LAN に公開するので、注意が要る
   - アカウントのクォータは、アカウント管理グループができるまで、確認していない(スペックのマスターデータだけ、先に入れた)
   - deploy の起動が `failed` になったとき、原因(イメージが取得できない、など)を利用者に伝える手段が無い(status だけ)
   - ワーカーが長時間止まったまま、Workflow 全体のタイムアウトに達したときは、補償が動かず、`pending` のまま残る(プロジェクトの削除と同じ弱点)

@@ -17,6 +17,10 @@ services:
       INGRESS_NAMESPACE: ${INGRESS_NAMESPACE:-}
       # インターネットへの出口の許可から除く、内部のネットワーク(CIDR のカンマ区切り。IPv4)。空なら、既定(10/8、172.16/12、192.168/16、169.254/16、100.64/10)。
       EGRESS_BLOCKED_NETWORKS: ${EGRESS_BLOCKED_NETWORKS:-}
+      # service として作る k8s の Service の種類(ClusterIP、NodePort、LoadBalancer)。LoadBalancer は、deploy ごとに外部 IP を使い、ポートを LAN に公開する。
+      SERVICE_TYPE: ${SERVICE_TYPE:-ClusterIP}
+      # クラスターのドメイン(service の DNS 名の最後の部分)。クラスターごとに違う(CoreDNS の Corefile の kubernetes の行で確かめる)。
+      CLUSTER_DOMAIN: ${CLUSTER_DOMAIN:-cluster.local}
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
   # watcher は、k8s を読み取るだけ(Pod と Deployment の get / list / watch)。
