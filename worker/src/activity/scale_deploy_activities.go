@@ -20,8 +20,8 @@ type ScaleStore interface {
 	// FindSpec は、スペックの名前から、CPU とメモリの大きさを取得する。
 	FindSpec(requestContext context.Context, specName string) (model.DeploySpec, error)
 
-	// UpdateStatus は、期待する状態のときだけ、状態を変える。変えられたかを返す。
-	UpdateStatus(requestContext context.Context, deployID string, fromStatus string, toStatus string) (bool, error)
+	// CompleteScale は、スケーリングの結果を確定する(applying の deploy だけ)。確定できたかを返す。
+	CompleteScale(requestContext context.Context, deployID string, succeeded bool) (bool, error)
 }
 
 // ScaleDeployActivities は、スケーリングの Workflow が呼ぶ Activity をまとめる。
@@ -100,19 +100,8 @@ func (scaleDeployActivities *ScaleDeployActivities) MarkScaleResult(requestConte
 	} else {
 		scaleDeployActivities.appLogger.Warn("スケーリングに失敗した", "deploy_id", input.DeployID, "activity", workflow.MarkScaleResultActivityName)
 	}
-	// 記録する状態を決める。成功なら、replicas に合わせて active か scaled_zero にする。
-	targetStatus := model.DeployStatusFailed
-	if input.Succeeded {
-		deploy, findError := scaleDeployActivities.scaleStore.FindForWorker(requestContext, input.DeployID)
-		if findError != nil {
-			return findError
-		}
-		targetStatus = model.DeployStatusActive
-		if deploy.Replicas == 0 {
-			targetStatus = model.DeployStatusScaledZero
-		}
-	}
-	// applying のときだけ、状態を変える(変えられなくても、別の処理が先に決めたということなので、エラーにしない)。
-	_, updateError := scaleDeployActivities.scaleStore.UpdateStatus(requestContext, input.DeployID, model.DeployStatusApplying, targetStatus)
+	// 結果の確定は、deploy(モデル)が行う(成功なら replicas に合わせて active か scaled_zero、失敗なら failed)。
+	// applying のときだけ変わる(変えられなくても、別の処理が先に決めたということなので、エラーにしない)。
+	_, updateError := scaleDeployActivities.scaleStore.CompleteScale(requestContext, input.DeployID, input.Succeeded)
 	return updateError
 }

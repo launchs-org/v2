@@ -150,9 +150,9 @@ func TestDeployRepositoryFindByID(testingT *testing.T) {
 	}
 }
 
-// TestDeployRepositoryUpdateStatus は、期待する状態のときだけ状態が変わり、
+// TestDeployRepositoryCompleteCreation は、期待する状態のときだけ状態が変わり、
 // 別の処理が先に変えていたときは、何も変えずに false を返すことを確認する。
-func TestDeployRepositoryUpdateStatus(testingT *testing.T) {
+func TestDeployRepositoryCompleteCreation(testingT *testing.T) {
 	// pending の deploy を1件作る。
 	_, deployRepository := newDeployTestEnvironment(testingT)
 	if createError := deployRepository.Create(context.Background(), newTestDeploy(1, "project-00000001", "user-a")); createError != nil {
@@ -161,7 +161,7 @@ func TestDeployRepositoryUpdateStatus(testingT *testing.T) {
 
 	// 期待が合えば変わる。
 	testingT.Run("期待する状態なら変わる", func(subTest *testing.T) {
-		changed, updateError := deployRepository.UpdateStatus(context.Background(), "deploy-00000001", model.DeployStatusPending, model.DeployStatusActive)
+		changed, updateError := deployRepository.CompleteCreation(context.Background(), "deploy-00000001", true)
 		if updateError != nil || !changed {
 			subTest.Fatalf("変わるはず: %v %v", changed, updateError)
 		}
@@ -172,7 +172,7 @@ func TestDeployRepositoryUpdateStatus(testingT *testing.T) {
 	})
 	// 期待が合わなければ変わらない(古い結果で上書きしない)。
 	testingT.Run("期待する状態でなければ、変えずに false", func(subTest *testing.T) {
-		changed, updateError := deployRepository.UpdateStatus(context.Background(), "deploy-00000001", model.DeployStatusPending, model.DeployStatusFailed)
+		changed, updateError := deployRepository.CompleteCreation(context.Background(), "deploy-00000001", false)
 		if updateError != nil || changed {
 			subTest.Fatalf("変わらないはず: %v %v", changed, updateError)
 		}
@@ -183,7 +183,7 @@ func TestDeployRepositoryUpdateStatus(testingT *testing.T) {
 	})
 	// 無い deploy は、false になる。
 	testingT.Run("無い deploy は false", func(subTest *testing.T) {
-		changed, updateError := deployRepository.UpdateStatus(context.Background(), "deploy-99999999", model.DeployStatusPending, model.DeployStatusActive)
+		changed, updateError := deployRepository.CompleteCreation(context.Background(), "deploy-99999999", true)
 		if updateError != nil || changed {
 			subTest.Errorf("false のはず: %v %v", changed, updateError)
 		}
@@ -200,7 +200,7 @@ func TestDeployRepositoryDeleteUnstarted(testingT *testing.T) {
 			testingT.Fatalf("作成できませんでした: %v", createError)
 		}
 	}
-	if _, updateError := deployRepository.UpdateStatus(context.Background(), "deploy-00000002", model.DeployStatusPending, model.DeployStatusActive); updateError != nil {
+	if _, updateError := deployRepository.CompleteCreation(context.Background(), "deploy-00000002", true); updateError != nil {
 		testingT.Fatalf("状態を変えられませんでした: %v", updateError)
 	}
 

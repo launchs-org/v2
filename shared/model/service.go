@@ -125,3 +125,82 @@ func (service *Service) PromotePendingPorts() {
 	service.Ports = service.PendingPorts
 	service.PendingPorts = nil
 }
+
+// CompleteCreation は、service の作成の結果を確定する。pending の service だけが対象。
+//
+//   - 成功: active にして、DNS 名と ClusterIP を記録する(ClusterIP が空なら NULL のまま)。
+//   - 失敗: failed にする。
+//
+// 引数:
+//   - succeeded: 作成に成功したか。
+//   - dnsName: 払い出された DNS 名(成功のときだけ使う)。
+//   - clusterIP: 払い出された ClusterIP(成功のときだけ使う。空なら記録しない)。
+//
+// 戻り値:
+//   - 確定したら true。pending でないときは、何も変えず false。
+func (service *Service) CompleteCreation(succeeded bool, dnsName string, clusterIP string) bool {
+	// 作成中でなければ、確定するものが無い。
+	if service.Status != ServiceStatusPending {
+		return false
+	}
+	// 失敗のときは failed にするだけ。
+	if !succeeded {
+		service.Status = ServiceStatusFailed
+		return true
+	}
+	// 成功のときは、active にして、払い出された値を記録する。
+	service.Status = ServiceStatusActive
+	service.DNSName = &dnsName
+	service.ClusterIP = nil
+	if clusterIP != "" {
+		service.ClusterIP = &clusterIP
+	}
+	return true
+}
+
+// BeginDelete は、削除を受け付ける(状態を deleting にする)。
+//
+// 戻り値:
+//   - 受け付ける前の状態(削除を始められなかったとき、元に戻すために使う)。
+//   - 作成中と削除中なら conflict。
+func (service *Service) BeginDelete() (string, error) {
+	// 作成中と削除中は、受け付けられない。
+	if !service.CanDelete() {
+		return "", apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、削除できません")
+	}
+	// 前の状態を覚えて、削除中にする。
+	previousStatus := service.Status
+	service.Status = ServiceStatusDeleting
+	return previousStatus, nil
+}
+
+// RevertDeleting は、削除中の service を、削除を受け付ける前の状態に戻す。
+//
+// 引数:
+//   - previousStatus: 戻す先の状態(BeginDelete が返したもの)。
+//
+// 戻り値:
+//   - 戻したら true。削除中でないときは、何も変えず false。
+func (service *Service) RevertDeleting(previousStatus string) bool {
+	// 削除中でなければ、戻すものが無い。
+	if service.Status != ServiceStatusDeleting {
+		return false
+	}
+	// 前の状態に戻す。
+	service.Status = previousStatus
+	return true
+}
+
+// MarkDeleteFailed は、削除中の service を、失敗(failed)にする。
+//
+// 戻り値:
+//   - 変えたら true。削除中でないときは、何も変えず false。
+func (service *Service) MarkDeleteFailed() bool {
+	// 削除中でなければ、変えるものが無い。
+	if service.Status != ServiceStatusDeleting {
+		return false
+	}
+	// 失敗の状態にする。
+	service.Status = ServiceStatusFailed
+	return true
+}

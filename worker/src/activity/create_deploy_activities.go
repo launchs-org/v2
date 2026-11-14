@@ -23,8 +23,8 @@ type DeployStore interface {
 	// FindSpec は、スペックの名前から、CPU とメモリの大きさを取得する。
 	FindSpec(requestContext context.Context, specName string) (model.DeploySpec, error)
 
-	// UpdateStatus は、期待する状態のときだけ、状態を変える。変えられたかを返す。
-	UpdateStatus(requestContext context.Context, deployID string, fromStatus string, toStatus string) (bool, error)
+	// CompleteCreation は、作成の起動の結果を確定する(pending の deploy だけ)。確定できたかを返す。
+	CompleteCreation(requestContext context.Context, deployID string, succeeded bool) (bool, error)
 }
 
 // CreateDeployActivities は、deploy を k8s に作って起動を確かめる Workflow が呼ぶ Activity をまとめる。
@@ -138,20 +138,8 @@ func (createDeployActivities *CreateDeployActivities) MarkDeployResult(requestCo
 		createDeployActivities.appLogger.Warn("deploy の起動に失敗した", "deploy_id", input.DeployID, "activity", workflow.MarkDeployResultActivityName)
 	}
 
-	// 記録する状態を決める。成功なら、replicas に合わせて active か scaled_zero にする。
-	targetStatus := model.DeployStatusFailed
-	if input.Succeeded {
-		deploy, findError := createDeployActivities.deployStore.FindForWorker(requestContext, input.DeployID)
-		if findError != nil {
-			return findError
-		}
-		targetStatus = model.DeployStatusActive
-		if deploy.Replicas == 0 {
-			targetStatus = model.DeployStatusScaledZero
-		}
-	}
-
-	// pending のときだけ、状態を変える(変えられなくても、別の処理が先に決めたということなので、エラーにしない)。
-	_, updateError := createDeployActivities.deployStore.UpdateStatus(requestContext, input.DeployID, model.DeployStatusPending, targetStatus)
+	// 結果の確定は、deploy(モデル)が行う(成功なら replicas に合わせて active か scaled_zero、失敗なら failed)。
+	// pending のときだけ変わる(変えられなくても、別の処理が先に決めたということなので、エラーにしない)。
+	_, updateError := createDeployActivities.deployStore.CompleteCreation(requestContext, input.DeployID, input.Succeeded)
 	return updateError
 }

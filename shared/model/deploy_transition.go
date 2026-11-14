@@ -314,3 +314,36 @@ func (deploy Deploy) CrashLoopingPod(at time.Time, threshold time.Duration) (Dep
 	}
 	return longest, found
 }
+
+// CompleteCreation は、作成の起動の結果を確定する。pending の deploy だけが対象。
+//
+// 引数:
+//   - succeeded: 起動に成功したか。成功なら落ち着いた状態(active か scaled_zero)、失敗なら failed。
+//
+// 戻り値:
+//   - 確定したら true。pending でないとき(別の処理が先に決めた)は、何も変えず false。
+func (deploy *Deploy) CompleteCreation(succeeded bool) bool {
+	// 起動中でなければ、確定するものが無い。
+	if !deploy.IsStarting() {
+		return false
+	}
+	// 成功なら落ち着いた状態、失敗なら failed にする。
+	if succeeded {
+		deploy.Status = deploy.SettledStatus()
+	} else {
+		deploy.Status = DeployStatusFailed
+	}
+	return true
+}
+
+// CompleteScale は、スケーリングの結果を確定する。applying の deploy だけが対象。
+//
+// 引数:
+//   - succeeded: 成功したか。成功なら落ち着いた状態、失敗なら failed。
+//
+// 戻り値:
+//   - 確定したら true。applying でないときは、何も変えず false。
+func (deploy *Deploy) CompleteScale(succeeded bool) bool {
+	// 反映中でなければ、確定するものが無い(結果の確定は、サービスのポートの反映と同じ規則)。
+	return deploy.CommitServicePorts(succeeded)
+}
