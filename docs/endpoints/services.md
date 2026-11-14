@@ -103,6 +103,9 @@
 - Note: ports は個別要素単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)。ポートの追加・削除・変更は全てこのエンドポイントで配列ごと送る
 - Note: この時点ではまだ反映されない。pending_ports として保存され、サービスの apply を呼ぶまで ports(現在反映されている値)は変わらない
 - Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はserviceに対する変更・apply・discardを排他制御する)
+- Note: service の status が "active" でないとき(作成中の "pending"、"failed"、"deleting")は 409 を返す(ポートを変えられるのは、k8s の Service がある active のときだけ)。更新・適用・破棄の全てで同じ
+- Note: 送った ports が、現在の ports と同じ内容(JSON の書式ではなく、中身で比べる)なら、pending_ports は保存せず null にする(以前の pending_ports も消える)。そのため、同じポートを apply し直すことはできない(409)
+- Note: ports の検査は、作成のときと同じ(1〜20個、name の規則、port の範囲、name と port・protocol の重複は 400)
 - Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
 
 ### サービス 適用
@@ -115,13 +118,13 @@
 ```json
 {}
 ```
-- Note: pending_ports の内容を ports に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ ports は更新されていない。pending_ports が null の場合は 409 を返す
-- Note: 呼び出し直後、deploy の status は "applying" になる。この間 service の pending_ports はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_ports の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて service の ports を pending_ports の内容に更新し、pending_ports は null に戻す。成功すれば deploy の status は "active" に、失敗すれば "failed" になる(service の ports の内容自体は失敗時も新しい値で上書きされる)([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
+- Note: pending_ports の内容を ports に反映するため、k8s の Service のポートを更新する。**Pod は再起動しない**(Service は、Pod のポートに直接つなぐため。ポートの変更で、利用者のアプリは中断しない)。呼び出し自体は即座に応答するが、この時点ではまだ ports は更新されていない。pending_ports が null の場合は 409 を返す
+- Note: 呼び出し直後、deploy の status は "applying" になる(他の操作を排他制御するため)。この間 service の pending_ports はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_ports の値を使って先に k8s の Service の更新を試み、その結果(成功・失敗)が確定した時点で、**成功なら** service の ports を pending_ports の内容に更新して pending_ports を null に戻し、deploy の status を "active" に戻す。**失敗なら**、k8s の Service を元の ports に戻した上で、ports も pending_ports も変えず(試して失敗した値は pending_ports に残る)、deploy の status を "failed" にする。ports は常に「いま動いている値」を表す。失敗のあとは、pending_ports を直して PATCH し直す、そのまま再度 apply する、discard で破棄する、のいずれもできる([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
 - Note: 既に deploy の status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
 - Note: apply 中に変化するのは deploy の status だけで、service の status("pending" | "active" | "failed" | "deleting")は変わらない。service の status は Service 自体の払い出し状態である。apply の進行は deploy の status が表す
-- Note: deploy の replicas が 0(status が "scaled_zero")のときは、再起動する Pod が無いのですぐに完了し、成功しても status は "active" ではなく "scaled_zero" に戻る。
+- Note: deploy の replicas が 0(status が "scaled_zero")のときも、k8s の Service は更新でき、成功しても status は "active" ではなく "scaled_zero" に戻る。
 - Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
-- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に deploy の status を "failed" に遷移させる
+- Note: k8s の Service の更新は、一時的な障害なら、2分までリトライする(仕様の applying の 300秒に収まる)。それでも更新できなければ、上の失敗として扱う
 
 ### サービス 破棄
 - Post: /deploy/:deployId/service/discard

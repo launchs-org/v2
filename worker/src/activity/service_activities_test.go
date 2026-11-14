@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"go.temporal.io/sdk/temporal"
@@ -23,7 +24,14 @@ type fakeServiceStore struct {
 	updates       []string
 	deletedRecord []string
 	failedMarks   []string
+	commits       []string
 	markError     error
+}
+
+// CommitPortsApply は、結果を覚えて、決めたエラーを返す。
+func (fakeStore *fakeServiceStore) CommitPortsApply(_ context.Context, serviceID string, succeeded bool) (bool, error) {
+	fakeStore.commits = append(fakeStore.commits, fmt.Sprintf("%s|%v", serviceID, succeeded))
+	return true, fakeStore.markError
 }
 
 // FindForWorker は、決めた service とエラーを返す。
@@ -95,7 +103,7 @@ func newTestServiceModel() model.Service {
 // newTestServiceActivities は、fake を持つ ServiceActivities を作る。
 func newTestServiceActivities(fakeStore *fakeServiceStore, fakeOperator *fakeServiceOperator) *ServiceActivities {
 	// ログは捨てる入れ物に出す。
-	return NewServiceActivities(fakeStore, fakeOperator, ServiceSettings{ServiceType: "ClusterIP", ClusterDomain: "test-cluster.local"}, newTestActivities(nil, nil).appLogger)
+	return NewServiceActivities(fakeStore, fakeStore, fakeOperator, ServiceSettings{ServiceType: "ClusterIP", ClusterDomain: "test-cluster.local"}, newTestActivities(nil, nil).appLogger)
 }
 
 // TestEnsureService は、DB の service から、種類・ポート・向き先の deploy を組み立てて k8s に渡し、
@@ -124,7 +132,8 @@ func TestEnsureService(testingT *testing.T) {
 	})
 	testingT.Run("設定の種類(LoadBalancer)が、k8s に渡る", func(subTest *testing.T) {
 		fakeOperator := &fakeServiceOperator{}
-		activities := NewServiceActivities(&fakeServiceStore{service: newTestServiceModel()}, fakeOperator,
+		fakeStore := &fakeServiceStore{service: newTestServiceModel()}
+		activities := NewServiceActivities(fakeStore, fakeStore, fakeOperator,
 			ServiceSettings{ServiceType: "LoadBalancer", ClusterDomain: "cluster.local"}, newTestActivities(nil, nil).appLogger)
 		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
 		testEnvironment.RegisterActivity(activities.EnsureService)
@@ -287,4 +296,121 @@ func TestDeleteDeployService(testingT *testing.T) {
 			subTest.Errorf("DB の失敗は、返すはず")
 		}
 	})
+}
+
+// newPendingPortsService は、現在のポートと、pending のポートが違う service を作る。
+//
+// 戻り値:
+//   - ポートは web(8080、tcp)、pending は web(8080、tcp)と metrics(9090、tcp)の、active の service。
+func newPendingPortsService() model.Service {
+	service := newTestServiceModel()
+	service.Status = model.ServiceStatusActive
+	service.PendingPorts = datatypes.JSON(`[{"name":"web","port":8080,"protocol":"tcp"},{"name":"metrics","port":9090,"protocol":"tcp"}]`)
+	service.Ports = datatypes.JSON(`[{"name":"web","port":8080,"protocol":"tcp"}]`)
+	return service
+}
+
+// TestApplyServicePorts は、k8s に渡る内容が、現在のポートではなく pending のポートになること、
+// 適用するポートが無い・壊れているときはリトライしないエラーになることを確認する。
+func TestApplyServicePorts(testingT *testing.T) {
+	testingT.Run("pending のポートで Service を更新する(名前・namespace・向き先・種類は、そのまま)", func(subTest *testing.T) {
+		fakeOperator := &fakeServiceOperator{}
+		activities := newTestServiceActivities(&fakeServiceStore{service: newPendingPortsService()}, fakeOperator)
+		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+		testEnvironment.RegisterActivity(activities.ApplyServicePorts)
+
+		_, executeError := testEnvironment.ExecuteActivity(activities.ApplyServicePorts, workflow.ApplyServicePortsActivityInput{ServiceID: "service-1"})
+
+		definition := fakeOperator.appliedDefinition
+		if executeError != nil || definition == nil || len(definition.Ports) != 2 || definition.Ports[1] != (ServicePortDefinition{Name: "metrics", Port: 9090, Protocol: "tcp"}) {
+			subTest.Fatalf("pending の2つのポートのはず: %v %+v", executeError, definition)
+		}
+		if definition.Namespace != "project-1" || definition.Name != "service-1" || definition.DeployID != "deploy-1" || definition.Type != "ClusterIP" {
+			subTest.Errorf("向き先と種類は変わらないはず: %+v", definition)
+		}
+	})
+	for _, broken := range []struct {
+		name   string
+		modify func(service *model.Service)
+	}{
+		{"適用するポートが無ければ、リトライしないエラー", func(service *model.Service) { service.PendingPorts = nil }},
+		{"pending のポートの JSON が壊れていたら、リトライしないエラー", func(service *model.Service) { service.PendingPorts = datatypes.JSON(`{"x":1}`) }},
+	} {
+		testingT.Run(broken.name, func(subTest *testing.T) {
+			service := newPendingPortsService()
+			broken.modify(&service)
+			fakeOperator := &fakeServiceOperator{}
+			activities := newTestServiceActivities(&fakeServiceStore{service: service}, fakeOperator)
+			testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+			testEnvironment.RegisterActivity(activities.ApplyServicePorts)
+			_, executeError := testEnvironment.ExecuteActivity(activities.ApplyServicePorts, workflow.ApplyServicePortsActivityInput{ServiceID: "service-1"})
+			var applicationError *temporal.ApplicationError
+			if !errors.As(executeError, &applicationError) || !applicationError.NonRetryable() || fakeOperator.appliedDefinition != nil {
+				subTest.Errorf("リトライしないエラーで、何も更新しないはず: %v", executeError)
+			}
+		})
+	}
+	testingT.Run("k8s の失敗は、リトライできるエラー。名前の形の不正は、リトライしないエラー", func(subTest *testing.T) {
+		for _, testCase := range []struct {
+			applyError error
+			retryable  bool
+		}{{errors.New("k8s down"), true}, {ErrInvalidServiceName, false}} {
+			activities := newTestServiceActivities(&fakeServiceStore{service: newPendingPortsService()}, &fakeServiceOperator{applyError: testCase.applyError})
+			testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+			testEnvironment.RegisterActivity(activities.ApplyServicePorts)
+			_, executeError := testEnvironment.ExecuteActivity(activities.ApplyServicePorts, workflow.ApplyServicePortsActivityInput{ServiceID: "service-1"})
+			var applicationError *temporal.ApplicationError
+			nonRetryable := errors.As(executeError, &applicationError) && applicationError.NonRetryable()
+			if executeError == nil || nonRetryable == testCase.retryable {
+				subTest.Errorf("%v: リトライ可否が違う: %v", testCase.applyError, executeError)
+			}
+		}
+	})
+}
+
+// TestRollbackServicePorts は、巻き戻しが、pending ではなく、現在の(動いていた)ポートで Service を更新することを確認する。
+func TestRollbackServicePorts(testingT *testing.T) {
+	testingT.Run("現在のポート(pending ではない)で Service を戻す", func(subTest *testing.T) {
+		fakeOperator := &fakeServiceOperator{}
+		activities := newTestServiceActivities(&fakeServiceStore{service: newPendingPortsService()}, fakeOperator)
+		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+		testEnvironment.RegisterActivity(activities.RollbackServicePorts)
+
+		_, executeError := testEnvironment.ExecuteActivity(activities.RollbackServicePorts, workflow.ApplyServicePortsActivityInput{ServiceID: "service-1"})
+
+		definition := fakeOperator.appliedDefinition
+		if executeError != nil || definition == nil || len(definition.Ports) != 1 || definition.Ports[0].Name != "web" {
+			subTest.Errorf("現在の1つのポート(web)のはず: %v %+v", executeError, definition)
+		}
+	})
+	testingT.Run("k8s の失敗は、リトライできるエラー", func(subTest *testing.T) {
+		activities := newTestServiceActivities(&fakeServiceStore{service: newPendingPortsService()}, &fakeServiceOperator{applyError: errors.New("k8s down")})
+		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+		testEnvironment.RegisterActivity(activities.RollbackServicePorts)
+		_, executeError := testEnvironment.ExecuteActivity(activities.RollbackServicePorts, workflow.ApplyServicePortsActivityInput{ServiceID: "service-1"})
+		var applicationError *temporal.ApplicationError
+		if executeError == nil || (errors.As(executeError, &applicationError) && applicationError.NonRetryable()) {
+			subTest.Errorf("リトライできるエラーのはず: %v", executeError)
+		}
+	})
+}
+
+// TestCommitServicePortsResult は、成否が保存先にそのまま渡され、保存先のエラーが返ることを確認する。
+func TestCommitServicePortsResult(testingT *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		succeeded   bool
+		commitError error
+	}{{"成功を渡す", true, nil}, {"失敗を渡す", false, nil}, {"保存先のエラーは、返す(リトライされる)", true, errors.New("database down")}} {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			fakeStore := &fakeServiceStore{markError: testCase.commitError}
+			activities := newTestServiceActivities(fakeStore, &fakeServiceOperator{})
+			testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+			testEnvironment.RegisterActivity(activities.CommitServicePortsResult)
+			_, executeError := testEnvironment.ExecuteActivity(activities.CommitServicePortsResult, workflow.CommitServicePortsResultInput{ServiceID: "service-1", Succeeded: testCase.succeeded})
+			if (executeError != nil) != (testCase.commitError != nil) || len(fakeStore.commits) != 1 || fakeStore.commits[0] != fmt.Sprintf("service-1|%v", testCase.succeeded) {
+				subTest.Errorf("成否が渡るはず: %v %v", executeError, fakeStore.commits)
+			}
+		})
+	}
 }

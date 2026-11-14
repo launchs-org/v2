@@ -72,3 +72,27 @@ func (starter *TemporalServiceWorkflowStarter) StartServiceDeletion(requestConte
 	}
 	return nil
 }
+
+// StartPortsApply は、ApplyServicePortsWorkflow を開始する。完了は待たない。
+//
+// Workflow ID は「apply-ports-{serviceId}-{uuid}」。実行するのは、ワーカーの一般の Task Queue。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - serviceID: ポートを反映する service の ID。
+//
+// 戻り値:
+//   - Temporal に開始を頼めなかったときのエラー。
+func (starter *TemporalServiceWorkflowStarter) StartPortsApply(requestContext context.Context, serviceID string) error {
+	// Workflow ID、Task Queue、全体のタイムアウトを決めて、開始を頼む。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewApplyServicePortsWorkflowID(serviceID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.ApplyServicePortsWorkflowTimeout,
+	}, sharedworkflow.ApplyServicePortsWorkflowName, sharedworkflow.ApplyServicePortsInput{ServiceID: serviceID})
+	// 開始できなかったときは、原因を包んで返す。
+	if executeError != nil {
+		return fmt.Errorf("service のポートの反映の Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}

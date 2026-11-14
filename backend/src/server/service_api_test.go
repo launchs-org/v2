@@ -17,12 +17,19 @@ import (
 type fakeServiceWorkflowStarter struct {
 	createdServiceIDs []string
 	deletedServiceIDs []string
+	appliedServiceIDs []string
 	startError        error
 }
 
 // StartServiceCreation は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeServiceWorkflowStarter) StartServiceCreation(_ context.Context, serviceID string) error {
 	fakeStarter.createdServiceIDs = append(fakeStarter.createdServiceIDs, serviceID)
+	return fakeStarter.startError
+}
+
+// StartPortsApply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeServiceWorkflowStarter) StartPortsApply(_ context.Context, serviceID string) error {
+	fakeStarter.appliedServiceIDs = append(fakeStarter.appliedServiceIDs, serviceID)
 	return fakeStarter.startError
 }
 
