@@ -16,9 +16,9 @@
 ### 正常系
 - `pending_ports` が存在する状態で呼び出すと 200 が返り、[デプロイ詳細取得](../deploys/002-get-deploy-deployid.md) の `status` が即座に `"applying"` になること
 - `status` が `"applying"` の間、`pending_ports` は消費されずそのまま保持されること
-- 再起動成功時、`ports` が `pending_ports` の内容に更新され、`pending_ports` が `null` に戻り、deploy の `status` が `"active"` になること
-- 再起動失敗時も、`ports` が `pending_ports` の内容(失敗した新しい値)に更新され、`pending_ports` が `null` に戻り、deploy の `status` が `"failed"` になること
-- deploy の `replicas` が 0(`status` が `"scaled_zero"`)のときに呼び出すと、再起動する Pod が無いのですぐに完了し、成功しても deploy の `status` は `"active"` ではなく `"scaled_zero"` に戻ること(失敗時は `"failed"`)
+- 反映成功時、`ports` が `pending_ports` の内容に更新され、`pending_ports` が `null` に戻り、deploy の `status` が `"active"` になること。Pod は再起動しないこと(Pod の ID と再起動回数が変わらない)
+- 反映失敗時は、k8s の Service が元のポートに戻り、`ports` も `pending_ports` も変わらず(失敗した値は `pending_ports` に残る)、deploy の `status` が `"failed"` になること。失敗のあとも、再度の apply・PATCH・discard ができること
+- deploy の `replicas` が 0(`status` が `"scaled_zero"`)のときに呼び出しても、k8s の Service は更新でき、成功しても deploy の `status` は `"active"` ではなく `"scaled_zero"` に戻ること(失敗時は `"failed"`)
 - apply 中も service の `status`(`"pending"` / `"active"` / `"failed"` / `"deleting"`)は変化せず、変化するのは deploy の `status` だけであること
 
 ### 異常系

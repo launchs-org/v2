@@ -48,6 +48,7 @@ type ServiceSettings struct {
 // ServiceActivities は、service の作成・削除の Workflow が呼ぶ Activity をまとめる。
 type ServiceActivities struct {
 	serviceStore    ServiceStore
+	portsStore      ServicePortsStore
 	serviceOperator ServiceOperator
 	settings        ServiceSettings
 	appLogger       *slog.Logger
@@ -57,15 +58,16 @@ type ServiceActivities struct {
 //
 // 引数:
 //   - serviceStore: service の保存先。
+//   - portsStore: ポートの反映の結果を確定する保存先。
 //   - serviceOperator: k8s の Service を操作するもの。
 //   - settings: Service の種類と、クラスターのドメイン。
 //   - appLogger: ログを出すロガー。
 //
 // 戻り値:
 //   - 作成した ServiceActivities。
-func NewServiceActivities(serviceStore ServiceStore, serviceOperator ServiceOperator, settings ServiceSettings, appLogger *slog.Logger) *ServiceActivities {
+func NewServiceActivities(serviceStore ServiceStore, portsStore ServicePortsStore, serviceOperator ServiceOperator, settings ServiceSettings, appLogger *slog.Logger) *ServiceActivities {
 	// 依存するものを持たせて返す。
-	return &ServiceActivities{serviceStore: serviceStore, serviceOperator: serviceOperator, settings: settings, appLogger: appLogger}
+	return &ServiceActivities{serviceStore: serviceStore, portsStore: portsStore, serviceOperator: serviceOperator, settings: settings, appLogger: appLogger}
 }
 
 // EnsureService は、service に対応する k8s の Service を作る(すでにあれば更新する)。
@@ -89,15 +91,10 @@ func (serviceActivities *ServiceActivities) EnsureService(requestContext context
 	if findError != nil {
 		return workflow.EnsureServiceResult{}, findError
 	}
-	// ポートの JSON を読む。壊れていたら、何度やっても同じなのでリトライしない。
-	var ports []model.ServicePort
-	if unmarshalError := json.Unmarshal(service.Ports, &ports); unmarshalError != nil {
-		return workflow.EnsureServiceResult{}, temporal.NewNonRetryableApplicationError(
-			fmt.Sprintf("ポートを読み取れません: %v", unmarshalError), "InvalidService", unmarshalError)
-	}
-	definition := ServiceDefinition{Namespace: service.ProjectID, Name: service.ID, DeployID: service.DeployID, Type: serviceActivities.settings.ServiceType}
-	for _, port := range ports {
-		definition.Ports = append(definition.Ports, ServicePortDefinition{Name: port.Name, Port: int32(port.Port), Protocol: port.Protocol})
+	// ポートの JSON から、k8s に作る Service の内容を組み立てる(壊れていたら、リトライしない)。
+	definition, definitionError := portsToDefinition(service, service.Ports, serviceActivities.settings.ServiceType)
+	if definitionError != nil {
+		return workflow.EnsureServiceResult{}, definitionError
 	}
 
 	// 作成は、k8s を操作するものに任せる。名前の形の不正は、リトライしない印を付ける。
@@ -219,4 +216,121 @@ func (serviceActivities *ServiceActivities) DeleteDeployService(requestContext c
 	}
 	// 削除は、k8s を操作するものに任せる。
 	return markNonRetryable(serviceActivities.serviceOperator.DeleteService(requestContext, service.ProjectID, service.ID))
+}
+
+// ServicePortsStore は、ポートの反映の Activity が必要とする、service の保存先の追加の操作。
+//
+// 実体は shared/repository の ServiceRepository。
+type ServicePortsStore interface {
+	// CommitPortsApply は、ポートの反映の結果を確定する。確定したかを返す。
+	CommitPortsApply(requestContext context.Context, serviceID string, succeeded bool) (bool, error)
+}
+
+// portsToDefinition は、service と、公開するポート(JSON)から、k8s に作る Service の内容を組み立てる。
+//
+// 引数:
+//   - service: service(namespace、名前、向き先の deploy に使う)。
+//   - portsJSON: 公開するポートの JSON の配列。
+//   - serviceType: Service の種類。
+//
+// 戻り値:
+//   - Service の内容。
+//   - ポートの JSON が壊れているときの、リトライしないエラー(何度やっても同じなため)。
+func portsToDefinition(service model.Service, portsJSON []byte, serviceType string) (ServiceDefinition, error) {
+	// ポートの JSON を読む。
+	var ports []model.ServicePort
+	if unmarshalError := json.Unmarshal(portsJSON, &ports); unmarshalError != nil {
+		return ServiceDefinition{}, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("ポートを読み取れません: %v", unmarshalError), "InvalidService", unmarshalError)
+	}
+	// k8s の Service の内容にする。
+	definition := ServiceDefinition{Namespace: service.ProjectID, Name: service.ID, DeployID: service.DeployID, Type: serviceType}
+	for _, port := range ports {
+		definition.Ports = append(definition.Ports, ServicePortDefinition{Name: port.Name, Port: int32(port.Port), Protocol: port.Protocol})
+	}
+	return definition, nil
+}
+
+// ApplyServicePorts は、pending のポートで、k8s の Service を更新する。
+//
+// DB の正式なポート(ports)ではなく、pending のポートを使う。Pod は再起動しない(Service は、Pod のポートに直接つなぐため)。
+// DB の正式なポートは、結果が確定するまで変えない。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: k8s の Service を更新する service の ID。
+//
+// 戻り値:
+//   - service を読めなかったとき、適用するポートが無い・壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func (serviceActivities *ServiceActivities) ApplyServicePorts(requestContext context.Context, input workflow.ApplyServicePortsActivityInput) error {
+	// どの Activity が何のために動いているかを、ログに残す。
+	serviceActivities.appLogger.Info("pending のポートで k8s の Service を更新する", "service_id", input.ServiceID, "activity", workflow.ApplyServicePortsActivityName)
+
+	// DB から service を読む。
+	service, findError := serviceActivities.serviceStore.FindForWorker(requestContext, input.ServiceID)
+	if findError != nil {
+		return findError
+	}
+	// 適用するポートが無いのは、何度やっても同じなので、リトライしない。
+	if len(service.PendingPorts) == 0 {
+		return temporal.NewNonRetryableApplicationError("適用するポートがありません", "NoPendingPorts", nil)
+	}
+	// pending のポートから、Service の内容を組み立てて、k8s を操作するものに任せる。
+	definition, definitionError := portsToDefinition(service, service.PendingPorts, serviceActivities.settings.ServiceType)
+	if definitionError != nil {
+		return definitionError
+	}
+	_, applyError := serviceActivities.serviceOperator.ApplyService(requestContext, definition)
+	return markNonRetryable(applyError)
+}
+
+// RollbackServicePorts は、反映に失敗したとき、k8s の Service を、現在の(動いていた)ポートに戻す。
+//
+// 失敗した新しいポートのままだと、k8s の Service が、DB の正式なポートとずれる。DB の正式なポートで、Service を作り直して、そろえる。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 元に戻す service の ID。
+//
+// 戻り値:
+//   - service を読めなかったとき、ポートが壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func (serviceActivities *ServiceActivities) RollbackServicePorts(requestContext context.Context, input workflow.ApplyServicePortsActivityInput) error {
+	// 運用で気づけるよう、警告で残す。
+	serviceActivities.appLogger.Warn("反映に失敗したので、k8s の Service を元のポートに戻す", "service_id", input.ServiceID, "activity", workflow.RollbackServicePortsActivityName)
+
+	// DB から service を読み、正式なポートで、Service の内容を組み立てる。
+	service, findError := serviceActivities.serviceStore.FindForWorker(requestContext, input.ServiceID)
+	if findError != nil {
+		return findError
+	}
+	definition, definitionError := portsToDefinition(service, service.Ports, serviceActivities.settings.ServiceType)
+	if definitionError != nil {
+		return definitionError
+	}
+	// 戻す作業は、k8s を操作するものに任せる。
+	_, applyError := serviceActivities.serviceOperator.ApplyService(requestContext, definition)
+	return markNonRetryable(applyError)
+}
+
+// CommitServicePortsResult は、ポートの反映の結果を DB に確定する。
+//
+// 成功なら、ポートを pending の内容にして pending を空に戻し、deploy を active(replicas が 0 なら scaled_zero)に戻す。
+// 失敗なら、ポートと pending は変えず、deploy を failed にする。すでに確定している(deploy が applying でない)ときは、何もしない。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 結果を確定する service の ID と、成功したか。
+//
+// 戻り値:
+//   - 確定できなかったときのデータベースのエラー。
+func (serviceActivities *ServiceActivities) CommitServicePortsResult(requestContext context.Context, input workflow.CommitServicePortsResultInput) error {
+	// 結果をログに残す(失敗は、運用で気づけるよう警告にする)。
+	if input.Succeeded {
+		serviceActivities.appLogger.Info("service のポートの反映に成功した", "service_id", input.ServiceID, "activity", workflow.CommitServicePortsResultActivityName)
+	} else {
+		serviceActivities.appLogger.Warn("service のポートの反映に失敗した", "service_id", input.ServiceID, "activity", workflow.CommitServicePortsResultActivityName)
+	}
+	// 確定を、保存先に任せる(確定済みなら何もしない。エラーでないので、結果は使わない)。
+	_, commitError := serviceActivities.portsStore.CommitPortsApply(requestContext, input.ServiceID, input.Succeeded)
+	return commitError
 }

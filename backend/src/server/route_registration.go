@@ -55,4 +55,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
 	apiGroup.GET("/deploy/:deployId/service", serviceController.Get)
 	apiGroup.DELETE("/deploy/:deployId/service", serviceController.Delete)
+	apiGroup.PATCH("/deploy/:deployId/service", serviceController.UpdatePorts)
+	apiGroup.POST("/deploy/:deployId/service/apply", serviceController.ApplyPorts)
+	apiGroup.POST("/deploy/:deployId/service/discard", serviceController.DiscardPorts)
 }
