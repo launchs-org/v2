@@ -69,7 +69,7 @@ func run() error {
 	// k8s を操作する役を、設定に合わせて選ぶ。
 	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, cluster.OperatorSettings{
 		RuntimeClass: workerConfig.RuntimeClass, IngressNamespace: workerConfig.IngressNamespace, BlockedNetworks: workerConfig.BlockedNetworks,
-	}, appLogger)
+	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints}, appLogger)
 	if operatorsError != nil {
 		return operatorsError
 	}
@@ -136,6 +136,17 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(serviceActivities.CommitServicePortsResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitServicePortsResultActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.DeleteDeployService, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteDeployServiceActivityName})
 
+	// ingress(ルールの反映と削除)の Workflow と Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyIngressRulesWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyIngressRulesWorkflowName})
+	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteIngressWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteIngressWorkflowName})
+	ingressActivities := activity.NewIngressActivities(repository.NewIngressRepository(appDatabase), operators.ingressOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(ingressActivities.ApplyIngressRules, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyIngressRulesActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.RollbackIngressRules, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackIngressRulesActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.CommitIngressRulesResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitIngressRulesResultActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.DeleteIngressObject, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteIngressObjectActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.DeleteIngressRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteIngressRecordActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.MarkIngressDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkIngressDeleteFailedActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
@@ -153,6 +164,9 @@ type clusterOperators struct {
 	deploymentOperator activity.DeploymentOperator
 	// serviceOperator は、k8s の Service を作る・削除する役。
 	serviceOperator activity.ServiceOperator
+
+	// ingressOperator は、Traefik の IngressRoute を作る・削除する役。
+	ingressOperator activity.IngressOperator
 }
 
 // chooseClusterOperators は、k8s への接続の設定に合わせて、k8s を操作する役を選ぶ。
@@ -165,12 +179,13 @@ type clusterOperators struct {
 // 引数:
 //   - kubernetesSettings: k8s への接続の設定。
 //   - operatorSettings: k8s を操作する役の設定(RuntimeClass、外からの通信を中継する namespace、除くネットワーク)。
+//   - ingressSettings: Traefik の IngressRoute の apiVersion と entryPoint。
 //   - appLogger: ログを出すロガー。
 //
 // 戻り値:
 //   - k8s を操作する役の一式。
 //   - k8s への接続の設定を読めなかったときのエラー。
-func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cluster.OperatorSettings, appLogger *slog.Logger) (clusterOperators, error) {
+func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cluster.OperatorSettings, ingressSettings cluster.IngressRouteSettings, appLogger *slog.Logger) (clusterOperators, error) {
 	// k8s のクライアントを作る(クラスタへの通信は、最初の操作まで行われない)。
 	clientset, clientsetError := k8s.NewClientset(kubernetesSettings)
 
@@ -181,16 +196,27 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 			namespaceDeleter:   activity.NewLoggingNamespaceDeleter(appLogger),
 			deploymentOperator: activity.NewLoggingDeploymentOperator(appLogger),
 			serviceOperator:    activity.NewLoggingServiceOperator(appLogger),
+			ingressOperator:    activity.NewLoggingIngressOperator(appLogger),
 		}, nil
 	}
 	// それ以外のエラーは、起動を止める。
 	if clientsetError != nil {
 		return clusterOperators{}, clientsetError
 	}
+	// CRD を操作する動的クライアントを作り、IngressRoute を操作する役を作る。
+	dynamicClient, dynamicError := k8s.NewDynamicClient(kubernetesSettings)
+	if dynamicError != nil {
+		return clusterOperators{}, dynamicError
+	}
+	ingressOperator, ingressError := cluster.NewKubernetesIngressOperator(dynamicClient, ingressSettings)
+	if ingressError != nil {
+		return clusterOperators{}, ingressError
+	}
 	// 本物のクライアントで、実際に操作する実装を使う。
 	return clusterOperators{
 		namespaceDeleter:   cluster.NewKubernetesNamespaceDeleter(clientset),
 		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, operatorSettings),
 		serviceOperator:    cluster.NewKubernetesServiceOperator(clientset),
+		ingressOperator:    ingressOperator,
 	}, nil
 }

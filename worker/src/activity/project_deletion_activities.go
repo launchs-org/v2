@@ -23,6 +23,9 @@ var ErrInvalidNamespaceName = errors.New("namespace の名前がプロジェク�
 // ErrInvalidServiceName は、Service の名前が service の ID の形ではないときのエラー。
 var ErrInvalidServiceName = errors.New("Service の名前が service の ID の形ではありません")
 
+// ErrInvalidIngressName は、IngressRoute の名前が ingress の ID の形ではないときのエラー。
+var ErrInvalidIngressName = errors.New("IngressRoute の名前が ingress の ID の形ではありません")
+
 // ErrInvalidDeploymentName は、Deployment の名前が deploy の ID の形ではないときのエラー。
 var ErrInvalidDeploymentName = errors.New("Deployment の名前が deploy の ID の形ではありません")
 
@@ -222,6 +225,9 @@ func markNonRetryable(originalError error) error {
 	}
 	if errors.Is(originalError, ErrInvalidServiceName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidServiceName", originalError)
+	}
+	if errors.Is(originalError, ErrInvalidIngressName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidIngressName", originalError)
 	}
 	if errors.Is(originalError, ErrInvalidDeploymentName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidDeploymentName", originalError)
