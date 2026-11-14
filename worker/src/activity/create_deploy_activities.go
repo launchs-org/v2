@@ -60,6 +60,9 @@ type DeploymentOperator interface {
 	// ApplyDeployment は、Deployment を作る。すでにあれば内容を更新する(冪等)。
 	ApplyDeployment(requestContext context.Context, definition DeploymentDefinition) error
 
+	// DeleteDeployment は、Deployment を削除する(Pod も一緒に消える)。無ければ何もしない(冪等)。
+	DeleteDeployment(requestContext context.Context, namespaceName string, deploymentName string) error
+
 	// DeploymentReady は、Deployment が、希望するレプリカ数まで起動し終えているかを返す。
 	DeploymentReady(requestContext context.Context, namespaceName string, deploymentName string) (bool, error)
 }
@@ -344,4 +347,19 @@ func (loggingOperator *LoggingDeploymentOperator) ApplyDeployment(_ context.Cont
 func (loggingOperator *LoggingDeploymentOperator) DeploymentReady(_ context.Context, _ string, _ string) (bool, error) {
 	// 何も作っていないので待つ必要は無く、常に Ready として扱う。
 	return true, nil
+}
+
+// DeleteDeployment は、何も削除せず、警告のログを出すだけ。
+//
+// 引数:
+//   - requestContext: 使わない。
+//   - namespaceName: 削除する予定の Deployment の namespace。
+//   - deploymentName: 削除する予定の Deployment の名前。
+//
+// 戻り値:
+//   - 常に nil。
+func (loggingOperator *LoggingDeploymentOperator) DeleteDeployment(_ context.Context, namespaceName string, deploymentName string) error {
+	// 実際には削除していないことが分かるよう、警告で出す。
+	loggingOperator.appLogger.Warn("k8s に未接続のため、Deployment は削除しない(仮の実装)", "namespace", namespaceName, "deployment", deploymentName)
+	return nil
 }

@@ -74,6 +74,16 @@ func (fakeStore *fakeDeployStore) RevertScale(_ context.Context, _ string, _ rep
 	return nil
 }
 
+// MarkDeleting は、何もせず、元の状態を active として成功する。
+func (fakeStore *fakeDeployStore) MarkDeleting(_ context.Context, _ string, _ string) (string, error) {
+	return model.DeployStatusActive, nil
+}
+
+// RevertDeleting は、何もせず成功する。
+func (fakeStore *fakeDeployStore) RevertDeleting(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
@@ -93,6 +103,11 @@ func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context
 
 // StartScale は、何もせず、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartScale(_ context.Context, _ string) error {
+	return fakeStarter.startError
+}
+
+// StartDeletion は、何もせず、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartDeletion(_ context.Context, _ string) error {
 	return fakeStarter.startError
 }
 

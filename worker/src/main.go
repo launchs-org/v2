@@ -103,6 +103,13 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(scaleDeployActivities.ApplyScale, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyScaleActivityName})
 	generalWorker.RegisterActivityWithOptions(scaleDeployActivities.MarkScaleResult, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkScaleResultActivityName})
 
+	// deploy を削除する Workflow と、その Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteDeployWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteDeployWorkflowName})
+	deleteDeployActivities := activity.NewDeleteDeployActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(deleteDeployActivities.DeleteDeployment, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteDeploymentActivityName})
+	generalWorker.RegisterActivityWithOptions(deleteDeployActivities.DeleteDeployRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteDeployRecordActivityName})
+	generalWorker.RegisterActivityWithOptions(deleteDeployActivities.MarkDeployDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkDeployDeleteFailedActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
