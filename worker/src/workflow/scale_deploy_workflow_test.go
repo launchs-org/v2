@@ -23,7 +23,7 @@ func newScaleDeployEnvironment(testingT *testing.T) *testsuite.TestWorkflowEnvir
 	// Temporal のテスト用の環境を作る(待ち時間は、時計を進めて飛ばす)。
 	testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	// Activity は、名前だけを登録する(中身はテストが差し替える)。
-	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.ApplyScaleInput) error { return nil },
+	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.ApplyScaleInput) (int64, error) { return 0, nil },
 		activity.RegisterOptions{Name: sharedworkflow.ApplyScaleActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.WaitDeploymentReadyInput) error { return nil },
 		activity.RegisterOptions{Name: sharedworkflow.WaitDeploymentReadyActivityName})
@@ -36,13 +36,13 @@ func newScaleDeployEnvironment(testingT *testing.T) *testsuite.TestWorkflowEnvir
 func TestScaleDeployWorkflow(testingT *testing.T) {
 	// 各 Activity の入力と、記録する結果。
 	applyInput := sharedworkflow.ApplyScaleInput{DeployID: "deploy-1"}
-	waitInput := sharedworkflow.WaitDeploymentReadyInput{DeployID: "deploy-1"}
+	waitInput := sharedworkflow.WaitDeploymentReadyInput{DeployID: "deploy-1", MinGeneration: 1}
 	succeededInput := sharedworkflow.MarkScaleResultInput{DeployID: "deploy-1", Succeeded: true}
 	failedInput := sharedworkflow.MarkScaleResultInput{DeployID: "deploy-1", Succeeded: false}
 
 	testingT.Run("全て成功すると、成功を記録して、成功で終わる", func(subTest *testing.T) {
 		testEnvironment := newScaleDeployEnvironment(subTest)
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(1), nil)
 		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, succeededInput).Return(nil)
 
@@ -56,7 +56,7 @@ func TestScaleDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("Deployment を更新できなければ、起動は待たず、失敗を記録して失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newScaleDeployEnvironment(subTest)
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(errors.New("k8s down"))
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(0), errors.New("k8s down"))
 		testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, failedInput).Return(nil)
 
 		testEnvironment.ExecuteWorkflow(ScaleDeployWorkflow, sharedworkflow.ScaleDeployInput{DeployID: "deploy-1"})
@@ -70,8 +70,8 @@ func TestScaleDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("更新が一時的に失敗しても、リトライで回復すれば成功で終わる", func(subTest *testing.T) {
 		testEnvironment := newScaleDeployEnvironment(subTest)
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(errors.New("k8s down")).Twice()
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(0), errors.New("k8s down")).Twice()
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(1), nil)
 		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, succeededInput).Return(nil)
 
@@ -84,7 +84,7 @@ func TestScaleDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("起動が期限まで確認できなければ、失敗を記録して失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newScaleDeployEnvironment(subTest)
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(1), nil)
 		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(errors.New("not ready in time"))
 		testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, failedInput).Return(nil)
 
@@ -99,7 +99,7 @@ func TestScaleDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("記録に失敗したときは、失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newScaleDeployEnvironment(subTest)
-		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, applyInput).Return(int64(1), nil)
 		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, succeededInput).Return(errors.New("database down"))
 
@@ -109,4 +109,19 @@ func TestScaleDeployWorkflow(testingT *testing.T) {
 			subTest.Fatalf("失敗で終わるはず")
 		}
 	})
+}
+
+// TestScaleDeployWorkflowPassesGeneration は、更新(作成)した Deployment の世代が、そのまま起動待ちの下限として渡されることを確認する。
+func TestScaleDeployWorkflowPassesGeneration(testingT *testing.T) {
+	// 更新が世代 7 を返すようにして、起動待ちが、世代 7 を下限として呼ばれることを、入力の一致で確かめる。
+	testEnvironment := newScaleDeployEnvironment(testingT)
+	testEnvironment.OnActivity(sharedworkflow.ApplyScaleActivityName, mock.Anything, sharedworkflow.ApplyScaleInput{DeployID: "deploy-1"}).Return(int64(7), nil)
+	testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, sharedworkflow.WaitDeploymentReadyInput{DeployID: "deploy-1", MinGeneration: 7}).Return(nil)
+	testEnvironment.OnActivity(sharedworkflow.MarkScaleResultActivityName, mock.Anything, sharedworkflow.MarkScaleResultInput{DeployID: "deploy-1", Succeeded: true}).Return(nil)
+	testEnvironment.ExecuteWorkflow(ScaleDeployWorkflow, sharedworkflow.ScaleDeployInput{DeployID: "deploy-1"})
+
+	if testEnvironment.GetWorkflowError() != nil {
+		testingT.Fatalf("世代 7 を下限として起動待ちが呼ばれ、成功で終わるはず: %v", testEnvironment.GetWorkflowError())
+	}
+	testEnvironment.AssertCalled(testingT, sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, sharedworkflow.WaitDeploymentReadyInput{DeployID: "deploy-1", MinGeneration: 7})
 }

@@ -36,6 +36,24 @@ DB に保存してある前の状態と、観測した今の状態の差から�
 
 CrashLoopBackOff の間は、再起動のたびに、`waiting`、`ready`、`restarted`、`not_ready` が繰り返し記録される。
 
+## 心拍(watcher が生きているかの印)
+
+`watcher_heartbeats`(1行だけ)。リーダーの watcher が、全件の反映を始めたあと、10 秒ごとに、DB の時計(`now()`)で書く(`model.WatcherHeartbeatInterval`)。
+
+安定している deploy の観測値(`observed_at`)は、イベントがない限り更新されない。そのため、「観測値が新しいか」では、watcher が生きているかを判断できない。ワーカーは、**最後の心拍からの経過が 30 秒未満(`WatcherHeartbeatStaleAfter`)のときだけ**、観測値を信用する。比べるのも DB の時計なので、サーバーごとの時計のずれは関係しない。
+
+## 観測値の使い手
+
+| 使い手 | 何に使うか |
+|---|---|
+| API(`GET /deploy/:deployId`) | `pods` の一覧(`deploy_pods`) |
+| ワーカー(`WaitDeploymentReady`) | 起動待ち(`deploy_observations` と心拍)。心拍が古い、または無いときは、k8s に直接問い合わせる |
+
+### 起動待ち(ワーカー)
+更新(作成)の Activity が、Deployment の設定の世代(generation)を返し、待機に渡す。次を全て満たしたときに Ready とする。
+- 観測値の generation が、渡された世代以上で、`observed_generation` が追いついている(更新の直後に、古い設定の「Ready」を信用しないため)
+- Pod の総数、最新の設定の数、準備完了、使える数が、全て、希望するレプリカ数と同じ
+
 ## イベントの保存期間(上限)
 
 `deploy_pod_events` は追記だけなので、上限を超えたものを、リーダーの watcher が削除する(`retention.Pruner`)。始めに1回、そのあとは1時間ごと。

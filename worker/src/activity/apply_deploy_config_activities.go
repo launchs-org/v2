@@ -57,8 +57,9 @@ func NewApplyDeployConfigActivities(configApplyStore ConfigApplyStore, deploymen
 //   - input: Deployment を更新する deploy の ID。
 //
 // 戻り値:
+//   - 更新後の Deployment の generation(設定の世代)。起動を待つときの下限になる。
 //   - deploy を読めなかったとき、適用する値が無い・壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
-func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConfig(requestContext context.Context, input workflow.ApplyPendingConfigInput) error {
+func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConfig(requestContext context.Context, input workflow.ApplyPendingConfigInput) (int64, error) {
 	// どの Activity が何のために動いているかを、ログに残す。
 	applyDeployConfigActivities.appLogger.Info("pending の起動設定で Deployment を更新する",
 		"deploy_id", input.DeployID, "activity", workflow.ApplyPendingConfigActivityName)
@@ -66,15 +67,15 @@ func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConf
 	// DB から deploy とスペックを読む。
 	deploy, findError := applyDeployConfigActivities.configApplyStore.FindForWorker(requestContext, input.DeployID)
 	if findError != nil {
-		return findError
+		return 0, findError
 	}
 	spec, specError := applyDeployConfigActivities.configApplyStore.FindSpec(requestContext, deploy.Spec)
 	if specError != nil {
-		return specError
+		return 0, specError
 	}
 	// 適用する値が無いのは、何度やっても同じなのでリトライしない。
 	if len(deploy.PendingEnv) == 0 {
-		return temporal.NewNonRetryableApplicationError("適用する起動設定がありません", "NoPendingConfig", nil)
+		return 0, temporal.NewNonRetryableApplicationError("適用する起動設定がありません", "NoPendingConfig", nil)
 	}
 
 	// 起動設定を pending の値に差し替えた deploy から、Deployment の内容を組み立てる。
@@ -84,7 +85,7 @@ func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConf
 	pendingDeploy.Args = deploy.PendingArgs
 	definition, definitionError := newDeploymentDefinition(pendingDeploy, spec)
 	if definitionError != nil {
-		return temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
+		return 0, temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
 	}
 	// 更新は、k8s を操作するものに任せる。
 	return applyDeployConfigActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
@@ -120,8 +121,9 @@ func (applyDeployConfigActivities *ApplyDeployConfigActivities) RollbackDeployme
 	if definitionError != nil {
 		return temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
 	}
-	// 戻す作業は、k8s を操作するものに任せる。
-	return applyDeployConfigActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
+	// 戻す作業は、k8s を操作するものに任せる(世代は、待たないので使わない)。
+	_, applyError := applyDeployConfigActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
+	return applyError
 }
 
 // CommitConfigResult は、反映の結果を DB に確定する。

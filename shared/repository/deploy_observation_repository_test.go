@@ -374,3 +374,71 @@ func TestDeployObservationRepositoryListPodsByDeploy(testingT *testing.T) {
 		}
 	})
 }
+
+// TestDeployObservationRepositoryFindDeployment は、deploy の観測値を1件取得でき、無いときは「無い」だけを返し、
+// 空の ID は拒否することを確認する。
+func TestDeployObservationRepositoryFindDeployment(testingT *testing.T) {
+	database, observationRepository := newObservationTestEnvironment(testingT)
+	database.Create(newTestDeploy(2, "project-00000001", "user-a"))
+	_, _ = observationRepository.UpsertDeployment(context.Background(), model.DeployObservation{DeployID: "deploy-00000001", Generation: 4, ObservedGeneration: 4, Replicas: 2, ReadyReplicas: 2, ObservedAt: time.Now()})
+
+	testingT.Run("その deploy の観測値を返す(他の deploy のものは返さない)", func(subTest *testing.T) {
+		observation, found, findError := observationRepository.FindDeployment(context.Background(), "deploy-00000001")
+		if findError != nil || !found || observation.Generation != 4 || observation.ReadyReplicas != 2 {
+			subTest.Errorf("観測値が返るはず: %v %v %+v", findError, found, observation)
+		}
+	})
+	testingT.Run("観測値が無い deploy は、エラーにせず、無いことを返す", func(subTest *testing.T) {
+		_, found, findError := observationRepository.FindDeployment(context.Background(), "deploy-00000002")
+		if findError != nil || found {
+			subTest.Errorf("無いだけのはず: %v %v", findError, found)
+		}
+	})
+	testingT.Run("空の ID は拒否する(先頭の1件を返さない)", func(subTest *testing.T) {
+		if _, _, findError := observationRepository.FindDeployment(context.Background(), ""); findError == nil {
+			subTest.Errorf("拒否されるはず")
+		}
+	})
+}
+
+// TestDeployObservationRepositoryHeartbeat は、心拍が、書くまでは「無い」、書けば経過時間が小さく、
+// 時間が経てば経過時間が大きくなり、繰り返し書いても1行のままであることを確認する。
+func TestDeployObservationRepositoryHeartbeat(testingT *testing.T) {
+	database, observationRepository := newObservationTestEnvironment(testingT)
+
+	testingT.Run("一度も書いていなければ、無い", func(subTest *testing.T) {
+		_, found, ageError := observationRepository.HeartbeatAge(context.Background())
+		if ageError != nil || found {
+			subTest.Errorf("無いはず: %v %v", ageError, found)
+		}
+	})
+	testingT.Run("書いた直後は、経過時間が短い", func(subTest *testing.T) {
+		if touchError := observationRepository.TouchHeartbeat(context.Background()); touchError != nil {
+			subTest.Fatalf("書けるはず: %v", touchError)
+		}
+		age, found, ageError := observationRepository.HeartbeatAge(context.Background())
+		if ageError != nil || !found || age < 0 || age > 5*time.Second {
+			subTest.Errorf("経過時間が短いはず: %v %v %v", age, found, ageError)
+		}
+	})
+	testingT.Run("時間が経つと、経過時間が大きくなり、しきい値を超える", func(subTest *testing.T) {
+		database.Exec("UPDATE watcher_heartbeats SET beat_at = now() - interval '2 minutes'")
+		age, found, _ := observationRepository.HeartbeatAge(context.Background())
+		if !found || age < 119*time.Second || age < model.WatcherHeartbeatStaleAfter {
+			subTest.Errorf("2分ほどで、しきい値を超えるはず: %v", age)
+		}
+	})
+	testingT.Run("繰り返し書くと、経過時間が戻り、行は1つのまま", func(subTest *testing.T) {
+		for attempt := 0; attempt < 3; attempt++ {
+			if touchError := observationRepository.TouchHeartbeat(context.Background()); touchError != nil {
+				subTest.Fatalf("書けるはず: %v", touchError)
+			}
+		}
+		var rowCount int64
+		database.Table("watcher_heartbeats").Count(&rowCount)
+		age, _, _ := observationRepository.HeartbeatAge(context.Background())
+		if rowCount != 1 || age > 5*time.Second {
+			subTest.Errorf("1行で、経過時間が短いはず: %d %v", rowCount, age)
+		}
+	})
+}
