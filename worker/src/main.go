@@ -122,13 +122,18 @@ func run() error {
 	// service(k8s の Service)を作る・削除する Workflow と、その Activity を登録する。deploy の削除が使う Activity も、ここにある。
 	generalWorker.RegisterWorkflowWithOptions(workflow.CreateServiceWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.CreateServiceWorkflowName})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteServiceWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteServiceWorkflowName})
-	serviceActivities := activity.NewServiceActivities(repository.NewServiceRepository(appDatabase), operators.serviceOperator,
+	serviceRepository := repository.NewServiceRepository(appDatabase)
+	serviceActivities := activity.NewServiceActivities(serviceRepository, serviceRepository, operators.serviceOperator,
 		activity.ServiceSettings{ServiceType: workerConfig.ServiceType, ClusterDomain: workerConfig.ClusterDomain}, appLogger)
 	generalWorker.RegisterActivityWithOptions(serviceActivities.EnsureService, sdkactivity.RegisterOptions{Name: sharedworkflow.EnsureServiceActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.MarkServiceResult, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkServiceResultActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.DeleteServiceObject, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteServiceObjectActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.DeleteServiceRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteServiceRecordActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.MarkServiceDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkServiceDeleteFailedActivityName})
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyServicePortsWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyServicePortsWorkflowName})
+	generalWorker.RegisterActivityWithOptions(serviceActivities.ApplyServicePorts, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyServicePortsActivityName})
+	generalWorker.RegisterActivityWithOptions(serviceActivities.RollbackServicePorts, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackServicePortsActivityName})
+	generalWorker.RegisterActivityWithOptions(serviceActivities.CommitServicePortsResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitServicePortsResultActivityName})
 	generalWorker.RegisterActivityWithOptions(serviceActivities.DeleteDeployService, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteDeployServiceActivityName})
 
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)

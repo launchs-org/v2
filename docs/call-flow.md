@@ -250,6 +250,25 @@ DELETE /deploy/:deployId/service
         └─ 期限(15分)までに終わらなければ MarkServiceDeleteFailed(failed。もう一度削除できる)
 ```
 
+
+### ポートの更新・適用・破棄(`PATCH`・`POST .../apply`・`POST .../discard`)
+
+`PATCH` と `discard` は、DB の `pending_ports` を書き換えるだけ(行をロックして、deploy が反映中・削除の途中でないこと、service が active であることを確かめる)。**k8s の Service への反映だけが非同期**。
+
+```
+POST /deploy/:deployId/service/apply
+  → ServiceService.ApplyPorts
+      ├─ ServiceRepository.BeginPortsApply   deploy を applying にする(pending_ports が無い・反映中・起動中・削除の途中・service が active でないなら 409)
+      ├─ Temporal に ApplyServicePortsWorkflow の開始を頼む(開始できなければ、deploy の状態を元に戻す)
+      └─ すぐ 200 {}
+        ↓ worker が非同期に実行
+  ApplyServicePortsWorkflow
+   ├─ Activity: ApplyServicePorts          pending のポートで、k8s の Service を更新する(Pod は再起動しない)
+   ├─ (失敗したときだけ) RollbackServicePorts  k8s の Service を、現在のポートに戻す
+   └─ Activity: CommitServicePortsResult    成功: ports ← pending、pending を空に、deploy を active(replicas 0 なら scaled_zero)に戻す
+                                             失敗: ports と pending は変えず、deploy を failed にする
+```
+
 **deploy を削除するとき**(5.3): `DeleteDeployWorkflow` の最初に、`DeleteDeployService` が、その deploy の service の k8s の Service を消す。DB の service の行は、deploy の行を消すときに、CASCADE で一緒に消える。deploy が削除中の間、`GET` の service の status は、`deleting` として返る。
 
 ## 6. どのファイルを見ればよいか
@@ -263,7 +282,7 @@ DELETE /deploy/:deployId/service
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`(作成・取得)と、操作ごとの `deploy_config_service.go`、`deploy_scale_service.go`、`deploy_deletion_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`。deploy は操作ごとに分かれている: `deploy_repository.go`(作成・取得)、`deploy_config_repository.go`、`deploy_scale_repository.go`、`deploy_deletion_repository.go`、`deploy_crash_loop_repository.go`) |
 | Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go`、`crash_loop.go`、`service.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go`、`create_service_workflow.go`、`delete_service_workflow.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go`、`create_service_workflow.go`、`delete_service_workflow.go`、`apply_service_ports_workflow.go` |
 | Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`、`crash_loop_activities.go`、`service_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント、ラベル名 | `shared/k8s/` |
 | watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/`(`deploy_observation_repository.go`、`deploy_pod_observation_repository.go`、`crash_loop_candidate_repository.go`、`pod_event_retention_repository.go`)、`pod_event_diff.go` |

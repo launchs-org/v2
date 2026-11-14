@@ -123,3 +123,55 @@ func NewDeleteServiceWorkflowID(serviceID string) string {
 	// 操作ごとに一意にするため、末尾に UUID を付ける。
 	return "delete-" + serviceID + "-" + uuid.NewString()
 }
+
+const (
+	// ApplyServicePortsWorkflowName は、service の pending のポートを、k8s の Service に反映する Workflow の名前。
+	ApplyServicePortsWorkflowName = "ApplyServicePortsWorkflow"
+
+	// ApplyServicePortsActivityName は、pending のポートで、k8s の Service を更新する Activity の名前。
+	ApplyServicePortsActivityName = "ApplyServicePorts"
+
+	// RollbackServicePortsActivityName は、反映に失敗したとき、k8s の Service を、現在の(動いていた)ポートに戻す Activity の名前。
+	RollbackServicePortsActivityName = "RollbackServicePorts"
+
+	// CommitServicePortsResultActivityName は、ポートの反映の結果を DB に確定する Activity の名前。
+	// 成功なら、ポートを pending の内容にして pending を空に戻し、deploy を元の状態に戻す。失敗なら、deploy を failed にする。
+	CommitServicePortsResultActivityName = "CommitServicePortsResult"
+
+	// ApplyServicePortsWorkflowTimeout は、ポートの反映の Workflow 全体の最長の実行時間(仮)。
+	ApplyServicePortsWorkflowTimeout = 15 * time.Minute
+)
+
+// ApplyServicePortsInput は、ApplyServicePortsWorkflow の入力。
+type ApplyServicePortsInput struct {
+	// ServiceID は、ポートを反映する service の ID。内容は、Activity が DB から読む。
+	ServiceID string
+}
+
+// ApplyServicePortsActivityInput は、ApplyServicePorts と RollbackServicePorts Activity の入力。
+type ApplyServicePortsActivityInput struct {
+	// ServiceID は、k8s の Service を更新する service の ID。
+	ServiceID string
+}
+
+// CommitServicePortsResultInput は、CommitServicePortsResult Activity の入力。
+type CommitServicePortsResultInput struct {
+	// ServiceID は、結果を確定する service の ID。
+	ServiceID string
+
+	// Succeeded は、反映に成功したか。true ならポートを pending の内容にして、deploy を active(replicas が 0 なら scaled_zero)に戻す。
+	// false なら、ポートと pending は変えず、deploy を failed にする。
+	Succeeded bool
+}
+
+// NewApplyServicePortsWorkflowID は、ポートの反映の Workflow ID を作る。形式は `{操作}-{リソースID}-{uuid}`。
+//
+// 引数:
+//   - serviceID: ポートを反映する service の ID。
+//
+// 戻り値:
+//   - Workflow ID。
+func NewApplyServicePortsWorkflowID(serviceID string) string {
+	// 操作ごとに一意にするため、末尾に UUID を付ける。
+	return "apply-ports-" + serviceID + "-" + uuid.NewString()
+}

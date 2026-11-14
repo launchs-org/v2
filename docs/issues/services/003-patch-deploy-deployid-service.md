@@ -16,6 +16,7 @@
 - 呼び出し直後、`ports`(現在反映されている値)は変化しないこと
 
 ### 異常系
+- service の `status` が `"active"` でない(`"pending"`・`"failed"`・`"deleting"`)場合 409 が返ること
 - 存在しない `deployId` を指定した場合 404 が返ること
 - 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - service が未作成の `deployId` に対して呼び出した場合 404 が返ること
@@ -25,6 +26,7 @@
 - `status` が `"applying"` の間はこの操作を受け付けず 409 が返ること(applying中はserviceに対する変更・apply・discardを排他制御する)
 
 ### 境界値
+- 現在の `ports` と同じ内容(JSON の書式が違うだけでも)を送ると、`pending_ports` は保存されず `null` のままになる(以前の `pending_ports` も消える)こと
 - `ports` は個別要素単位のCRUDではなく、常に全件を送って置き換える方式であること(部分更新は不可)
 - 既存の `pending_ports` が存在する状態で再度PATCHした場合、新しい内容で `pending_ports` が上書きされること(前回のpendingは破棄される)
 
