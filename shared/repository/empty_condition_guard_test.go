@@ -86,6 +86,21 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 		}, expectedKind: apperror.KindNotFound},
 		{name: "service のレコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return NewServiceRepository(database).DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "service の作成の取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return NewServiceRepository(database).DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "service のポートの保存: deploy の ID が空", call: func() error {
+			return NewServiceRepository(database).SavePendingPorts(requestContext, "user-a", "", []byte(`[]`))
+		}, expectedKind: apperror.KindNotFound},
+		{name: "service のポートの破棄: ユーザー ID が空", call: func() error {
+			return NewServiceRepository(database).DiscardPendingPorts(requestContext, "", "deploy-00000001")
+		}, expectedKind: apperror.KindNotFound},
+		{name: "service のポートの適用の開始: deploy の ID が空", call: func() error {
+			_, _, err := NewServiceRepository(database).BeginPortsApply(requestContext, "user-a", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "service のポートの適用の巻き戻し: ID が空(applying の全ての deploy を変えない)", call: func() error { return NewServiceRepository(database).RevertPortsApply(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "service のポートの適用の確定: ID が空", call: func() error {
+			_, err := NewServiceRepository(database).CommitPortsApply(requestContext, "", true)
+			return err
+		}, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 状態変更: ID が空", call: func() error {
 			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")

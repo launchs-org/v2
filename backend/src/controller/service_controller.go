@@ -23,6 +23,9 @@ type ServiceUseCase interface {
 	Create(requestContext context.Context, userID string, deployID string, ports []model.ServicePort) (model.Service, error)
 	Get(requestContext context.Context, userID string, deployID string) (model.Service, error)
 	Delete(requestContext context.Context, userID string, deployID string) error
+	UpdatePorts(requestContext context.Context, userID string, deployID string, ports []model.ServicePort) error
+	DiscardPorts(requestContext context.Context, userID string, deployID string) error
+	ApplyPorts(requestContext context.Context, userID string, deployID string) error
 }
 
 // ServicePortRequest は、公開するポート1つ(リクエストのボディ)。

@@ -20,6 +20,10 @@ type ServiceStore interface {
 	DeleteUnstarted(requestContext context.Context, serviceID string) error
 	MarkDeleting(requestContext context.Context, userID string, deployID string) (string, string, error)
 	RevertDeleting(requestContext context.Context, serviceID string, previousStatus string) error
+	SavePendingPorts(requestContext context.Context, userID string, deployID string, ports datatypes.JSON) error
+	DiscardPendingPorts(requestContext context.Context, userID string, deployID string) error
+	BeginPortsApply(requestContext context.Context, userID string, deployID string) (string, string, error)
+	RevertPortsApply(requestContext context.Context, deployID string, previousStatus string) error
 }
 
 // ServiceWorkflowStarter は、service の作成・削除の処理(Workflow)を開始する。
@@ -31,6 +35,9 @@ type ServiceWorkflowStarter interface {
 
 	// StartServiceDeletion は、service を削除する処理を開始する。完了は待たない。
 	StartServiceDeletion(requestContext context.Context, serviceID string) error
+
+	// StartPortsApply は、service の pending のポートを、k8s の Service に反映する処理を開始する。完了は待たない。
+	StartPortsApply(requestContext context.Context, serviceID string) error
 }
 
 // ServiceService は、service(deploy のポートの公開)に関する操作のビジネスルールを担当する。
