@@ -271,6 +271,37 @@ POST /deploy/:deployId/service/apply
 
 **deploy を削除するとき**(5.3): `DeleteDeployWorkflow` の最初に、`DeleteDeployService` が、その deploy の service の k8s の Service を消す。DB の service の行は、deploy の行を消すときに、CASCADE で一緒に消える。deploy が削除中の間、`GET` の service の status は、`deleting` として返る。
 
+## 5.7 ingress(外向きの入り口): `/projects/:projectId/ingresses`
+
+ingress は、プロジェクトに属し、Traefik の IngressRoute 1つに対応する。状態の規則と遷移は `model.Ingress` が持つ。
+
+```
+POST /projects/:projectId/ingresses                      (作成。Workflow は使わない)
+ └─ IngressService.Create
+     ├─ ingresshost.Generator.Generate     「形容詞-色-動物.ベースドメイン」を払い出す(払い出さない名前は選び直す)
+     └─ IngressRepository.Create           プロジェクトをロックして active を確かめ、保存(host が重なったら作り直す)
+
+PUT /projects/:projectId/ingresses/:ingressId            (ルールを pending として保存)
+ └─ model.ValidateIngressRules             path の書式・重複・個数・ポート番号の範囲
+     └─ IngressRepository.SavePendingRules 流す先(同じプロジェクトの service の tcp のポート)を確かめて保存。現在と同じ内容なら pending は NULL
+
+POST .../apply
+ ├─ IngressRepository.BeginRulesApply      流す先を改めて確かめて(不正なら 409)、applying にする
+ └─ TemporalIngressWorkflowStarter.StartRulesApply
+     └─ ApplyIngressRulesWorkflow          IngressRoute を pending のルールで更新 → 失敗したら現在のルールに戻す → 結果を確定
+         (成功: ルールを昇格して active / 失敗: ルールと pending は変えず failed)
+
+DELETE .../:ingressId
+ ├─ IngressRepository.MarkDeleting         deleting にする(applying・deleting は 409)
+ └─ DeleteIngressWorkflow                  IngressRoute を削除 → レコードを削除(期限までに終えられなければ failed)
+```
+
+- IngressRoute は、ルールが1つ以上あるときだけ存在する。ルールを空にして apply すると、IngressRoute が削除される。
+- ルールは `Host(...) && PathPrefix(...)` の式になり、Service のポートへ流す。長い path が優先される。
+- service を消す・ポートを減らしたとき、ingress のルールは自動では消えない(流す先を失ったルールは、Traefik が 503 を返す)。次の apply で、流す先の検査により 409 になる。
+- k8s の操作は `worker/src/cluster/ingress_operator.go`(動的クライアント)。k8s につながない開発用は、ログだけを出す実装。
+- プロジェクトのレコードを消すとき、配下の ingress も一緒に消す(`ProjectRepository.DeleteRecord`)。IngressRoute は namespace の削除で消える。
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -281,9 +312,9 @@ POST /deploy/:deployId/service/apply
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`(作成・取得)と、操作ごとの `deploy_config_service.go`、`deploy_scale_service.go`、`deploy_deletion_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`。deploy は操作ごとに分かれている: `deploy_repository.go`(作成・取得)、`deploy_config_repository.go`、`deploy_scale_repository.go`、`deploy_deletion_repository.go`、`deploy_crash_loop_repository.go`) |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go`、`crash_loop.go`、`service.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go`、`create_service_workflow.go`、`delete_service_workflow.go`、`apply_service_ports_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`、`crash_loop_activities.go`、`service_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go`、`crash_loop.go`、`service.go`、`ingress.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go`、`create_service_workflow.go`、`delete_service_workflow.go`、`apply_service_ports_workflow.go`、`apply_ingress_rules_workflow.go`、`delete_ingress_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`、`crash_loop_activities.go`、`service_activities.go`、`ingress_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント、ラベル名 | `shared/k8s/` |
 | watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/`(`deploy_observation_repository.go`、`deploy_pod_observation_repository.go`、`crash_loop_candidate_repository.go`、`pod_event_retention_repository.go`)、`pod_event_diff.go` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |
