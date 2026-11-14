@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -36,17 +37,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config", "RUNTIME_CLASS": "gvisor"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -90,7 +91,7 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 				if actualError != nil {
 					subTest.Fatalf("エラーにならないはず: %v", actualError)
 				}
-				if actualConfig != testCase.expectedConfig {
+				if !reflect.DeepEqual(actualConfig, testCase.expectedConfig) {
 					subTest.Errorf("設定が違う: 期待 %+v、実際 %+v", testCase.expectedConfig, actualConfig)
 				}
 				return
@@ -104,6 +105,66 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 				if !strings.Contains(actualError.Error(), expectedPiece) {
 					subTest.Errorf("エラーに %s が含まれていない: %v", expectedPiece, actualError)
 				}
+			}
+		})
+	}
+}
+
+// TestLoadWorkerConfigIngressNamespace は、外からの通信を中継する namespace(INGRESS_NAMESPACE)が、
+// 省略すると空(許可しない)で、指定するとその値になることを確認する。
+func TestLoadWorkerConfigIngressNamespace(testingT *testing.T) {
+	// 必須の環境変数に、確かめたいものを足して読む道具。
+	load := func(extra map[string]string) (WorkerConfig, error) {
+		environment := map[string]string{"DATABASE_URL": "postgres://x", "KUBERNETES_ACCESS": "none"}
+		for name, value := range extra {
+			environment[name] = value
+		}
+		return LoadWorkerConfig(sharedconfig.NewEnvironmentReader(func(name string) (string, bool) {
+			value, exists := environment[name]
+			return value, exists
+		}))
+	}
+	testingT.Run("省略すると空", func(subTest *testing.T) {
+		loaded, loadError := load(nil)
+		if loadError != nil || loaded.IngressNamespace != "" {
+			subTest.Errorf("空のはず: %v %q", loadError, loaded.IngressNamespace)
+		}
+	})
+	testingT.Run("指定すると、その値", func(subTest *testing.T) {
+		loaded, loadError := load(map[string]string{"INGRESS_NAMESPACE": "traefik"})
+		if loadError != nil || loaded.IngressNamespace != "traefik" {
+			subTest.Errorf("traefik のはず: %v %q", loadError, loaded.IngressNamespace)
+		}
+	})
+}
+
+// TestLoadWorkerConfigBlockedNetworks は、インターネットへの出口から除く内部のネットワーク(EGRESS_BLOCKED_NETWORKS)が、
+// 省略すると既定で、指定するとその値になり、不正な値は、環境変数の名前を付けて拒否されることを確認する。
+func TestLoadWorkerConfigBlockedNetworks(testingT *testing.T) {
+	// 必須の環境変数に、確かめたいものを足して読む道具。
+	load := func(blocked string) (WorkerConfig, error) {
+		environment := map[string]string{"DATABASE_URL": "postgres://x", "KUBERNETES_ACCESS": "none"}
+		if blocked != "" {
+			environment["EGRESS_BLOCKED_NETWORKS"] = blocked
+		}
+		return LoadWorkerConfig(newTestReader(environment))
+	}
+	testingT.Run("省略すると、既定の5つ", func(subTest *testing.T) {
+		loaded, loadError := load("")
+		if loadError != nil || !reflect.DeepEqual(loaded.BlockedNetworks, k8s.DefaultBlockedNetworks()) {
+			subTest.Errorf("既定のはず: %v %v", loadError, loaded.BlockedNetworks)
+		}
+	})
+	testingT.Run("指定すると、その値(既定には足されず、置き換わる)", func(subTest *testing.T) {
+		loaded, loadError := load("192.168.0.0/16, 203.0.113.0/24")
+		if loadError != nil || !reflect.DeepEqual(loaded.BlockedNetworks, []string{"192.168.0.0/16", "203.0.113.0/24"}) {
+			subTest.Errorf("指定した2つのはず: %v %v", loadError, loaded.BlockedNetworks)
+		}
+	})
+	for _, invalid := range []string{"not-a-cidr", "10.0.0.0/8,2001:db8::/32", "0.0.0.0/0"} {
+		testingT.Run("不正な値 "+invalid+" は、環境変数の名前を付けて拒否する", func(subTest *testing.T) {
+			if _, loadError := load(invalid); loadError == nil || !strings.Contains(loadError.Error(), "EGRESS_BLOCKED_NETWORKS") {
+				subTest.Errorf("名前を含むエラーのはず: %v", loadError)
 			}
 		})
 	}

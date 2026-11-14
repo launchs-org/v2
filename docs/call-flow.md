@@ -109,7 +109,7 @@ curl → ... → DeployController.Create(入力の検証: projectId、imageRef�
   → すぐ 200 {deployId} を返す(この時点の status は pending)
         ↓ ここから worker が非同期に実行
   CreateDeployWorkflow
-   ├─ Activity: EnsureProjectNamespace  プロジェクトの namespace を、無ければ作る
+   ├─ Activity: EnsureProjectNamespace  プロジェクトの namespace を、無ければ作り、**隔離の NetworkPolicy を適用する**([network-isolation.md](network-isolation.md))
    ├─ Activity: ApplyDeployment         DB の deploy とスペックから、k8s の Deployment を作る
    ├─ Activity: WaitDeploymentReady     Ready になるまで待つ(最長 300 秒。ワーカーが入れ替わっても引き継ぐ)
    └─ Activity: MarkDeployResult        成功なら active、失敗(300 秒で Ready にならない等)なら failed

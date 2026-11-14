@@ -13,6 +13,10 @@ services:
       KUBECONFIG: /kube/config
       # deploy の Pod の RuntimeClass(例: gvisor)。空なら指定せず、クラスターの既定のランタイムを使う。
       RUNTIME_CLASS: ${RUNTIME_CLASS:-}
+      # 外からの通信を中継する namespace(Traefik など)。プロジェクトの namespace の NetworkPolicy で、ここからの通信を許可する。空なら許可しない。
+      INGRESS_NAMESPACE: ${INGRESS_NAMESPACE:-}
+      # インターネットへの出口の許可から除く、内部のネットワーク(CIDR のカンマ区切り。IPv4)。空なら、既定(10/8、172.16/12、192.168/16、169.254/16、100.64/10)。
+      EGRESS_BLOCKED_NETWORKS: ${EGRESS_BLOCKED_NETWORKS:-}
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
   # watcher は、k8s を読み取るだけ(Pod と Deployment の get / list / watch)。
