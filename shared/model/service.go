@@ -3,6 +3,8 @@ package model
 import (
 	"time"
 
+	"launchs/shared/apperror"
+
 	"gorm.io/datatypes"
 )
 
@@ -93,4 +95,33 @@ func (service Service) CanChangePorts() bool {
 func (service Service) CanDelete() bool {
 	// 作成中と削除中のどちらでもなければ受け付ける。
 	return service.Status != ServiceStatusPending && service.Status != ServiceStatusDeleting
+}
+
+// BeginPortsApply は、ポートの反映を始められるかを確かめる。
+//
+// 戻り値:
+//   - active でない、または適用する値が無いときは conflict。
+func (service Service) BeginPortsApply() error {
+	// active でない service は、ポートを変えられない。
+	if !service.CanChangePorts() {
+		return apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、ポートを操作できません")
+	}
+	// 適用する値が無いときは、反映する意味が無い。
+	if len(service.PendingPorts) == 0 {
+		return apperror.New(apperror.KindConflict, "適用するポートの変更がありません")
+	}
+	return nil
+}
+
+// PromotePendingPorts は、pending のポートを、現在のポートにして、pending を空に戻す。
+//
+// pending が無いときは、何もしない(現在のポートを壊さない)。
+func (service *Service) PromotePendingPorts() {
+	// pending が無ければ何もしない。
+	if len(service.PendingPorts) == 0 {
+		return
+	}
+	// 現在のポートを pending の内容にして、pending を空に戻す。
+	service.Ports = service.PendingPorts
+	service.PendingPorts = nil
 }

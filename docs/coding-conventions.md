@@ -163,10 +163,13 @@ docker-compose.yaml
 
 ---
 
-## 状態による操作の可否は、モデルのメソッドに置く
+## 状態の規則と、状態を変える操作は、モデルのメソッドに置く
 
 deploy や service の「この状態なら、この操作ができる」という規則は、`shared/model` のメソッド(`deploy_rules.go`、`service.go`)に集める。
 repository や service では、`deploy.Status == ...` のように状態を直接比べず、`deploy.CanEditSettings()` のようにモデルへ聞く。
+状態を変える操作(`BeginConfigApply`、`CommitConfig`、`BeginScale`、`BeginDelete` など)も、モデルのメソッドにする。
+メソッドはメモリ上の値だけを変え、repository は「行をロックして読む → メソッドを呼ぶ → 保存する」だけを行う。
+Pod は deploy が持つ(`Deploy.Pods`)。Pod 自身の規則(`IsStable`、`NextUnhealthySince`)は `DeployPod` のメソッドにする。
 新しい対象(ingress、volume など)を作るときも、同じ形で、状態の規則をモデルに持たせる。規則を変えるときは、モデルのテストの表を直す。
 
 ## 10. Docker と開発環境
