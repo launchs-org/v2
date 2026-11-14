@@ -54,6 +54,33 @@ CrashLoopBackOff の間は、再起動のたびに、`waiting`、`ready`、`rest
 - 観測値の generation が、渡された世代以上で、`observed_generation` が追いついている(更新の直後に、古い設定の「Ready」を信用しないため)
 - Pod の総数、最新の設定の数、準備完了、使える数が、全て、希望するレプリカ数と同じ
 
+## クラッシュし続ける deploy を止める(上限)
+
+k8s は、クラッシュしたコンテナを、間隔を最大 5 分まで延ばしながら、永久に再起動し続ける。`active` のまま壊れ続けないよう、**異常な状態が上限を超えたら、レプリカを 0 にして止め、`failed` にする**。
+
+### 「安定して動いている」の定義
+Pod が **Ready のままで、コンテナが 5 分以上動き続けている**(`model.PodStableAfter`)こと。クラッシュを繰り返す Pod は、一瞬 Ready になることがあるので、Ready になっただけでは回復とみなさない。
+
+watcher は、Pod の保存のたびに、`deploy_pods.unhealthy_since`(安定して動いている状態でなくなった時刻)を更新する(`repository.NextUnhealthySince`)。安定すれば NULL、不健全が続く間は同じ時刻、安定して動いていたあとで崩れたら、その時刻から数え直す。
+
+### 止める条件(`ListCrashLoopCandidates`。DB の時計で判定)
+次を **全て** 満たす deploy を、1 分ごとに探す(`crashloop.Monitor`)。
+- `status` が `active` で、希望するレプリカ数が 1 以上(作成中・反映中・削除中・すでに止まっているものには、触らない。作成と反映には、300 秒の期限がある)
+- 終了処理中でない Pod の中に、**安定して動いている Pod が 1 つも無い**(3 台のうち 1 台だけ不調で、他が正常なら、止めない)
+- Pod のどれかが、次のどちらかを満たす
+  - 安定して動いていない状態が **30 分以上**続いている(`CRASH_LOOP_UNHEALTHY_FOR`)
+  - コンテナの再起動が **20 回以上**で、安定していない状態が **10 分以上**続いている(`CRASH_LOOP_MAX_RESTARTS`、`CRASH_LOOP_RESTART_MIN_UNHEALTHY`)。`restart_count` は累積なので、何日も安定して動いてきた Pod が、一度クラッシュしただけでは、止まらないようにする
+
+### 止める処理(`StopCrashLoopWorkflow`。ワーカーが実行)
+```
+watcher の Monitor(リーダーだけ) → Temporal に Workflow の開始を頼む
+  1. BeginCrashLoopStop   active の deploy を applying にし、`crash_loop_limit` のイベント(理由と、再起動の回数・続いた時間)を記録
+                           active でなければ(別の処理が進んでいる)何もせずに終わる(重ねて頼んでも安全)
+  2. ScaleToZero           k8s の Deployment のレプリカを 0 にする(コンテナの再起動が止まる)。DB の replicas は変えない
+  3. FinishCrashLoopStop   deploy を failed にする(2 に失敗しても、applying のまま残さない)
+```
+止まったあと、`replicas`(希望する数)はそのまま。利用者は、**同じ数でスケールし直す**(`failed` の deploy は、同じ数でもスケールできる)か、設定を直して適用して、やり直せる。
+
 ## イベントの保存期間(上限)
 
 `deploy_pod_events` は追記だけなので、上限を超えたものを、リーダーの watcher が削除する(`retention.Pruner`)。始めに1回、そのあとは1時間ごと。
@@ -82,6 +109,19 @@ watcher/src/main.go
 - 状態の組み立ては `observer.BuildPodSnapshot` / `BuildDeploymentSnapshot`(k8s の型から DB の行を作る、副作用の無い関数)。
 - DB の読み書きは `repository.DeployObservationRepository`。Pod は、行をロックして前の状態を読み、イベントを同じトランザクションで追記する。
 - deploy の行がまだ無い(作成の途中で、k8s に先に現れた)ときは、保存せず、エラーにもしない。次のイベントで保存される。
+
+## 設定(環境変数)
+
+| 環境変数 | 意味 | 既定 |
+|---|---|---|
+| `DATABASE_URL` | app データベース | 必須 |
+| `KUBERNETES_ACCESS`、`KUBECONFIG` | k8s への接続 | 必須(`none` なら観測しない) |
+| `TEMPORAL_ADDRESS`、`TEMPORAL_NAMESPACE` | 止める Workflow の開始に使う | `temporal:7233`、`default` |
+| `CRASH_LOOP_UNHEALTHY_FOR` | 安定していない状態が、これだけ続いたら止める | `30m` |
+| `CRASH_LOOP_MAX_RESTARTS` | 再起動がこの回数に達し、不健全が続いたら止める | `20` |
+| `CRASH_LOOP_RESTART_MIN_UNHEALTHY` | 再起動の回数で止めるときの、最低限の不健全の長さ | `10m` |
+
+`CRASH_LOOP_UNHEALTHY_FOR` は、安定の判定(5 分)より長くする(短いと、起動したばかりの正常な Pod を止めてしまう)。0 以下の値は、全ての deploy を止めてしまうので、起動時に拒否する。
 
 ## 開発で試すとき
 

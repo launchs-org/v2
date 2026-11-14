@@ -211,6 +211,21 @@ ApplyDeployment / ApplyPendingConfig / ApplyScale   Deployment を作る・更�
        └─ 心拍が古い・無い:       k8s に直接問い合わせる(watcher の障害で、正常な deploy を failed にしない)
 ```
 
+## 5.5 クラッシュし続ける deploy を止める
+
+```
+watcher(リーダーだけ)
+  ├─ Pod の保存のたびに、unhealthy_since(安定して動いていない状態が始まった時刻)を更新
+  └─ crashloop.Monitor(1分ごと)  止めるべき deploy を探す(安定した Pod が無く、30分(または再起動20回かつ10分)以上不健全)
+       → Temporal に StopCrashLoopWorkflow の開始を頼む
+  ↓ worker が実行
+  StopCrashLoopWorkflow
+   ├─ Activity: BeginCrashLoopStop   active なら applying にして、crash_loop_limit のイベントを記録(active でなければ終わり)
+   ├─ Activity: ScaleToZero           k8s のレプリカを 0 にする(DB の replicas は変えない)
+   └─ Activity: FinishCrashLoopStop   failed にする
+```
+止まったあとは、同じ数のスケール(5.2)で、やり直せる。詳しくは [watcher.md](watcher.md)。
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -221,9 +236,9 @@ ApplyDeployment / ApplyPendingConfig / ApplyScale   Deployment を作る・更�
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go`、`crash_loop.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go`、`stop_crash_loop_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`、`crash_loop_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント、ラベル名 | `shared/k8s/` |
 | watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/deploy_observation_repository.go`、`pod_event_diff.go` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |
