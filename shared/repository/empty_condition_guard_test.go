@@ -64,6 +64,28 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 		{name: "deploy 削除の巻き戻し: ID が空", call: func() error { return deployRepository.RevertDeleting(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 削除失敗の記録: ID が空", call: func() error { return deployRepository.MarkDeleteFailed(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy レコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return deployRepository.DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "service 作成: deploy の ID が空", call: func() error {
+			return NewServiceRepository(database).Create(requestContext, newTestService(9, "", "user-a"))
+		}, expectedKind: apperror.KindInternal},
+		{name: "service 取得: ユーザー ID が空", call: func() error {
+			_, _, err := NewServiceRepository(database).FindByDeployID(requestContext, "", "deploy-00000001")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "service 取得(ワーカー): ID が空(先頭の1件を返さない)", call: func() error { _, err := NewServiceRepository(database).FindForWorker(requestContext, ""); return err }, expectedKind: apperror.KindNotFound},
+		{name: "service を active に: ID が空(全ての pending を変えない)", call: func() error {
+			_, err := NewServiceRepository(database).MarkActive(requestContext, "", "dns", "ip")
+			return err
+		}, expectedKind: apperror.KindInternal},
+		{name: "service の状態変更: ID が空", call: func() error {
+			_, err := NewServiceRepository(database).UpdateStatus(requestContext, "", "pending", "active")
+			return err
+		}, expectedKind: apperror.KindInternal},
+		{name: "service の削除の受付: deploy の ID が空", call: func() error {
+			_, _, err := NewServiceRepository(database).MarkDeleting(requestContext, "user-a", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "service のレコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return NewServiceRepository(database).DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "service の作成の取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return NewServiceRepository(database).DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 状態変更: ID が空", call: func() error {
 			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")

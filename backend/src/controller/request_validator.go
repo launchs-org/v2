@@ -22,6 +22,10 @@ var imageReferencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-/:@]*$
 // environmentVariableNamePattern は、環境変数の名前に使える形(英字か _ で始まり、英数字と _ だけ)。
 var environmentVariableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// servicePortNamePattern は、service のポートの名前に使える形(k8s のポート名の規則)。
+// 小文字の英数字とハイフン。先頭と末尾はハイフンにできず、ハイフンは連続できない。
+var servicePortNamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 // requestValidator は、リクエストのボディの検証に使う validator。
 // エラーのメッセージに JSON のキー名(name など)が出るよう、タグ名の取り方を差し替えてある。
 var requestValidator = newRequestValidator()
@@ -31,6 +35,7 @@ var requestValidator = newRequestValidator()
 // 登録する規則:
 //   - resourcename: 英数字とハイフンのみ(長さは、min と max で別に指定する)。
 //   - imageref: イメージの参照に使える文字だけ(英数字で始まり、英数字と . _ - / : @)。
+//   - portname: service のポートの名前(小文字の英数字とハイフン。ハイフンの連続や、先頭・末尾は不可。英字を1つ以上含む)。
 //   - envname: 環境変数の名前(英字か _ で始まり、英数字と _ だけ)。
 //
 // 戻り値:
@@ -59,6 +64,11 @@ func newRequestValidator() *validator.Validate {
 	// イメージの参照の規則を登録する。
 	_ = validate.RegisterValidation("imageref", func(fieldLevel validator.FieldLevel) bool {
 		return imageReferencePattern.MatchString(fieldLevel.Field().String())
+	})
+	// service のポートの名前の規則を登録する(k8s は、ポート名に、英字が1つ以上あることも求める)。
+	_ = validate.RegisterValidation("portname", func(fieldLevel validator.FieldLevel) bool {
+		name := fieldLevel.Field().String()
+		return servicePortNamePattern.MatchString(name) && strings.ContainsAny(name, "abcdefghijklmnopqrstuvwxyz")
 	})
 	// 環境変数の名前の規則を登録する。
 	_ = validate.RegisterValidation("envname", func(fieldLevel validator.FieldLevel) bool {

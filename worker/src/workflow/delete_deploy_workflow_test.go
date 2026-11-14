@@ -24,6 +24,8 @@ func newDeleteDeployEnvironment(testingT *testing.T) *testsuite.TestWorkflowEnvi
 	// Temporal のテスト用の環境を作る(待ち時間は、時計を進めて飛ばす)。
 	testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestWorkflowEnvironment()
 	// Activity は、名前だけを登録する(中身はテストが差し替える)。
+	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.DeleteDeployServiceInput) error { return nil },
+		activity.RegisterOptions{Name: sharedworkflow.DeleteDeployServiceActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.DeleteDeploymentInput) error { return nil },
 		activity.RegisterOptions{Name: sharedworkflow.DeleteDeploymentActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.DeleteDeployRecordInput) error { return nil },
@@ -36,12 +38,14 @@ func newDeleteDeployEnvironment(testingT *testing.T) *testsuite.TestWorkflowEnvi
 // TestDeleteDeployWorkflow は、Deployment、レコードの順に削除し、失敗したら delete_failed にして失敗で終わることを確認する。
 func TestDeleteDeployWorkflow(testingT *testing.T) {
 	// 各 Activity の入力。
+	serviceInput := sharedworkflow.DeleteDeployServiceInput{DeployID: "deploy-1"}
 	deploymentInput := sharedworkflow.DeleteDeploymentInput{DeployID: "deploy-1"}
 	recordInput := sharedworkflow.DeleteDeployRecordInput{DeployID: "deploy-1"}
 	failedInput := sharedworkflow.MarkDeployDeleteFailedInput{DeployID: "deploy-1"}
 
 	testingT.Run("成功すると、Deployment、レコードの順に削除して、成功で終わる", func(subTest *testing.T) {
 		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeployRecordActivityName, mock.Anything, recordInput).Return(nil)
 
@@ -55,6 +59,7 @@ func TestDeleteDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("Deployment の削除が一時的に失敗しても、リトライで回復すれば成功で終わる", func(subTest *testing.T) {
 		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(errors.New("k8s down")).Twice()
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeployRecordActivityName, mock.Anything, recordInput).Return(nil)
@@ -69,6 +74,7 @@ func TestDeleteDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("Deployment の削除が期限まで失敗し続けると、レコードは消さず、delete_failed にして失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(errors.New("k8s down"))
 		testEnvironment.OnActivity(sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput).Return(nil)
 
@@ -83,6 +89,7 @@ func TestDeleteDeployWorkflow(testingT *testing.T) {
 
 	testingT.Run("リトライしないエラーなら、すぐ delete_failed にして失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).
 			Return(temporal.NewNonRetryableApplicationError("bad name", "InvalidDeploymentName", nil))
 		testEnvironment.OnActivity(sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput).Return(nil)
@@ -96,8 +103,39 @@ func TestDeleteDeployWorkflow(testingT *testing.T) {
 		testEnvironment.AssertCalled(subTest, sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput)
 	})
 
+	testingT.Run("service の k8s の Service の削除が期限まで失敗し続けると、Deployment もレコードも消さず、delete_failed にして失敗で終わる", func(subTest *testing.T) {
+		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(errors.New("k8s down"))
+		testEnvironment.OnActivity(sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput).Return(nil)
+
+		testEnvironment.ExecuteWorkflow(DeleteDeployWorkflow, sharedworkflow.DeleteDeployInput{DeployID: "deploy-1"})
+
+		if testEnvironment.GetWorkflowError() == nil {
+			subTest.Fatalf("失敗で終わるはず")
+		}
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput)
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.DeleteDeployRecordActivityName, mock.Anything, recordInput)
+		testEnvironment.AssertCalled(subTest, sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput)
+	})
+
+	testingT.Run("service の削除が一時的に失敗しても、リトライで回復すれば、成功で終わる", func(subTest *testing.T) {
+		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(errors.New("k8s down")).Twice()
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployRecordActivityName, mock.Anything, recordInput).Return(nil)
+
+		testEnvironment.ExecuteWorkflow(DeleteDeployWorkflow, sharedworkflow.DeleteDeployInput{DeployID: "deploy-1"})
+
+		if testEnvironment.GetWorkflowError() != nil {
+			subTest.Fatalf("リトライで回復して成功するはず: %v", testEnvironment.GetWorkflowError())
+		}
+		testEnvironment.AssertNumberOfCalls(subTest, sharedworkflow.DeleteDeployServiceActivityName, 3)
+	})
+
 	testingT.Run("レコードの削除が失敗し続けても、delete_failed にして失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newDeleteDeployEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.DeleteDeployServiceActivityName, mock.Anything, serviceInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeploymentActivityName, mock.Anything, deploymentInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.DeleteDeployRecordActivityName, mock.Anything, recordInput).Return(errors.New("database down"))
 		testEnvironment.OnActivity(sharedworkflow.MarkDeployDeleteFailedActivityName, mock.Anything, failedInput).Return(nil)
