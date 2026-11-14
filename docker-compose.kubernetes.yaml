@@ -11,5 +11,7 @@ services:
     environment:
       KUBERNETES_ACCESS: kubeconfig
       KUBECONFIG: /kube/config
+      # deploy の Pod の RuntimeClass(例: gvisor)。空なら指定せず、クラスターの既定のランタイムを使う。
+      RUNTIME_CLASS: ${RUNTIME_CLASS:-}
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
