@@ -24,13 +24,8 @@ const (
 	defaultTemporalNamespace = "default"
 
 	// defaultCrashLoopUnhealthyFor は、Pod が安定して動いていない状態が、これだけ続いたら、deploy を止める(既定)。
-	defaultCrashLoopUnhealthyFor = 30 * time.Minute
-
-	// defaultCrashLoopMaxRestarts は、コンテナの再起動がこの回数に達し、不健全が続いたら、deploy を止める(既定)。
-	defaultCrashLoopMaxRestarts = 20
-
-	// defaultCrashLoopRestartMinUnhealthy は、再起動の回数で止めるときに、最低限必要な、不健全が続いた時間(既定)。
-	defaultCrashLoopRestartMinUnhealthy = 10 * time.Minute
+	// k8s の再起動の間隔は 10 秒から最大 5 分まで延びるので、10 分で、およそ 6〜7 回の再起動になる。
+	defaultCrashLoopUnhealthyFor = 10 * time.Minute
 )
 
 // WatcherConfig は、watcher の設定。
@@ -60,9 +55,7 @@ type WatcherConfig struct {
 //   - DATABASE_URL: app データベースの接続先(必須)。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - TEMPORAL_ADDRESS、TEMPORAL_NAMESPACE: Temporal の接続先。省略すると temporal:7233、default。
-//   - CRASH_LOOP_UNHEALTHY_FOR: 安定して動いていない状態が、これだけ続いたら止める(既定 30m)。
-//   - CRASH_LOOP_MAX_RESTARTS: 再起動がこの回数に達し、不健全が続いたら止める(既定 20)。
-//   - CRASH_LOOP_RESTART_MIN_UNHEALTHY: 再起動の回数で止めるときの、最低限の不健全の長さ(既定 10m)。
+//   - CRASH_LOOP_UNHEALTHY_FOR: 安定して動いていない状態が、これだけ続いたら止める(既定 10m)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
 // 設定に問題があっても止まらず、見つかった全ての問題をまとめて報告する。
@@ -81,9 +74,7 @@ func LoadWatcherConfig(reader *sharedconfig.EnvironmentReader) (WatcherConfig, e
 	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	crashLoopLimits := repository.CrashLoopLimits{
-		UnhealthyFor:        reader.OptionalDuration("CRASH_LOOP_UNHEALTHY_FOR", defaultCrashLoopUnhealthyFor),
-		MaxRestarts:         reader.OptionalInt("CRASH_LOOP_MAX_RESTARTS", defaultCrashLoopMaxRestarts),
-		RestartMinUnhealthy: reader.OptionalDuration("CRASH_LOOP_RESTART_MIN_UNHEALTHY", defaultCrashLoopRestartMinUnhealthy),
+		UnhealthyFor: reader.OptionalDuration("CRASH_LOOP_UNHEALTHY_FOR", defaultCrashLoopUnhealthyFor),
 	}
 
 	// 読み込み中に見つかった問題を集める。
@@ -99,8 +90,8 @@ func LoadWatcherConfig(reader *sharedconfig.EnvironmentReader) (WatcherConfig, e
 		loadError = errors.Join(loadError, validateError)
 	}
 	// 上限は、0 以下だと、全ての deploy を止めてしまうので、拒否する。
-	if crashLoopLimits.UnhealthyFor <= 0 || crashLoopLimits.MaxRestarts < 1 || crashLoopLimits.RestartMinUnhealthy <= 0 {
-		loadError = errors.Join(loadError, errors.New("環境変数 CRASH_LOOP_UNHEALTHY_FOR、CRASH_LOOP_MAX_RESTARTS、CRASH_LOOP_RESTART_MIN_UNHEALTHY は、正の値でなければなりません"))
+	if crashLoopLimits.UnhealthyFor <= 0 {
+		loadError = errors.Join(loadError, errors.New("環境変数 CRASH_LOOP_UNHEALTHY_FOR は、正の値でなければなりません"))
 	}
 	// 問題があったときは、まとめて返す。
 	if loadError != nil {
