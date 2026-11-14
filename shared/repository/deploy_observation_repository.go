@@ -305,3 +305,30 @@ func (observationRepository *DeployObservationRepository) PruneEvents(requestCon
 	}
 	return deletedCount, nil
 }
+
+// ListPodsByDeploy は、deploy の、いま存在する Pod の状態を、作られた順に返す。
+//
+// 消えた Pod の行は残らないので、返るのは、いま存在する Pod(終了処理中を含む)だけ。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: deploy の ID。
+//
+// 戻り値:
+//   - Pod の一覧(作られた時刻の順。同じ時刻なら UID の順)。無ければ空。
+//   - データベースのエラー。
+func (observationRepository *DeployObservationRepository) ListPodsByDeploy(requestContext context.Context, deployID string) ([]model.DeployPod, error) {
+	// 条件の値が空だと、全ての行が対象になるので、先に拒否する。
+	if hasEmpty(deployID) {
+		return nil, newEmptyConditionError()
+	}
+	// 作られた順に読む(順番が毎回同じになるよう、UID でも並べる)。
+	var pods []model.DeployPod
+	listError := observationRepository.database.WithContext(requestContext).
+		Where(&model.DeployPod{DeployID: deployID}).
+		Order("pod_created_at, pod_uid").Find(&pods).Error
+	if listError != nil {
+		return nil, apperror.Wrap(apperror.KindInternal, "Pod の一覧を取得できませんでした", listError)
+	}
+	return pods, nil
+}
