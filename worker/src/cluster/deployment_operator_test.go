@@ -107,6 +107,10 @@ func TestKubernetesDeploymentOperatorApplyDeployment(testingT *testing.T) {
 		if deployment.Spec.Selector.MatchLabels[deployIDLabel] != testDeploymentName || deployment.Spec.Template.Labels[deployIDLabel] != testDeploymentName {
 			subTest.Errorf("selector と Pod のラベルが結びついていない")
 		}
+		// Pod には Datadog の差し込みを無効にするラベルが付き、Deployment 本体と selector には付かない。
+		if deployment.Spec.Template.Labels[datadogInjectionLabel] != "false" || deployment.Labels[datadogInjectionLabel] != "" || deployment.Spec.Selector.MatchLabels[datadogInjectionLabel] != "" {
+			subTest.Errorf("Datadog の差し込みを無効にするラベルが、Pod だけに付くはず: %+v", deployment.Spec.Template.Labels)
+		}
 		// コンテナの内容。
 		podSpec := deployment.Spec.Template.Spec
 		container := podSpec.Containers[0]
