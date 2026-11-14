@@ -10,6 +10,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"launchs/shared/k8s"
 )
 
 const (
@@ -26,12 +28,6 @@ const (
 	dnsPortNumber    = 53
 )
 
-// privateNetworks は、インターネットへの出口の許可から除く、内部のネットワーク。
-//
-// ノードの IP(例 192.168.100.x)、Pod と Service の CIDR(例 10.240.0.0/16、10.112.0.0/12)、リンクローカル
-// (クラウドのメタデータなど)、CGNAT(Tailscale など)を含む。これらへの通信は、止める。
-var privateNetworks = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"}
-
 // buildIsolationPolicy は、プロジェクトの namespace を、他から隔離する NetworkPolicy を組み立てる。
 //
 // namespace の中の全ての Pod に、次を適用する(Cilium は、ポリシーが選んだ Pod だけを隔離するので、これが無いと、
@@ -44,10 +40,15 @@ var privateNetworks = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", 
 // 引数:
 //   - namespaceName: 隔離する namespace(プロジェクトの ID)。
 //   - ingressNamespace: 外からの通信を中継する namespace(Traefik など)。空なら、許可しない。
+//   - blockedNetworks: インターネットへの出口の許可から除く、内部のネットワーク(CIDR)。空なら、既定(k8s.DefaultBlockedNetworks)。
 //
 // 戻り値:
 //   - 組み立てた NetworkPolicy。
-func buildIsolationPolicy(namespaceName string, ingressNamespace string) *networkingv1.NetworkPolicy {
+func buildIsolationPolicy(namespaceName string, ingressNamespace string, blockedNetworks []string) *networkingv1.NetworkPolicy {
+	// 除くネットワークが指定されていなければ、既定を使う(隔離が外れた状態にならないようにする)。
+	if len(blockedNetworks) == 0 {
+		blockedNetworks = k8s.DefaultBlockedNetworks()
+	}
 	// ----- 入ってくる通信: 同じ namespace(空の podSelector は、同じ namespace の全ての Pod) -----
 	ingressPeers := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}
 	// 外からの通信を中継する namespace があれば、そこからも許可する。
@@ -72,7 +73,7 @@ func buildIsolationPolicy(namespaceName string, ingressNamespace string) *networ
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &udp, Port: &dnsPort}, {Protocol: &tcp, Port: &dnsPort}},
 		},
 		// インターネット(内部のネットワークを除く)。
-		{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: append([]string(nil), privateNetworks...)}}}},
+		{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: append([]string(nil), blockedNetworks...)}}}},
 	}
 
 	// 全ての Pod に、入ってくる通信と出ていく通信の両方の規則を適用する。
@@ -99,7 +100,7 @@ func buildIsolationPolicy(namespaceName string, ingressNamespace string) *networ
 //   - k8s への依頼に失敗したときのエラー。
 func (operator *KubernetesDeploymentOperator) ensureIsolationPolicy(requestContext context.Context, namespaceName string) error {
 	// 期待する内容を組み立てる。
-	desiredPolicy := buildIsolationPolicy(namespaceName, operator.ingressNamespace)
+	desiredPolicy := buildIsolationPolicy(namespaceName, operator.ingressNamespace, operator.blockedNetworks)
 	policies := operator.clientset.NetworkingV1().NetworkPolicies(namespaceName)
 
 	// まず作ってみる。
