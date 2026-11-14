@@ -191,6 +191,8 @@ k8s の Pod / Deployment の変化
        deploy_pod_events     Pod の状態変化のログ(created / ready / restarted / waiting ...)
 ```
 
+古い Pod のイベントは、watcher が、30 日と 1deploy あたり 1000 件の上限で削除する([watcher.md](watcher.md))。
+
 今の段階では、API とワーカーは、まだ観測値を読まない(次の PR で、`pods` の一覧と、ワーカーの起動待ちを、DB 読みにする)。
 
 ## 6. どのファイルを見ればよいか
