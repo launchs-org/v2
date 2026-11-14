@@ -30,11 +30,18 @@ const (
 	// PodEventTerminating は、Pod が終了の処理に入ったことを表すイベント。
 	PodEventTerminating = "terminating"
 
+	// PodEventCrashLoopLimit は、Pod が異常な状態のまま上限を超えたため、deploy を止めた(レプリカを 0 にした)ことを表すイベント。
+	PodEventCrashLoopLimit = "crash_loop_limit"
+
 	// PodEventDeleted は、Pod が消えたことを表すイベント。
 	PodEventDeleted = "deleted"
 )
 
 const (
+	// PodStableAfter は、Ready のまま、コンテナがこの時間以上動き続けたとき、Pod が「安定して動いている」とみなす時間。
+	// クラッシュを繰り返す Pod は、一瞬 Ready になることがあるので、Ready になっただけでは、回復とみなさない。
+	PodStableAfter = 5 * time.Minute
+
 	// WatcherHeartbeatInterval は、watcher が、生きていることを DB に書く間隔。
 	WatcherHeartbeatInterval = 10 * time.Second
 
@@ -125,6 +132,9 @@ type DeployPod struct {
 
 	// ObservedAt は、watcher がこの値を観測した時刻。
 	ObservedAt time.Time `gorm:"column:observed_at"`
+
+	// UnhealthySince は、「安定して動いている」状態でなくなった時刻。安定して動いているときは nil。
+	UnhealthySince *time.Time `gorm:"column:unhealthy_since"`
 }
 
 // DeployPodEvent は、deploy_pod_events テーブルの1行。Pod の状態変化のログ。
