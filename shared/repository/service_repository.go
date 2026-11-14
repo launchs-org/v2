@@ -179,67 +179,32 @@ func (serviceRepository *ServiceRepository) FindByDeployIDForWorker(requestConte
 	return service, true, nil
 }
 
-// MarkActive は、k8s に作れた service を、active にし、払い出された DNS 名と ClusterIP を記録する。
+// CompleteCreation は、service の作成の結果を確定する。pending の service だけが対象。
 //
-// pending のときだけ変える(別の処理が先に変えていたら、何もしない)。
+//   - 成功: active にして、DNS 名と ClusterIP を記録する。
+//   - 失敗: failed にする。
 //
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - serviceID: service の ID。
-//   - dnsName: DNS 名。
-//   - clusterIP: ClusterIP(None のとき、または払い出されないときは空)。
-//
-// 戻り値:
-//   - 変えられたら true。pending でなかったとき、または無いときは false。
-//   - データベースのエラー。
-func (serviceRepository *ServiceRepository) MarkActive(requestContext context.Context, serviceID string, dnsName string, clusterIP string) (bool, error) {
-	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
-	if hasEmpty(serviceID, dnsName) {
-		return false, newEmptyConditionError()
-	}
-	// 空の ClusterIP は NULL のままにする(ポインタにして、空なら nil)。
-	var clusterIPValue *string
-	if clusterIP != "" {
-		clusterIPValue = &clusterIP
-	}
-	// pending のときだけ、active にして、DNS 名と ClusterIP を書く。
-	updateResult := serviceRepository.database.WithContext(requestContext).
-		Model(&model.Service{}).
-		Where(&model.Service{ID: serviceID, Status: model.ServiceStatusPending}).
-		Updates(&model.Service{Status: model.ServiceStatusActive, DNSName: &dnsName, ClusterIP: clusterIPValue})
-	if updateResult.Error != nil {
-		return false, apperror.Wrap(apperror.KindInternal, "service を更新できませんでした", updateResult.Error)
-	}
-	return updateResult.RowsAffected > 0, nil
-}
-
-// UpdateStatus は、service の状態を、期待する状態から別の状態へ変える。
-//
-// 期待する状態でないとき(別の処理が先に変えたとき)は、何も変えず、false を返す。
+// 別の処理が先に決めていたとき(pending でないとき)や、service が無いときは、何も変えず false を返す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
-//   - serviceID: 状態を変える service の ID。
-//   - fromStatus: 変更前に期待する状態。
-//   - toStatus: 変更後の状態。
+//   - serviceID: 結果を確定する service の ID。
+//   - succeeded: 作成に成功したか。
+//   - dnsName: 払い出された DNS 名(成功のときだけ使う。成功のときは空にできない)。
+//   - clusterIP: 払い出された ClusterIP(成功のときだけ使う。空なら記録しない)。
 //
 // 戻り値:
-//   - 変えられたら true。期待する状態でなかったとき、または無いときは false。
+//   - 確定したら true。
 //   - データベースのエラー。
-func (serviceRepository *ServiceRepository) UpdateStatus(requestContext context.Context, serviceID string, fromStatus string, toStatus string) (bool, error) {
-	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
-	if hasEmpty(serviceID, fromStatus, toStatus) {
+func (serviceRepository *ServiceRepository) CompleteCreation(requestContext context.Context, serviceID string, succeeded bool, dnsName string, clusterIP string) (bool, error) {
+	// 成功のときに DNS 名が空だと、壊れた値を書いてしまうので、先に拒否する。
+	if succeeded && hasEmpty(dnsName) {
 		return false, newEmptyConditionError()
 	}
-	// 期待する状態のときだけ、状態を更新する(更新日時は Gorm が更新する)。
-	updateResult := serviceRepository.database.WithContext(requestContext).
-		Model(&model.Service{}).
-		Where(&model.Service{ID: serviceID, Status: fromStatus}).
-		Updates(&model.Service{Status: toStatus})
-	if updateResult.Error != nil {
-		return false, apperror.Wrap(apperror.KindInternal, "service の状態を更新できませんでした", updateResult.Error)
-	}
-	return updateResult.RowsAffected > 0, nil
+	// モデルに、結果の確定を任せる。
+	return transitionService(serviceRepository.database, requestContext, serviceID, func(service *model.Service) bool {
+		return service.CompleteCreation(succeeded, dnsName, clusterIP)
+	})
 }
 
 // DeleteUnstarted は、作成の Workflow を開始できなかった service(pending)を、物理削除する。
@@ -314,17 +279,16 @@ func (serviceRepository *ServiceRepository) MarkDeleting(requestContext context.
 		if serviceError != nil {
 			return apperror.Wrap(apperror.KindInternal, "service を取得できませんでした", serviceError)
 		}
-		// 作成中と削除中は、受け付けない。
-		if !service.CanDelete() {
-			return apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、削除できません")
+		// モデルに、削除の受け付けを任せる(作成中と削除中は、受け付けない)。
+		acceptedStatus, beginError := service.BeginDelete()
+		if beginError != nil {
+			return beginError
 		}
-		// 状態を deleting にする(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Service{}).Where(&model.Service{ID: service.ID}).
-			Updates(&model.Service{Status: model.ServiceStatusDeleting}).Error
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "service を削除中にできませんでした", updateError)
+		// 変えた service を保存する。
+		if saveError := transaction.Save(&service).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "service を削除中にできませんでした", saveError)
 		}
-		serviceID, previousStatus = service.ID, service.Status
+		serviceID, previousStatus = service.ID, acceptedStatus
 		return nil
 	})
 	if transactionError != nil {
@@ -345,8 +309,13 @@ func (serviceRepository *ServiceRepository) MarkDeleting(requestContext context.
 // 戻り値:
 //   - データベースのエラー。
 func (serviceRepository *ServiceRepository) RevertDeleting(requestContext context.Context, serviceID string, previousStatus string) error {
-	// 削除中のときだけ、前の状態に戻す(UpdateStatus は、条件の空値も拒否する)。
-	_, revertError := serviceRepository.UpdateStatus(requestContext, serviceID, model.ServiceStatusDeleting, previousStatus)
+	// 条件の値が空のときは拒否し、削除中のときだけ、モデルに前の状態へ戻させる。
+	if hasEmpty(previousStatus) {
+		return newEmptyConditionError()
+	}
+	_, revertError := transitionService(serviceRepository.database, requestContext, serviceID, func(service *model.Service) bool {
+		return service.RevertDeleting(previousStatus)
+	})
 	return revertError
 }
 
@@ -362,8 +331,10 @@ func (serviceRepository *ServiceRepository) RevertDeleting(requestContext contex
 // 戻り値:
 //   - データベースのエラー。
 func (serviceRepository *ServiceRepository) MarkDeleteFailed(requestContext context.Context, serviceID string) error {
-	// 削除中のときだけ、failed にする。
-	_, markError := serviceRepository.UpdateStatus(requestContext, serviceID, model.ServiceStatusDeleting, model.ServiceStatusFailed)
+	// 削除中のときだけ、モデルに failed へ変えさせる。
+	_, markError := transitionService(serviceRepository.database, requestContext, serviceID, func(service *model.Service) bool {
+		return service.MarkDeleteFailed()
+	})
 	return markError
 }
 

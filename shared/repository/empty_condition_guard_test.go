@@ -73,11 +73,11 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 		}, expectedKind: apperror.KindNotFound},
 		{name: "service 取得(ワーカー): ID が空(先頭の1件を返さない)", call: func() error { _, err := NewServiceRepository(database).FindForWorker(requestContext, ""); return err }, expectedKind: apperror.KindNotFound},
 		{name: "service を active に: ID が空(全ての pending を変えない)", call: func() error {
-			_, err := NewServiceRepository(database).MarkActive(requestContext, "", "dns", "ip")
+			_, err := NewServiceRepository(database).CompleteCreation(requestContext, "", true, "dns", "ip")
 			return err
 		}, expectedKind: apperror.KindInternal},
 		{name: "service の状態変更: ID が空", call: func() error {
-			_, err := NewServiceRepository(database).UpdateStatus(requestContext, "", "pending", "active")
+			_, err := NewServiceRepository(database).CompleteCreation(requestContext, "", false, "", "")
 			return err
 		}, expectedKind: apperror.KindInternal},
 		{name: "service の削除の受付: deploy の ID が空", call: func() error {
@@ -102,12 +102,12 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 			return err
 		}, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
-		{name: "deploy 状態変更: ID が空", call: func() error {
-			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")
+		{name: "deploy 作成の確定: ID が空", call: func() error {
+			_, err := deployRepository.CompleteCreation(requestContext, "", true)
 			return err
 		}, expectedKind: apperror.KindInternal},
-		{name: "deploy 状態変更: 期待する状態が空", call: func() error {
-			_, err := deployRepository.UpdateStatus(requestContext, "deploy-00000001", "", "active")
+		{name: "deploy スケーリングの確定: ID が空", call: func() error {
+			_, err := deployRepository.CompleteScale(requestContext, "", true)
 			return err
 		}, expectedKind: apperror.KindInternal},
 	}
