@@ -18,6 +18,8 @@ deploy に紐づく service を削除するエンドポイント。呼び出す�
 - deploy が削除されるとき、その service も連鎖して削除され、`status` が `"deleting"` になること
 
 ### 異常系
+- 作成中(`status: "pending"`)の service を削除しようとした場合 409 が返ること(作成の処理が status を決めるため)
+- 作成または削除に失敗した(`status: "failed"`)service は、もう一度削除できること(やり直し)
 - 存在しない `deployId` を指定した場合 404 が返ること
 - 他ユーザーが所有する `deployId` を指定した場合 404 が返ること(存在しない場合と区別させないため、同じ 404 にする)
 - service が未作成の `deployId` に対して呼び出した場合 404 が返ること

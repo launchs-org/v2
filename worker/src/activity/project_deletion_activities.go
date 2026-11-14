@@ -20,6 +20,9 @@ import (
 // 何度やり直しても結果は同じなので、Activity は、このエラーをリトライしない。
 var ErrInvalidNamespaceName = errors.New("namespace の名前がプロジェクトの ID の形ではありません")
 
+// ErrInvalidServiceName は、Service の名前が service の ID の形ではないときのエラー。
+var ErrInvalidServiceName = errors.New("Service の名前が service の ID の形ではありません")
+
 // ErrInvalidDeploymentName は、Deployment の名前が deploy の ID の形ではないときのエラー。
 var ErrInvalidDeploymentName = errors.New("Deployment の名前が deploy の ID の形ではありません")
 
@@ -216,6 +219,9 @@ func markNonRetryable(originalError error) error {
 	// 名前の形が不正なら、リトライしても無駄なので、リトライしない印を付ける。
 	if errors.Is(originalError, ErrInvalidNamespaceName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidNamespaceName", originalError)
+	}
+	if errors.Is(originalError, ErrInvalidServiceName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidServiceName", originalError)
 	}
 	if errors.Is(originalError, ErrInvalidDeploymentName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidDeploymentName", originalError)

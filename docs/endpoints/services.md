@@ -36,7 +36,10 @@
 - Note: deploy の status が "deleting" の間は 409 を返す(deploy の削除に伴い service も deleting になるため)
 - Note: service はコンテナ内の複数ポートを、クラスタ内(および必要ならingressのpath ruleから参照されて外部)へ公開する単位。ports配列の各要素でport番号ごとにprotocol("tcp"|"udp")を選べる
 - Note: HTTPという制約はここには無い(TCP/UDPどちらのポートも登録できる)。「HTTPのみ対応」の制約は[イングレス](ingresses.md)側にあり、ingressのpath ruleはprotocol "tcp" のポートのみ参照できる
-- Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName("<name>.svc.cluster.local" 形式、nameはdeployごとに割り当てられるサービス名)と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
+- Note: status は "pending" | "active" | "failed" | "deleting" のいずれか。dnsName と clusterIP は "active" になるまで null(status/dnsName/clusterIP はサービス自体の払い出し状態であり、pending_*の対象ではない)
+- Note: **dnsName は `<serviceId>.<projectId>.svc.<クラスターのドメイン>`** の形。Kubernetes の Service の正式な名前は `<名前>.<namespace>.svc.<クラスターのドメイン>` で、namespace(projectId)は省略できない。クラスターのドメインは、クラスターごとに違い(例 `test-cluster.local`)、ワーカーの環境変数 `CLUSTER_DOMAIN` で指定する。同じプロジェクトの deploy からは、短い名前(`<serviceId>`)でも届く。**他のプロジェクトからは、隔離(NetworkPolicy)のため、届かない**([network-isolation.md](../network-isolation.md))
+- Note: k8s の Service の種類は、ワーカーの環境変数 `SERVICE_TYPE`(`ClusterIP`(既定)、`NodePort`、`LoadBalancer`)で決まる。`LoadBalancer` は、deploy ごとに外部 IP を使い、利用者のポート(UDP を含む)を LAN に公開する。外部 IP が払い出されなくても、status は "active" になる(clusterIP は払い出される)
+- Note: ports の検査: 1〜20個。name は小文字の英数字とハイフン(15文字まで。先頭・末尾のハイフンと、連続するハイフンは不可。英字を1つ以上含む)。port は 1〜65535。protocol は "tcp" | "udp"。**name の重複と、同じ port と protocol の組の重複は 400**。同じ port 番号でも、protocol が違えば許可する(DNS の 53 番など)
 
 ### サービス取得
 - Get: /deploy/:deployId/service
@@ -54,7 +57,7 @@
   ],
   "pending_ports": null,
   "status": "active",
-  "dnsName": "web.svc.cluster.local",
+  "dnsName": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.svc.cluster.local",
   "clusterIP": "10.43.12.7"
 }
 ```
@@ -71,7 +74,7 @@
     {"name": "game", "port": 27015, "protocol": "udp"}
   ],
   "status": "active",
-  "dnsName": "web.svc.cluster.local",
+  "dnsName": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.svc.cluster.local",
   "clusterIP": "10.43.12.7"
 }
 ```
@@ -144,8 +147,9 @@
 ```json
 {}
 ```
+- Note: 作成中("pending")の service は、作成の処理が status を決めるので、削除できず 409 を返す。作成または削除に失敗した("failed")service は、もう一度削除できる(削除の処理は、15分までリトライし、超えると "failed" になる)
 - Note: 呼び出すと即座に応答し、service の status は直ちに "deleting" になる。実体(k8s Service等)の削除処理は非同期に開始され、完了するとレコード自体が削除される([サービス取得](#サービス取得)は 404 を返すようになる)
 - Note: 当該 service の各ポートを参照している ingress の path rule は、呼び出し時点(status: "deleting" になった時点)で連鎖して削除される
 - Note: 既に status が "deleting" の間に再度削除を呼び出した場合は 409 を返す(削除処理中の多重実行不可)
-- Note: deploy が削除されるときは、その service も連鎖して削除される(status が "deleting" になる)。この連鎖削除でも、上記の ingress の path rule の削除は同様に行われる
+- Note: deploy が削除されるときは、その service も連鎖して削除される(deploy が削除中の間、service の status は "deleting" として返る。k8s の Service は deploy の削除の Workflow が消し、DB の service の行は、deploy の行と一緒に消える)。この連鎖削除でも、上記の ingress の path rule の削除は同様に行われる
 - Note: deploy の status が "deleting" の間にこの操作を呼び出した場合も 409 を返す

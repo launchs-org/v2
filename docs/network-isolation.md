@@ -17,6 +17,9 @@ namespace の全ての Pod に、次を適用する。
 
 → 他のプロジェクト、システムの Pod、ノードへの通信は、止まる。別のプロジェクトの deploy を、Service 名で呼ぶことも、できない(意図した仕様)。
 
+## service との関係
+同じプロジェクトの deploy からは、service(k8s の Service)に、DNS 名、短い名前、ClusterIP のどれでも届く。**他のプロジェクトからは、届かない**(Service の ClusterIP も、Pod への通信になるので、隔離される。実機で確認済み)。
+
 ## 適用のタイミング
 - **namespace を作ったとき**(プロジェクトの最初の deploy の作成)。
 - **deploy を作るたびに、作り直しではなく、内容を合わせる**(冪等)。手で変えられた場合や、`INGRESS_NAMESPACE` を変えたあとも、次の deploy の作成で、期待する内容に戻る。

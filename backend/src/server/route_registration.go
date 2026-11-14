@@ -49,4 +49,10 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PUT("/deploy/:deployId/config", deployController.UpdateConfig)
 	apiGroup.POST("/deploy/:deployId/config/apply", deployController.ApplyConfig)
 	apiGroup.POST("/deploy/:deployId/config/discard", deployController.DiscardConfig)
+
+	serviceRepository := repository.NewServiceRepository(dependencies.Database)
+	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
+	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
+	apiGroup.GET("/deploy/:deployId/service", serviceController.Get)
+	apiGroup.DELETE("/deploy/:deployId/service", serviceController.Delete)
 }

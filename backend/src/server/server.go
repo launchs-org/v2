@@ -25,6 +25,9 @@ type Dependencies struct {
 	// DeployWorkflowStarter は、deploy の起動(k8s への作成)の Workflow を開始するもの。
 	DeployWorkflowStarter service.DeployWorkflowStarter
 
+	// ServiceWorkflowStarter は、service の作成・削除の Workflow を開始するもの。
+	ServiceWorkflowStarter service.ServiceWorkflowStarter
+
 	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
 	ProjectDeletionStarter service.ProjectDeletionStarter
 }

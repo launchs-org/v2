@@ -37,17 +37,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config", "RUNTIME_CLASS": "gvisor"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -165,6 +165,51 @@ func TestLoadWorkerConfigBlockedNetworks(testingT *testing.T) {
 		testingT.Run("不正な値 "+invalid+" は、環境変数の名前を付けて拒否する", func(subTest *testing.T) {
 			if _, loadError := load(invalid); loadError == nil || !strings.Contains(loadError.Error(), "EGRESS_BLOCKED_NETWORKS") {
 				subTest.Errorf("名前を含むエラーのはず: %v", loadError)
+			}
+		})
+	}
+}
+
+// TestLoadWorkerConfigServiceTypeAndClusterDomain は、Service の種類(SERVICE_TYPE)とクラスターのドメイン(CLUSTER_DOMAIN)の、
+// 既定値・指定・不正な値の扱いを確認する。
+func TestLoadWorkerConfigServiceTypeAndClusterDomain(testingT *testing.T) {
+	// 必須の環境変数に、確かめたいものを足して読む道具。
+	load := func(extra map[string]string) (WorkerConfig, error) {
+		environment := map[string]string{"DATABASE_URL": "postgres://x", "KUBERNETES_ACCESS": "none"}
+		for name, value := range extra {
+			environment[name] = value
+		}
+		return LoadWorkerConfig(newTestReader(environment))
+	}
+	testingT.Run("省略すると、ClusterIP と cluster.local", func(subTest *testing.T) {
+		loaded, loadError := load(nil)
+		if loadError != nil || loaded.ServiceType != "ClusterIP" || loaded.ClusterDomain != "cluster.local" {
+			subTest.Errorf("既定のはず: %v %q %q", loadError, loaded.ServiceType, loaded.ClusterDomain)
+		}
+	})
+	for _, serviceType := range []string{"ClusterIP", "NodePort", "LoadBalancer"} {
+		testingT.Run("SERVICE_TYPE に "+serviceType+" を指定できる", func(subTest *testing.T) {
+			loaded, loadError := load(map[string]string{"SERVICE_TYPE": serviceType})
+			if loadError != nil || loaded.ServiceType != serviceType {
+				subTest.Errorf("%s のはず: %v %q", serviceType, loadError, loaded.ServiceType)
+			}
+		})
+	}
+	testingT.Run("CLUSTER_DOMAIN を指定できる", func(subTest *testing.T) {
+		loaded, loadError := load(map[string]string{"CLUSTER_DOMAIN": "test-cluster.local"})
+		if loadError != nil || loaded.ClusterDomain != "test-cluster.local" {
+			subTest.Errorf("指定した値のはず: %v %q", loadError, loaded.ClusterDomain)
+		}
+	})
+	for _, invalid := range []map[string]string{
+		{"SERVICE_TYPE": "ExternalName"}, {"SERVICE_TYPE": "clusterip"}, {"SERVICE_TYPE": "Headless"},
+		{"CLUSTER_DOMAIN": "Bad_Domain"}, {"CLUSTER_DOMAIN": ".leading.dot"}, {"CLUSTER_DOMAIN": "trailing.dot."}, {"CLUSTER_DOMAIN": "has space.local"},
+		{"CLUSTER_DOMAIN": "-bad.local"}, {"CLUSTER_DOMAIN": strings.Repeat("a", 151)},
+	} {
+		testingT.Run("不正な値は、環境変数の名前を付けて拒否する", func(subTest *testing.T) {
+			_, loadError := load(invalid)
+			if loadError == nil || (!strings.Contains(loadError.Error(), "SERVICE_TYPE") && !strings.Contains(loadError.Error(), "CLUSTER_DOMAIN")) {
+				subTest.Errorf("名前を含むエラーのはず: %v %v", invalid, loadError)
 			}
 		})
 	}
