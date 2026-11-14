@@ -41,24 +41,46 @@ type KubernetesDeploymentOperator struct {
 	clientset kubernetes.Interface
 	// runtimeClassName は、Pod に指定する RuntimeClass。空なら指定せず、クラスタの既定のランタイムを使う。
 	runtimeClassName string
+	// ingressNamespace は、外からの通信を中継する namespace(Traefik など)。隔離の NetworkPolicy で、ここからの通信を許可する。空なら許可しない。
+	ingressNamespace string
+	// blockedNetworks は、隔離の NetworkPolicy で、インターネットへの出口の許可から除く、内部のネットワーク(CIDR)。
+	blockedNetworks []string
+}
+
+// OperatorSettings は、KubernetesDeploymentOperator の設定。
+type OperatorSettings struct {
+	// RuntimeClass は、Pod に指定する RuntimeClass(環境変数 RUNTIME_CLASS)。空なら指定しない。
+	RuntimeClass string
+
+	// IngressNamespace は、外からの通信を中継する namespace(環境変数 INGRESS_NAMESPACE。Traefik など)。空なら許可しない。
+	IngressNamespace string
+
+	// BlockedNetworks は、インターネットへの出口の許可から除く、内部のネットワーク(環境変数 EGRESS_BLOCKED_NETWORKS)。
+	// 空なら、既定(k8s.DefaultBlockedNetworks)。
+	BlockedNetworks []string
 }
 
 // NewKubernetesDeploymentOperator は、KubernetesDeploymentOperator を作る。
 //
 // 引数:
 //   - clientset: k8s のクライアント。
-//   - runtimeClassName: Pod に指定する RuntimeClass(環境変数 RUNTIME_CLASS)。空なら指定しない。
+//   - settings: 設定(RuntimeClass、外からの通信を中継する namespace、除くネットワーク)。
 //
 // 戻り値:
 //   - 作成した KubernetesDeploymentOperator。
-func NewKubernetesDeploymentOperator(clientset kubernetes.Interface, runtimeClassName string) *KubernetesDeploymentOperator {
+func NewKubernetesDeploymentOperator(clientset kubernetes.Interface, settings OperatorSettings) *KubernetesDeploymentOperator {
 	// 依存するものを持たせて返す。
-	return &KubernetesDeploymentOperator{clientset: clientset, runtimeClassName: runtimeClassName}
+	return &KubernetesDeploymentOperator{
+		clientset: clientset, runtimeClassName: settings.RuntimeClass,
+		ingressNamespace: settings.IngressNamespace, blockedNetworks: settings.BlockedNetworks,
+	}
 }
 
-// EnsureNamespace は、namespace が無ければ作る。すでにあれば何もしない(冪等)。
+// EnsureNamespace は、namespace が無ければ作り、隔離の NetworkPolicy を適用する。すでにあれば、足りないものだけを揃える(冪等)。
 //
 // 作るのは、プロジェクトの ID の形の名前だけ。それ以外は、k8s に触れる前に拒否する。
+// NetworkPolicy は、namespace の作成のあと、必ず適用する(Cilium は、ポリシーが無いと、全ての通信を許可するため)。
+// deploy を作るたびに呼ばれるので、ポリシーが無かった既存のプロジェクトも、次の deploy の作成で、隔離される。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -76,15 +98,12 @@ func (operator *KubernetesDeploymentOperator) EnsureNamespace(requestContext con
 	_, createError := operator.clientset.CoreV1().Namespaces().Create(requestContext, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: namespaceName, Labels: map[string]string{projectIDLabel: namespaceName}},
 	}, metav1.CreateOptions{})
-	// すでにあれば、目的は達成されているので成功とする。
-	if apierrors.IsAlreadyExists(createError) {
-		return nil
-	}
-	// それ以外の失敗は、原因を包んで返す(Temporal がリトライする)。
-	if createError != nil {
+	// すでにあるのは、目的が達成されているので、失敗にしない。それ以外の失敗は、原因を包んで返す(Temporal がリトライする)。
+	if createError != nil && !apierrors.IsAlreadyExists(createError) {
 		return fmt.Errorf("namespace %s を作れませんでした: %w", namespaceName, createError)
 	}
-	return nil
+	// 隔離の NetworkPolicy を適用する(namespace を作った直後も、すでにあったときも)。
+	return operator.ensureIsolationPolicy(requestContext, namespaceName)
 }
 
 // ApplyDeployment は、Deployment を作る。すでにあれば内容を更新する(冪等)。
