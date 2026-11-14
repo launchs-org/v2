@@ -32,19 +32,16 @@ func (deployRepository *DeployRepository) MarkDeleting(requestContext context.Co
 		if lockError != nil {
 			return lockError
 		}
-		// 反映中、起動中、削除中は、削除を受け付けられない。
-		if !deploy.CanDelete() {
-			return apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、削除できません")
+		// モデルに、削除の受け付けを任せる(状態の規則は、モデルが持つ)。
+		acceptedStatus, beginError := deploy.BeginDelete()
+		if beginError != nil {
+			return beginError
 		}
-		// 状態を deleting にする(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Updates(&model.Deploy{Status: model.DeployStatusDeleting}).Error
-		// データベースのエラーは、内部エラーにして返す。
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "deploy を削除中にできませんでした", updateError)
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy を削除中にできませんでした", saveError)
 		}
-		previousStatus = deploy.Status
+		previousStatus = acceptedStatus
 		return nil
 	})
 	// 失敗したら、そのエラーを返す。

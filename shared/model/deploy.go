@@ -78,6 +78,9 @@ type Deploy struct {
 
 	// UpdatedAt は、更新日時。
 	UpdatedAt time.Time `gorm:"column:updated_at"`
+
+	// Pods は、deploy が持つ Pod(watcher が観測した現在の状態)。読み込んだときだけ入り、deploy の保存では書かない(読み取り専用)。
+	Pods []DeployPod `gorm:"foreignKey:DeployID;references:ID;->"`
 }
 
 // TableName は、Gorm にテーブル名を教える。

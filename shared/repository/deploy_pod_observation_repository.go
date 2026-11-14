@@ -45,7 +45,7 @@ func (observationRepository *DeployObservationRepository) ApplyPod(requestContex
 		}
 
 		// 「安定して動いている状態でなくなった時刻」を、前の状態から決める。
-		next.UnhealthySince = NextUnhealthySince(previous, next)
+		next.UnhealthySince = next.NextUnhealthySince(previous)
 
 		// 今の状態を保存する(あれば全ての列を上書きする)。
 		saveError := transaction.
