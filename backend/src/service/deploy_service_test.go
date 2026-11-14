@@ -20,6 +20,7 @@ type fakeDeployStore struct {
 	createdDeploy   *model.Deploy
 	cancelError     error
 	canceledDeploys []string
+	findError       error
 }
 
 // FindSpec は、決めたエラーを返す。
@@ -35,7 +36,7 @@ func (fakeStore *fakeDeployStore) Create(_ context.Context, deploy *model.Deploy
 
 // FindByID は、固定の deploy を返す。
 func (fakeStore *fakeDeployStore) FindByID(_ context.Context, userID string, deployID string) (model.Deploy, error) {
-	return model.Deploy{ID: deployID, UserID: userID}, nil
+	return model.Deploy{ID: deployID, UserID: userID}, fakeStore.findError
 }
 
 // DeleteUnstarted は、取り消された ID を覚えて、決めたエラーを返す。
@@ -84,6 +85,19 @@ func (fakeStore *fakeDeployStore) RevertDeleting(_ context.Context, _ string, _ 
 	return nil
 }
 
+// fakePodStore は、テスト用の PodStore。決めた Pod を返し、問い合わせた deploy の ID を覚える。
+type fakePodStore struct {
+	pods       []model.DeployPod
+	queriedIDs []string
+	err        error
+}
+
+// ListPodsByDeploy は、問い合わせた ID を覚えて、決めた Pod とエラーを返す。
+func (fakeStore *fakePodStore) ListPodsByDeploy(_ context.Context, deployID string) ([]model.DeployPod, error) {
+	fakeStore.queriedIDs = append(fakeStore.queriedIDs, deployID)
+	return fakeStore.pods, fakeStore.err
+}
+
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
@@ -118,7 +132,7 @@ func TestDeployServiceCreate(testingT *testing.T) {
 		fakeStore := &fakeDeployStore{}
 		fakeStarter := &fakeDeployWorkflowStarter{}
 
-		deployID, createError := NewDeployService(fakeStore, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
+		deployID, createError := NewDeployService(fakeStore, &fakePodStore{}, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
 
 		if createError != nil {
 			subTest.Fatalf("エラーにならないはず: %v", createError)
@@ -140,7 +154,7 @@ func TestDeployServiceCreate(testingT *testing.T) {
 		fakeStore := &fakeDeployStore{specError: apperror.New(apperror.KindInvalidRequest, "指定できないスペックです")}
 		fakeStarter := &fakeDeployWorkflowStarter{}
 
-		_, createError := NewDeployService(fakeStore, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "huge")
+		_, createError := NewDeployService(fakeStore, &fakePodStore{}, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "huge")
 
 		if apperror.KindOf(createError) != apperror.KindInvalidRequest || fakeStore.createdDeploy != nil || len(fakeStarter.startedDeployIDs) != 0 {
 			subTest.Errorf("invalid_request で、保存も開始もしないはず: %v", createError)
@@ -151,7 +165,7 @@ func TestDeployServiceCreate(testingT *testing.T) {
 		fakeStore := &fakeDeployStore{createError: apperror.New(apperror.KindConflict, "削除中")}
 		fakeStarter := &fakeDeployWorkflowStarter{}
 
-		_, createError := NewDeployService(fakeStore, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
+		_, createError := NewDeployService(fakeStore, &fakePodStore{}, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
 
 		if apperror.KindOf(createError) != apperror.KindConflict || len(fakeStarter.startedDeployIDs) != 0 {
 			subTest.Errorf("conflict で、開始しないはず: %v", createError)
@@ -162,7 +176,7 @@ func TestDeployServiceCreate(testingT *testing.T) {
 		fakeStore := &fakeDeployStore{}
 		fakeStarter := &fakeDeployWorkflowStarter{startError: errors.New("temporal down")}
 
-		_, createError := NewDeployService(fakeStore, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
+		_, createError := NewDeployService(fakeStore, &fakePodStore{}, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
 
 		if apperror.KindOf(createError) != apperror.KindInternal {
 			subTest.Errorf("internal_error のはず: %v", createError)
@@ -176,10 +190,35 @@ func TestDeployServiceCreate(testingT *testing.T) {
 		fakeStore := &fakeDeployStore{cancelError: errors.New("db down")}
 		fakeStarter := &fakeDeployWorkflowStarter{startError: errors.New("temporal down")}
 
-		_, createError := NewDeployService(fakeStore, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
+		_, createError := NewDeployService(fakeStore, &fakePodStore{}, fakeStarter).Create(context.Background(), "user-a", "project-1", "registry/app:1", "small")
 
 		if apperror.KindOf(createError) != apperror.KindInternal {
 			subTest.Errorf("internal_error のはず: %v", createError)
+		}
+	})
+}
+
+// TestDeployServiceListPods は、持ち主の確認のあとで Pod を読み、他人や無い deploy の Pod は読まないことを確認する。
+func TestDeployServiceListPods(testingT *testing.T) {
+	testingT.Run("持ち主の deploy なら、Pod の一覧を返す", func(subTest *testing.T) {
+		fakePods := &fakePodStore{pods: []model.DeployPod{{PodUID: "uid-1"}, {PodUID: "uid-2"}}}
+		pods, listError := NewDeployService(&fakeDeployStore{}, fakePods, &fakeDeployWorkflowStarter{}).ListPods(context.Background(), "user-a", "deploy-1")
+		if listError != nil || len(pods) != 2 || len(fakePods.queriedIDs) != 1 || fakePods.queriedIDs[0] != "deploy-1" {
+			subTest.Errorf("2件を、deploy-1 で読むはず: %v %v %v", listError, pods, fakePods.queriedIDs)
+		}
+	})
+	testingT.Run("deploy が無い、または他人のものなら not_found で、Pod は読まない", func(subTest *testing.T) {
+		fakePods := &fakePodStore{pods: []model.DeployPod{{PodUID: "uid-1"}}}
+		fakeStore := &fakeDeployStore{findError: apperror.New(apperror.KindNotFound, "deploy が見つかりません")}
+		pods, listError := NewDeployService(fakeStore, fakePods, &fakeDeployWorkflowStarter{}).ListPods(context.Background(), "user-b", "deploy-1")
+		if apperror.KindOf(listError) != apperror.KindNotFound || pods != nil || len(fakePods.queriedIDs) != 0 {
+			subTest.Errorf("not_found で、Pod は読まないはず: %v %v %v", listError, pods, fakePods.queriedIDs)
+		}
+	})
+	testingT.Run("Pod の読み取りに失敗したら、そのエラーを返す", func(subTest *testing.T) {
+		fakePods := &fakePodStore{err: errors.New("database down")}
+		if _, listError := NewDeployService(&fakeDeployStore{}, fakePods, &fakeDeployWorkflowStarter{}).ListPods(context.Background(), "user-a", "deploy-1"); listError == nil {
+			subTest.Errorf("エラーのはず")
 		}
 	})
 }

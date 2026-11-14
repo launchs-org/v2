@@ -18,6 +18,7 @@ import (
 type DeployUseCase interface {
 	Create(requestContext context.Context, userID string, projectID string, imageRef string, specName string) (string, error)
 	Get(requestContext context.Context, userID string, deployID string) (model.Deploy, error)
+	ListPods(requestContext context.Context, userID string, deployID string) ([]model.DeployPod, error)
 	UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error
 	DiscardConfig(requestContext context.Context, userID string, deployID string) error
 	ApplyConfig(requestContext context.Context, userID string, deployID string) error
@@ -123,7 +124,7 @@ type DeployResponse struct {
 	// Replicas は、希望するレプリカ数。
 	Replicas int `json:"replicas"`
 
-	// Pods は、現在稼働している Pod の一覧。いまは、k8s から読む仕組みが無いので、常に空。
+	// Pods は、いま存在する Pod の一覧(watcher が DB に書いた観測値。作られた順)。無ければ空の配列。
 	Pods []PodResponse `json:"pods"`
 
 	// ImageRef は、起動しているイメージ。
@@ -207,8 +208,15 @@ func (deployController *DeployController) Get(echoContext *echo.Context) error {
 	if getError != nil {
 		return getError
 	}
+	// Pod の一覧を読む(watcher が DB に書いた観測値)。
+	pods, podsError := deployController.deployUseCase.ListPods(echoContext.Request().Context(), userID, deploy.ID)
+	if podsError != nil {
+		return podsError
+	}
 	// モデルを、レスポンスの形にして返す。
-	return echoContext.JSON(http.StatusOK, newDeployResponse(deploy))
+	response := newDeployResponse(deploy)
+	response.Pods = newPodResponses(pods)
+	return echoContext.JSON(http.StatusOK, response)
 }
 
 // newDeployResponse は、モデルを、レスポンスの形にする。
@@ -226,7 +234,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		Status:   deploy.Status,
 		Spec:     deploy.Spec,
 		Replicas: deploy.Replicas,
-		// Pod の一覧は、k8s から読む仕組みができるまで、空の配列で返す(null にしない)。
+		// Pod の一覧は、呼び出し側が設定する(config だけを返す API では使わない)。ここでは、空の配列(null にしない)。
 		Pods:      []PodResponse{},
 		ImageRef:  deploy.ImageRef,
 		CreatedAt: jst.Format(deploy.CreatedAt),
@@ -404,4 +412,25 @@ func (deployController *DeployController) Delete(echoContext *echo.Context) erro
 	}
 	// 空のオブジェクトを返す。
 	return echoContext.JSON(http.StatusOK, struct{}{})
+}
+
+// podIDPrefix は、API に出す Pod の ID の接頭辞。ID は、この後ろに k8s の Pod の UID(UUID)を付けたもの。
+const podIDPrefix = "pod-"
+
+// newPodResponses は、Pod のモデルの一覧を、レスポンスの形にする。
+//
+// podId は「pod-」+ k8s の Pod の UID。Pod が作り直されると別の UID になるので、別の podId になる。
+//
+// 引数:
+//   - pods: Pod のモデルの一覧。
+//
+// 戻り値:
+//   - レスポンスの Pod の一覧。無ければ空の配列(null にしない)。
+func newPodResponses(pods []model.DeployPod) []PodResponse {
+	// モデルを1つずつ、レスポンスの形にする。
+	responses := make([]PodResponse, 0, len(pods))
+	for _, pod := range pods {
+		responses = append(responses, PodResponse{PodID: podIDPrefix + pod.PodUID, Status: pod.Status})
+	}
+	return responses
 }
