@@ -60,9 +60,9 @@ func (fakeStore *fakeDeployStore) BeginConfigApply(_ context.Context, _ string, 
 	return model.DeployStatusActive, nil
 }
 
-// UpdateStatus は、何もせず成功する。
-func (fakeStore *fakeDeployStore) UpdateStatus(_ context.Context, _ string, _ string, _ string) (bool, error) {
-	return true, nil
+// RevertApply は、何もせず成功する。
+func (fakeStore *fakeDeployStore) RevertApply(_ context.Context, _ string, _ string) error {
+	return nil
 }
 
 // BeginScale は、何もせず、変更ありとして成功する。

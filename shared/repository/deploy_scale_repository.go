@@ -40,28 +40,25 @@ func (deployRepository *DeployRepository) BeginScale(requestContext context.Cont
 	var start ScaleStart
 	// 取得と更新を、1つのトランザクションで行う。
 	transactionError := deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
-		// 操作できる状態(applying、deleting、delete_failed 以外)であることを、行をロックして確かめる。
-		deploy, lockError := lockEditableDeploy(transaction, userID, deployID)
+		// 行をロックして読む(持ち主の条件つき)。
+		deploy, lockError := lockDeploy(transaction, userID, deployID)
 		if lockError != nil {
 			return lockError
 		}
-		// 作成の起動中(pending)は、作成の処理が状態を決めるので、スケーリングは始められない。
-		if deploy.Status == model.DeployStatusPending {
-			return apperror.New(apperror.KindConflict, "deploy は起動中のため、スケーリングできません")
-		}
+		// 変える前の値を覚える。
 		start = ScaleStart{PreviousReplicas: deploy.Replicas, PreviousStatus: deploy.Status}
-		// 同じ数で、失敗してもいないなら、何も変えない。
-		if deploy.Replicas == replicas && deploy.Status != model.DeployStatusFailed {
+		// モデルに、スケーリングの開始を任せる(状態の規則は、モデルが持つ)。
+		changed, beginError := deploy.BeginScale(replicas)
+		if beginError != nil {
+			return beginError
+		}
+		// 何も変わらなかったときは、保存しない。
+		if !changed {
 			return nil
 		}
-		// replicas と status を更新する(0 も書くので、列を指定する。更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Select("replicas", "status").
-			Updates(&model.Deploy{Replicas: replicas, Status: model.DeployStatusApplying}).Error
-		// データベースのエラーは、内部エラーにして返す。
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "deploy を更新できませんでした", updateError)
+		// 変えた deploy を保存する(0 も書くので、全ての列を書く)。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy を更新できませんでした", saveError)
 		}
 		start.Changed = true
 		return nil
@@ -85,15 +82,12 @@ func (deployRepository *DeployRepository) RevertScale(requestContext context.Con
 	if hasEmpty(deployID, start.PreviousStatus) {
 		return newEmptyConditionError()
 	}
-	// applying のときだけ、replicas と status を戻す。
-	revertError := deployRepository.database.WithContext(requestContext).
-		Model(&model.Deploy{}).
-		Where(&model.Deploy{ID: deployID, Status: model.DeployStatusApplying}).
-		Select("replicas", "status").
-		Updates(&model.Deploy{Replicas: start.PreviousReplicas, Status: start.PreviousStatus}).Error
-	// データベースのエラーは、内部エラーにして返す。
+	// applying のときだけ、モデルに replicas と status を戻させる。
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertScale(start.PreviousReplicas, start.PreviousStatus)
+	})
 	if revertError != nil {
-		return apperror.Wrap(apperror.KindInternal, "スケーリングを元に戻せませんでした", revertError)
+		return revertError
 	}
 	return nil
 }

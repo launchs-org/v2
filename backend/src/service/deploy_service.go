@@ -21,7 +21,7 @@ type DeployStore interface {
 	SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error
 	DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error
 	BeginConfigApply(requestContext context.Context, userID string, deployID string) (string, error)
-	UpdateStatus(requestContext context.Context, deployID string, fromStatus string, toStatus string) (bool, error)
+	RevertApply(requestContext context.Context, deployID string, previousStatus string) error
 	BeginScale(requestContext context.Context, userID string, deployID string, replicas int) (repository.ScaleStart, error)
 	RevertScale(requestContext context.Context, deployID string, start repository.ScaleStart) error
 	MarkDeleting(requestContext context.Context, userID string, deployID string) (string, error)

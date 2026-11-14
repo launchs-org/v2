@@ -43,8 +43,7 @@ func lockDeployAndActiveService(transaction *gorm.DB, userID string, deployID st
 		return model.Deploy{}, model.Service{}, apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", deployError)
 	}
 	// 反映中や削除の途中は、操作できない(排他制御)。
-	switch deploy.Status {
-	case model.DeployStatusApplying, model.DeployStatusDeleting, model.DeployStatusDeleteFailed:
+	if !deploy.CanEditSettings() {
 		return model.Deploy{}, model.Service{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、service のポートを操作できません")
 	}
 	// service を、ロックして読む。
@@ -58,7 +57,7 @@ func lockDeployAndActiveService(transaction *gorm.DB, userID string, deployID st
 		return model.Deploy{}, model.Service{}, apperror.Wrap(apperror.KindInternal, "service を取得できませんでした", serviceError)
 	}
 	// active でない service は、ポートを変えられない。
-	if service.Status != model.ServiceStatusActive {
+	if !service.CanChangePorts() {
 		return model.Deploy{}, model.Service{}, apperror.New(apperror.KindConflict, "service は "+service.Status+" のため、ポートを操作できません")
 	}
 	return deploy, service, nil
@@ -165,22 +164,20 @@ func (serviceRepository *ServiceRepository) BeginPortsApply(requestContext conte
 		if lockError != nil {
 			return lockError
 		}
-		// 作成の起動中(pending)の deploy は、作成の処理が状態を決めるので、反映は始められない。
-		if deploy.Status == model.DeployStatusPending {
-			return apperror.New(apperror.KindConflict, "deploy は起動中のため、ポートを適用できません")
+		// service 側の条件(適用する値があること)を、モデルに確かめさせる。
+		if beginError := service.BeginPortsApply(); beginError != nil {
+			return beginError
 		}
-		// 適用する値が無いときは、反映する意味が無い。
-		if len(service.PendingPorts) == 0 {
-			return apperror.New(apperror.KindConflict, "適用するポートの変更がありません")
+		// deploy を反映中にすることを、モデルに任せる。
+		acceptedStatus, beginError := deploy.BeginServicePortsApply()
+		if beginError != nil {
+			return beginError
 		}
-		// deploy の状態を applying にする(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Updates(&model.Deploy{Status: model.DeployStatusApplying}).Error
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", updateError)
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", saveError)
 		}
-		serviceID, previousStatus = service.ID, deploy.Status
+		serviceID, previousStatus = service.ID, acceptedStatus
 		return nil
 	})
 	if transactionError != nil {
@@ -206,12 +203,12 @@ func (serviceRepository *ServiceRepository) RevertPortsApply(requestContext cont
 		return newEmptyConditionError()
 	}
 	// applying のときだけ、前の状態に戻す(更新日時は Gorm が更新する)。
-	updateError := serviceRepository.database.WithContext(requestContext).
-		Model(&model.Deploy{}).
-		Where(&model.Deploy{ID: deployID, Status: model.DeployStatusApplying}).
-		Updates(&model.Deploy{Status: previousStatus}).Error
+	// applying のときだけ、モデルに前の状態へ戻させる。
+	_, updateError := transitionDeploy(serviceRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertApply(previousStatus)
+	})
 	if updateError != nil {
-		return apperror.Wrap(apperror.KindInternal, "deploy を元の状態に戻せませんでした", updateError)
+		return updateError
 	}
 	return nil
 }
@@ -261,38 +258,20 @@ func (serviceRepository *ServiceRepository) CommitPortsApply(requestContext cont
 		if deployError != nil {
 			return deployError
 		}
-		if deploy.Status != model.DeployStatusApplying {
+		// モデルに、結果の確定を任せる(applying でなければ、何も変わらない)。
+		if !deploy.CommitServicePorts(succeeded) {
 			return nil
 		}
-
-		// 失敗のときは、deploy を failed にするだけ(ポートと pending は、そのまま)。
-		if !succeeded {
-			failError := transaction.Model(&model.Deploy{}).Where(&model.Deploy{ID: deploy.ID}).
-				Updates(&model.Deploy{Status: model.DeployStatusFailed}).Error
-			if failError != nil {
-				return failError
-			}
-			committed = true
-			return nil
-		}
-		// 成功のときの、deploy の状態を決める(replicas が 0 なら scaled_zero)。
-		targetStatus := model.DeployStatusActive
-		if deploy.Replicas == 0 {
-			targetStatus = model.DeployStatusScaledZero
-		}
-		// 適用する値があるときだけ、ポートを pending の内容にして、pending を NULL に戻す(適用する値が無いなら、ポートを壊さない)。
-		if len(service.PendingPorts) > 0 {
-			portsError := transaction.Model(&model.Service{}).Where(&model.Service{ID: service.ID}).
-				Select("ports", "pending_ports").
-				Updates(&model.Service{Ports: service.PendingPorts}).Error
-			if portsError != nil {
-				return portsError
+		// 成功のときだけ、pending のポートを、現在のポートにする。
+		if succeeded {
+			service.PromotePendingPorts()
+			if saveError := transaction.Save(&service).Error; saveError != nil {
+				return saveError
 			}
 		}
-		statusError := transaction.Model(&model.Deploy{}).Where(&model.Deploy{ID: deploy.ID}).
-			Updates(&model.Deploy{Status: targetStatus}).Error
-		if statusError != nil {
-			return statusError
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return saveError
 		}
 		committed = true
 		return nil

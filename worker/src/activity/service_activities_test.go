@@ -44,15 +44,13 @@ func (fakeStore *fakeServiceStore) FindByDeployIDForWorker(_ context.Context, _ 
 	return fakeStore.service, fakeStore.found, fakeStore.findError
 }
 
-// MarkActive は、記録する値を覚えて、成功する。
-func (fakeStore *fakeServiceStore) MarkActive(_ context.Context, serviceID string, dnsName string, clusterIP string) (bool, error) {
-	fakeStore.markedActive = append(fakeStore.markedActive, serviceID+"|"+dnsName+"|"+clusterIP)
-	return true, fakeStore.markError
-}
-
-// UpdateStatus は、状態の変更を覚えて、成功する。
-func (fakeStore *fakeServiceStore) UpdateStatus(_ context.Context, _ string, fromStatus string, toStatus string) (bool, error) {
-	fakeStore.updates = append(fakeStore.updates, fromStatus+"->"+toStatus)
+// CompleteCreation は、成功なら記録する値を、失敗なら状態の変更を覚えて、決めたエラーを返す。
+func (fakeStore *fakeServiceStore) CompleteCreation(_ context.Context, serviceID string, succeeded bool, dnsName string, clusterIP string) (bool, error) {
+	if succeeded {
+		fakeStore.markedActive = append(fakeStore.markedActive, serviceID+"|"+dnsName+"|"+clusterIP)
+	} else {
+		fakeStore.updates = append(fakeStore.updates, model.ServiceStatusPending+"->"+model.ServiceStatusFailed)
+	}
 	return true, fakeStore.markError
 }
 
