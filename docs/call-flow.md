@@ -193,7 +193,15 @@ k8s の Pod / Deployment の変化
 
 古い Pod のイベントは、watcher が、30 日と 1deploy あたり 1000 件の上限で削除する([watcher.md](watcher.md))。
 
-今の段階では、API とワーカーは、まだ観測値を読まない(次の PR で、`pods` の一覧と、ワーカーの起動待ちを、DB 読みにする)。
+**API は、deploy の詳細の `pods` を、`deploy_pods` から返す**(k8s には問い合わせない)。
+```
+GET /deploy/:deployId
+  → DeployController.Get
+       ├─ DeployService.Get        deploy を読む(他人のものは 404)
+       └─ DeployService.ListPods   持ち主を確かめてから、DeployObservationRepository.ListPodsByDeploy で Pod を読む
+  → pods: [{podId: "pod-" + k8s の Pod の UID, status: pending / running / terminating}]  作られた順
+```
+watcher が止まっている間は、古い値(または空)になる。ワーカーの起動待ちは、まだ k8s に問い合わせている(次の PR で、DB 読みにする)。
 
 ## 6. どのファイルを見ればよいか
 
