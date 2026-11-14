@@ -30,6 +30,14 @@ type DeployStore interface {
 	RevertDeleting(requestContext context.Context, deployID string, previousStatus string) error
 }
 
+// PodStore は、DeployService が必要とする、Pod の観測した状態の読み取り。
+//
+// 実体は shared/repository の DeployObservationRepository(書き込むのは watcher だけ)。テストでは fake に差し替える。
+type PodStore interface {
+	// ListPodsByDeploy は、deploy の、いま存在する Pod を、作られた順に返す。
+	ListPodsByDeploy(requestContext context.Context, deployID string) ([]model.DeployPod, error)
+}
+
 // DeployWorkflowStarter は、deploy の起動(k8s への作成)を行う処理(Workflow)を開始する。
 //
 // 実体は TemporalDeployWorkflowStarter。テストでは fake に差し替える。
@@ -50,6 +58,7 @@ type DeployWorkflowStarter interface {
 // DeployService は、deploy に関する操作のビジネスルールを担当する。
 type DeployService struct {
 	deployStore           DeployStore
+	podStore              PodStore
 	deployWorkflowStarter DeployWorkflowStarter
 }
 
@@ -57,13 +66,14 @@ type DeployService struct {
 //
 // 引数:
 //   - deployStore: deploy の保存先。
+//   - podStore: Pod の観測した状態の読み取り先。
 //   - deployWorkflowStarter: deploy の起動の処理を開始するもの。
 //
 // 戻り値:
 //   - 作成した DeployService。
-func NewDeployService(deployStore DeployStore, deployWorkflowStarter DeployWorkflowStarter) *DeployService {
+func NewDeployService(deployStore DeployStore, podStore PodStore, deployWorkflowStarter DeployWorkflowStarter) *DeployService {
 	// 保存先と、起動の開始を持たせた DeployService を返す。
-	return &DeployService{deployStore: deployStore, deployWorkflowStarter: deployWorkflowStarter}
+	return &DeployService{deployStore: deployStore, podStore: podStore, deployWorkflowStarter: deployWorkflowStarter}
 }
 
 // Create は、プロジェクトの配下に deploy を作り、起動の処理を開始する。
@@ -298,4 +308,25 @@ func (deployService *DeployService) Delete(requestContext context.Context, userI
 		return apperror.Wrap(apperror.KindInternal, "deploy の削除を開始できませんでした", joinErrors(startError, revertError))
 	}
 	return apperror.Wrap(apperror.KindInternal, "deploy の削除を開始できませんでした", startError)
+}
+
+// ListPods は、ユーザーの deploy の、いま存在する Pod を、作られた順に返す。
+//
+// Pod の状態は、watcher が DB に書いた観測値(k8s には問い合わせない)。watcher が動いていない間は、古い値や、空になる。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: deploy の ID。
+//
+// 戻り値:
+//   - Pod の一覧。無ければ空。
+//   - deploy が無い、または他のユーザーのものなら not_found。
+func (deployService *DeployService) ListPods(requestContext context.Context, userID string, deployID string) ([]model.DeployPod, error) {
+	// 先に、ユーザーの deploy であることを確かめる(他のユーザーの deploy の Pod は、見せない)。
+	if _, findError := deployService.deployStore.FindByID(requestContext, userID, deployID); findError != nil {
+		return nil, findError
+	}
+	// 持ち主の確認ができたので、Pod の一覧を読む。
+	return deployService.podStore.ListPodsByDeploy(requestContext, deployID)
 }

@@ -325,3 +325,52 @@ func TestDeployObservationRepositoryPruneEvents(testingT *testing.T) {
 		}
 	})
 }
+
+// TestDeployObservationRepositoryListPodsByDeploy は、deploy の Pod だけが、作られた順に返り、
+// 他の deploy の Pod は含まれず、無ければ空になることを確認する。
+func TestDeployObservationRepositoryListPodsByDeploy(testingT *testing.T) {
+	// deploy を2件用意し、Pod を、作られた時刻が前後するように入れる。
+	database, observationRepository := newObservationTestEnvironment(testingT)
+	database.Create(newTestDeploy(2, "project-00000001", "user-a"))
+	now := time.Now()
+	podAt := func(uid string, deployID string, createdAt time.Time) model.DeployPod {
+		pod := newTestPod(now)
+		pod.PodUID, pod.PodName, pod.DeployID, pod.PodCreatedAt = uid, "name-"+uid, deployID, createdAt
+		return pod
+	}
+	for _, pod := range []model.DeployPod{
+		podAt("uid-b", "deploy-00000001", now.Add(-time.Minute)),
+		podAt("uid-a", "deploy-00000001", now.Add(-2*time.Minute)),
+		podAt("uid-c", "deploy-00000001", now.Add(-time.Minute)),
+		podAt("uid-x", "deploy-00000002", now),
+	} {
+		if _, applyError := observationRepository.ApplyPod(context.Background(), pod); applyError != nil {
+			testingT.Fatalf("保存できるはず: %v", applyError)
+		}
+	}
+
+	testingT.Run("その deploy の Pod だけが、作られた順(同時刻は UID の順)に返る", func(subTest *testing.T) {
+		pods, listError := observationRepository.ListPodsByDeploy(context.Background(), "deploy-00000001")
+		if listError != nil || len(pods) != 3 || pods[0].PodUID != "uid-a" || pods[1].PodUID != "uid-b" || pods[2].PodUID != "uid-c" {
+			subTest.Errorf("uid-a、uid-b、uid-c の順のはず: %v %+v", listError, pods)
+		}
+	})
+	testingT.Run("Pod が無い deploy は、空になる", func(subTest *testing.T) {
+		pods, listError := observationRepository.ListPodsByDeploy(context.Background(), "deploy-99999999")
+		if listError != nil || len(pods) != 0 {
+			subTest.Errorf("空のはず: %v %+v", listError, pods)
+		}
+	})
+	testingT.Run("消えた Pod は、一覧に出ない", func(subTest *testing.T) {
+		_, _ = observationRepository.DeletePod(context.Background(), "project-00000001", "name-uid-a", now)
+		pods, _ := observationRepository.ListPodsByDeploy(context.Background(), "deploy-00000001")
+		if len(pods) != 2 || pods[0].PodUID != "uid-b" {
+			subTest.Errorf("2件になるはず: %+v", pods)
+		}
+	})
+	testingT.Run("空の ID は拒否する", func(subTest *testing.T) {
+		if _, listError := observationRepository.ListPodsByDeploy(context.Background(), ""); listError == nil {
+			subTest.Errorf("拒否されるはず(全ての Pod を返さない)")
+		}
+	})
+}
