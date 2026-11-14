@@ -40,6 +40,10 @@ type WorkerConfig struct {
 	// 空なら指定せず、クラスタの既定のランタイムを使う。
 	RuntimeClass string
 
+	// IngressNamespace は、外からの通信を中継する namespace の名前(環境変数 INGRESS_NAMESPACE。Traefik など)。
+	// プロジェクトの namespace の隔離の NetworkPolicy で、ここからの通信を許可する。空なら、許可しない。
+	IngressNamespace string
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -51,6 +55,7 @@ type WorkerConfig struct {
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
 //   - RUNTIME_CLASS: deploy の Pod に指定する RuntimeClass。省略すると、指定しない(クラスタの既定)。
+//   - INGRESS_NAMESPACE: 外からの通信を中継する namespace(Traefik など)。省略すると、その namespace からの通信は許可しない。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
 //
@@ -69,6 +74,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
 	runtimeClass := reader.OptionalString("RUNTIME_CLASS", "")
+	ingressNamespace := reader.OptionalString("INGRESS_NAMESPACE", "")
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -96,6 +102,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		TemporalNamespace: temporalNamespace,
 		LogLevel:          logLevel,
 		RuntimeClass:      runtimeClass,
+		IngressNamespace:  ingressNamespace,
 		Kubernetes:        kubernetesSettings,
 	}, nil
 }

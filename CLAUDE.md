@@ -47,6 +47,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - コンテナ名は `backend`(または `app`)、`worker` など。コンテナの名前と、コンテナ内部のコード構成は別の話として扱う。
 - コンテナ内部のコード構成は `controller / service / repository / model` の層でファイルを分ける。
 - **k8s の実際の状態(Pod、Deployment のレプリカ数など)を DB に書くのは、watcher だけ**(詳細は [docs/watcher.md](docs/watcher.md))。watcher は同時に1つだけ動かし、リーダー選出は PostgreSQL の advisory lock(`shared/leader`)で行う。
+- **プロジェクトの namespace は、NetworkPolicy で隔離する**(namespace の作成時に適用。詳細は [docs/network-isolation.md](docs/network-isolation.md))。外からの通信を中継する namespace(Traefik など)は、環境変数 `INGRESS_NAMESPACE` で許可する。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様

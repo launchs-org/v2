@@ -108,3 +108,31 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		})
 	}
 }
+
+// TestLoadWorkerConfigIngressNamespace は、外からの通信を中継する namespace(INGRESS_NAMESPACE)が、
+// 省略すると空(許可しない)で、指定するとその値になることを確認する。
+func TestLoadWorkerConfigIngressNamespace(testingT *testing.T) {
+	// 必須の環境変数に、確かめたいものを足して読む道具。
+	load := func(extra map[string]string) (WorkerConfig, error) {
+		environment := map[string]string{"DATABASE_URL": "postgres://x", "KUBERNETES_ACCESS": "none"}
+		for name, value := range extra {
+			environment[name] = value
+		}
+		return LoadWorkerConfig(sharedconfig.NewEnvironmentReader(func(name string) (string, bool) {
+			value, exists := environment[name]
+			return value, exists
+		}))
+	}
+	testingT.Run("省略すると空", func(subTest *testing.T) {
+		loaded, loadError := load(nil)
+		if loadError != nil || loaded.IngressNamespace != "" {
+			subTest.Errorf("空のはず: %v %q", loadError, loaded.IngressNamespace)
+		}
+	})
+	testingT.Run("指定すると、その値", func(subTest *testing.T) {
+		loaded, loadError := load(map[string]string{"INGRESS_NAMESPACE": "traefik"})
+		if loadError != nil || loaded.IngressNamespace != "traefik" {
+			subTest.Errorf("traefik のはず: %v %q", loadError, loaded.IngressNamespace)
+		}
+	})
+}

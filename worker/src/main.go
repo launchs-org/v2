@@ -67,7 +67,7 @@ func run() error {
 	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteProjectWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteProjectWorkflowName})
 	// k8s を操作する役を、設定に合わせて選ぶ。
-	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, workerConfig.RuntimeClass, appLogger)
+	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, workerConfig.RuntimeClass, workerConfig.IngressNamespace, appLogger)
 	if operatorsError != nil {
 		return operatorsError
 	}
@@ -144,12 +144,13 @@ type clusterOperators struct {
 // 引数:
 //   - kubernetesSettings: k8s への接続の設定。
 //   - runtimeClass: deploy の Pod に指定する RuntimeClass(空なら指定しない)。
+//   - ingressNamespace: 外からの通信を中継する namespace(Traefik など。空なら、隔離の NetworkPolicy で許可しない)。
 //   - appLogger: ログを出すロガー。
 //
 // 戻り値:
 //   - k8s を操作する役の一式。
 //   - k8s への接続の設定を読めなかったときのエラー。
-func chooseClusterOperators(kubernetesSettings k8s.Settings, runtimeClass string, appLogger *slog.Logger) (clusterOperators, error) {
+func chooseClusterOperators(kubernetesSettings k8s.Settings, runtimeClass string, ingressNamespace string, appLogger *slog.Logger) (clusterOperators, error) {
 	// k8s のクライアントを作る(クラスタへの通信は、最初の操作まで行われない)。
 	clientset, clientsetError := k8s.NewClientset(kubernetesSettings)
 
@@ -168,6 +169,6 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, runtimeClass string
 	// 本物のクライアントで、実際に操作する実装を使う。
 	return clusterOperators{
 		namespaceDeleter:   cluster.NewKubernetesNamespaceDeleter(clientset),
-		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, runtimeClass),
+		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, runtimeClass, ingressNamespace),
 	}, nil
 }
