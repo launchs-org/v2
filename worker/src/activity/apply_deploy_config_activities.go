@@ -90,9 +90,44 @@ func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConf
 	return applyDeployConfigActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
 }
 
+// RollbackDeploymentConfig は、反映に失敗したとき、k8s の Deployment を、現在の正式な値に戻す。
+//
+// 失敗した新しい設定のままだと、古い Pod が再作成されたときに、壊れた設定で立ち上がってしまう。
+// DB の正式な値(いま動いていた値)で Deployment を作り直し、k8s と DB の正式な値をそろえる。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 元に戻す deploy の ID。
+//
+// 戻り値:
+//   - deploy を読めなかったとき、内容が壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func (applyDeployConfigActivities *ApplyDeployConfigActivities) RollbackDeploymentConfig(requestContext context.Context, input workflow.RollbackDeploymentConfigInput) error {
+	// どの Activity が何のために動いているかを、警告として残す。
+	applyDeployConfigActivities.appLogger.Warn("反映に失敗したので、Deployment を元の値に戻す",
+		"deploy_id", input.DeployID, "activity", workflow.RollbackDeploymentConfigActivityName)
+
+	// DB から deploy とスペックを読む。
+	deploy, findError := applyDeployConfigActivities.configApplyStore.FindForWorker(requestContext, input.DeployID)
+	if findError != nil {
+		return findError
+	}
+	spec, specError := applyDeployConfigActivities.configApplyStore.FindSpec(requestContext, deploy.Spec)
+	if specError != nil {
+		return specError
+	}
+	// 正式な値(pending ではない方)から、Deployment の内容を組み立てる。
+	definition, definitionError := newDeploymentDefinition(deploy, spec)
+	if definitionError != nil {
+		return temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
+	}
+	// 戻す作業は、k8s を操作するものに任せる。
+	return applyDeployConfigActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
+}
+
 // CommitConfigResult は、反映の結果を DB に確定する。
 //
-// 正式な値を pending の内容で上書きし、pending を空に戻し、status を active(または scaled_zero)か failed にする。
+// 成功なら、正式な値を pending の内容にし、pending を空に戻し、status を active(または scaled_zero)にする。
+// 失敗なら、正式な値と pending は変えず、status を failed にする。
 // すでに確定している(applying でない)ときは、何もしない。
 //
 // 引数:

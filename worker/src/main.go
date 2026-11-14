@@ -94,6 +94,7 @@ func run() error {
 	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployConfigWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployConfigWorkflowName})
 	applyDeployConfigActivities := activity.NewApplyDeployConfigActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
 	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.ApplyPendingConfig, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingConfigActivityName})
+	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.RollbackDeploymentConfig, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentConfigActivityName})
 	generalWorker.RegisterActivityWithOptions(applyDeployConfigActivities.CommitConfigResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitConfigResultActivityName})
 
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)

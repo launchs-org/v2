@@ -27,6 +27,8 @@ func newApplyDeployConfigEnvironment(testingT *testing.T) *testsuite.TestWorkflo
 		activity.RegisterOptions{Name: sharedworkflow.ApplyPendingConfigActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.WaitDeploymentReadyInput) error { return nil },
 		activity.RegisterOptions{Name: sharedworkflow.WaitDeploymentReadyActivityName})
+	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.RollbackDeploymentConfigInput) error { return nil },
+		activity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentConfigActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.CommitConfigResultInput) error { return nil },
 		activity.RegisterOptions{Name: sharedworkflow.CommitConfigResultActivityName})
 	return testEnvironment
@@ -40,6 +42,7 @@ func TestApplyDeployConfigWorkflow(testingT *testing.T) {
 	waitInput := sharedworkflow.WaitDeploymentReadyInput{DeployID: "deploy-1"}
 	succeededInput := sharedworkflow.CommitConfigResultInput{DeployID: "deploy-1", Succeeded: true}
 	failedInput := sharedworkflow.CommitConfigResultInput{DeployID: "deploy-1", Succeeded: false}
+	rollbackInput := sharedworkflow.RollbackDeploymentConfigInput{DeployID: "deploy-1"}
 
 	testingT.Run("全て成功すると、成功を確定して、成功で終わる", func(subTest *testing.T) {
 		testEnvironment := newApplyDeployConfigEnvironment(subTest)
@@ -54,11 +57,13 @@ func TestApplyDeployConfigWorkflow(testingT *testing.T) {
 		}
 		testEnvironment.AssertCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, succeededInput)
 		testEnvironment.AssertNotCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput)
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.RollbackDeploymentConfigActivityName, mock.Anything, rollbackInput)
 	})
 
 	testingT.Run("Deployment を更新できなければ、起動は待たず、失敗を確定して失敗で終わる", func(subTest *testing.T) {
 		testEnvironment := newApplyDeployConfigEnvironment(subTest)
 		testEnvironment.OnActivity(sharedworkflow.ApplyPendingConfigActivityName, mock.Anything, applyInput).Return(errors.New("k8s down"))
+		testEnvironment.OnActivity(sharedworkflow.RollbackDeploymentConfigActivityName, mock.Anything, rollbackInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput).Return(nil)
 
 		testEnvironment.ExecuteWorkflow(ApplyDeployConfigWorkflow, sharedworkflow.ApplyDeployConfigInput{DeployID: "deploy-1"})
@@ -88,6 +93,23 @@ func TestApplyDeployConfigWorkflow(testingT *testing.T) {
 		testEnvironment := newApplyDeployConfigEnvironment(subTest)
 		testEnvironment.OnActivity(sharedworkflow.ApplyPendingConfigActivityName, mock.Anything, applyInput).Return(nil)
 		testEnvironment.OnActivity(sharedworkflow.WaitDeploymentReadyActivityName, mock.Anything, waitInput).Return(errors.New("not ready in time"))
+		testEnvironment.OnActivity(sharedworkflow.RollbackDeploymentConfigActivityName, mock.Anything, rollbackInput).Return(nil)
+		testEnvironment.OnActivity(sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput).Return(nil)
+
+		testEnvironment.ExecuteWorkflow(ApplyDeployConfigWorkflow, sharedworkflow.ApplyDeployConfigInput{DeployID: "deploy-1"})
+
+		if testEnvironment.GetWorkflowError() == nil {
+			subTest.Fatalf("失敗で終わるはず")
+		}
+		testEnvironment.AssertCalled(subTest, sharedworkflow.RollbackDeploymentConfigActivityName, mock.Anything, rollbackInput)
+		testEnvironment.AssertCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput)
+		testEnvironment.AssertNotCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, succeededInput)
+	})
+
+	testingT.Run("元の値に戻せなくても、失敗を確定して失敗で終わる", func(subTest *testing.T) {
+		testEnvironment := newApplyDeployConfigEnvironment(subTest)
+		testEnvironment.OnActivity(sharedworkflow.ApplyPendingConfigActivityName, mock.Anything, applyInput).Return(errors.New("k8s down"))
+		testEnvironment.OnActivity(sharedworkflow.RollbackDeploymentConfigActivityName, mock.Anything, rollbackInput).Return(errors.New("k8s still down"))
 		testEnvironment.OnActivity(sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput).Return(nil)
 
 		testEnvironment.ExecuteWorkflow(ApplyDeployConfigWorkflow, sharedworkflow.ApplyDeployConfigInput{DeployID: "deploy-1"})
@@ -96,7 +118,6 @@ func TestApplyDeployConfigWorkflow(testingT *testing.T) {
 			subTest.Fatalf("失敗で終わるはず")
 		}
 		testEnvironment.AssertCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, failedInput)
-		testEnvironment.AssertNotCalled(subTest, sharedworkflow.CommitConfigResultActivityName, mock.Anything, succeededInput)
 	})
 
 	testingT.Run("確定に失敗したときは、反映の結果が成功でも、失敗で終わる(applying は残る)", func(subTest *testing.T) {

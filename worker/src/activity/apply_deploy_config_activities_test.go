@@ -161,3 +161,38 @@ func TestCommitConfigResultActivity(testingT *testing.T) {
 		})
 	}
 }
+
+// TestRollbackDeploymentConfig は、巻き戻しが、pending ではなく現在の正式な値で Deployment を作り直すことを確認する。
+func TestRollbackDeploymentConfig(testingT *testing.T) {
+	// 現在の値と pending が違う deploy で、現在の値が k8s に渡る。
+	testingT.Run("現在の正式な値で Deployment を戻す", func(subTest *testing.T) {
+		fakeOperator := &fakeDeploymentOperator{}
+		activities := NewApplyDeployConfigActivities(&fakeConfigApplyStore{deploy: newPendingConfigDeploy()}, fakeOperator, newTestActivities(nil, nil).appLogger)
+		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+		testEnvironment.RegisterActivity(activities.RollbackDeploymentConfig)
+
+		_, executeError := testEnvironment.ExecuteActivity(activities.RollbackDeploymentConfig, workflow.RollbackDeploymentConfigInput{DeployID: "deploy-1"})
+
+		if executeError != nil || fakeOperator.appliedDefinition == nil {
+			subTest.Fatalf("成功するはず: %v", executeError)
+		}
+		definition := fakeOperator.appliedDefinition
+		if definition.Env["PORT"] != "8080" || definition.Command == nil || *definition.Command != "/app/server" || len(definition.Args) != 2 {
+			subTest.Errorf("現在の値のはず(pending ではない): %+v", definition)
+		}
+	})
+	// k8s への依頼の失敗は、リトライできるエラーのまま返る。
+	testingT.Run("k8s への依頼に失敗したら、リトライできるエラー", func(subTest *testing.T) {
+		fakeOperator := &fakeDeploymentOperator{applyError: errors.New("k8s down")}
+		activities := NewApplyDeployConfigActivities(&fakeConfigApplyStore{deploy: newPendingConfigDeploy()}, fakeOperator, newTestActivities(nil, nil).appLogger)
+		testEnvironment := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+		testEnvironment.RegisterActivity(activities.RollbackDeploymentConfig)
+
+		_, executeError := testEnvironment.ExecuteActivity(activities.RollbackDeploymentConfig, workflow.RollbackDeploymentConfigInput{DeployID: "deploy-1"})
+
+		var applicationError *temporal.ApplicationError
+		if executeError == nil || (errors.As(executeError, &applicationError) && applicationError.NonRetryable()) {
+			subTest.Errorf("リトライできるエラーのはず: %v", executeError)
+		}
+	})
+}
