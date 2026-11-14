@@ -217,20 +217,16 @@ func (projectRepository *ProjectRepository) MarkDeleting(requestContext context.
 			return apperror.Wrap(apperror.KindInternal, "プロジェクトを取得できませんでした", findError)
 		}
 
-		// 削除を受け付けられる状態(active、delete_failed)でなければ、conflict にする。
-		if project.Status != model.ProjectStatusActive && project.Status != model.ProjectStatusDeleteFailed {
-			return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、変更できません")
+		// モデルに、削除の受け付けを任せる(active、delete_failed 以外は、conflict)。
+		acceptedStatus, beginError := project.BeginDelete()
+		if beginError != nil {
+			return beginError
 		}
-
-		// 更新すると、読み込んだ project の Status も書き換わるので、先に更新前の状態を控える。
-		statusBeforeUpdate := project.Status
-
-		// 状態を deleting に更新する(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&project).Updates(&model.Project{Status: model.ProjectStatusDeleting}).Error
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", updateError)
+		// 変えた project を保存する。
+		if saveError := transaction.Save(&project).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除中にできませんでした", saveError)
 		}
-		previousStatus = statusBeforeUpdate
+		previousStatus = acceptedStatus
 		return nil
 	})
 	// トランザクションが失敗したら、そのエラー(not_found、conflict、internal)を返す。
@@ -281,13 +277,16 @@ func (projectRepository *ProjectRepository) RevertDeleting(requestContext contex
 		return newEmptyConditionError()
 	}
 	// 持ち主の、削除中のプロジェクトだけを対象にして、前の状態に戻す(更新日時は Gorm が更新する)。
-	updateResult := projectRepository.database.WithContext(requestContext).
-		Model(&model.Project{}).
-		Where(&model.Project{ID: projectID, UserID: userID, Status: model.ProjectStatusDeleting}).
-		Updates(&model.Project{Status: previousStatus})
-	// データベースのエラーは、内部エラーにして返す。
-	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを元の状態に戻せませんでした", updateResult.Error)
+	// 削除中のときだけ、モデルに前の状態へ戻させる。
+	_, updateError := transitionProject(projectRepository.database, requestContext, projectID, func(project *model.Project) bool {
+		// 他のユーザーのプロジェクトは、戻さない。
+		if project.UserID != userID {
+			return false
+		}
+		return project.RevertDeleting(previousStatus)
+	})
+	if updateError != nil {
+		return updateError
 	}
 	return nil
 }
@@ -309,13 +308,12 @@ func (projectRepository *ProjectRepository) MarkDeleteFailed(requestContext cont
 		return newEmptyConditionError()
 	}
 	// 削除中のプロジェクトだけを、delete_failed にする(更新日時は Gorm が更新する)。
-	updateResult := projectRepository.database.WithContext(requestContext).
-		Model(&model.Project{}).
-		Where(&model.Project{ID: projectID, Status: model.ProjectStatusDeleting}).
-		Updates(&model.Project{Status: model.ProjectStatusDeleteFailed})
-	// データベースのエラーは、内部エラーにして返す。
-	if updateResult.Error != nil {
-		return apperror.Wrap(apperror.KindInternal, "プロジェクトを削除失敗の状態にできませんでした", updateResult.Error)
+	// 削除中のときだけ、モデルに削除失敗の状態へ変えさせる。
+	_, updateError := transitionProject(projectRepository.database, requestContext, projectID, func(project *model.Project) bool {
+		return project.MarkDeleteFailed()
+	})
+	if updateError != nil {
+		return updateError
 	}
 	return nil
 }

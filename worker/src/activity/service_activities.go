@@ -23,11 +23,8 @@ type ServiceStore interface {
 	// FindByDeployIDForWorker は、deploy の service を取得する。無ければ false。
 	FindByDeployIDForWorker(requestContext context.Context, deployID string) (model.Service, bool, error)
 
-	// MarkActive は、pending の service を active にして、DNS 名と ClusterIP を記録する。
-	MarkActive(requestContext context.Context, serviceID string, dnsName string, clusterIP string) (bool, error)
-
-	// UpdateStatus は、期待する状態のときだけ、状態を変える。
-	UpdateStatus(requestContext context.Context, serviceID string, fromStatus string, toStatus string) (bool, error)
+	// CompleteCreation は、pending の service の作成の結果を確定する(成功なら active にして DNS 名と ClusterIP を記録、失敗なら failed)。
+	CompleteCreation(requestContext context.Context, serviceID string, succeeded bool, dnsName string, clusterIP string) (bool, error)
 
 	// DeleteRecord は、削除中の service を、DB から物理削除する。
 	DeleteRecord(requestContext context.Context, serviceID string) error
@@ -123,12 +120,12 @@ func (serviceActivities *ServiceActivities) MarkServiceResult(requestContext con
 	// 失敗のときは、運用で気づけるよう、警告にする。
 	if !input.Succeeded {
 		serviceActivities.appLogger.Warn("service の作成に失敗した", "service_id", input.ServiceID, "activity", workflow.MarkServiceResultActivityName)
-		_, failError := serviceActivities.serviceStore.UpdateStatus(requestContext, input.ServiceID, model.ServiceStatusPending, model.ServiceStatusFailed)
+		_, failError := serviceActivities.serviceStore.CompleteCreation(requestContext, input.ServiceID, false, "", "")
 		return failError
 	}
 	// 成功のときは、active にして、払い出された値を記録する(変えられなくても、別の処理が先に決めたので、エラーにしない)。
 	serviceActivities.appLogger.Info("service を作った", "service_id", input.ServiceID, "dns_name", input.DNSName, "cluster_ip", input.ClusterIP, "activity", workflow.MarkServiceResultActivityName)
-	_, markError := serviceActivities.serviceStore.MarkActive(requestContext, input.ServiceID, input.DNSName, input.ClusterIP)
+	_, markError := serviceActivities.serviceStore.CompleteCreation(requestContext, input.ServiceID, true, input.DNSName, input.ClusterIP)
 	return markError
 }
 

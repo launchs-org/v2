@@ -114,29 +114,20 @@ func (deployRepository *DeployRepository) BeginConfigApply(requestContext contex
 	previousStatus := ""
 	// 取得と更新を、1つのトランザクションで行う。
 	transactionError := deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
-		// 編集できる状態(applying、deleting、delete_failed 以外)であることを、行をロックして確かめる。
-		deploy, lockError := lockEditableDeploy(transaction, userID, deployID)
+		// 行をロックして読む(持ち主の条件つき)。
+		deploy, lockError := lockDeploy(transaction, userID, deployID)
 		if lockError != nil {
 			return lockError
 		}
-		// 作成の起動中(pending)は、作成の処理が状態を決めるので、反映は始められない。
-		if deploy.Status == model.DeployStatusPending {
-			return apperror.New(apperror.KindConflict, "deploy は起動中のため、起動設定を適用できません")
-		}
-		// 適用する値が無いときは、反映する意味が無い。
-		if len(deploy.PendingEnv) == 0 && deploy.PendingCommand == nil && len(deploy.PendingArgs) == 0 {
-			return apperror.New(apperror.KindConflict, "適用する起動設定の変更がありません")
-		}
-		// 状態を applying にする(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Updates(&model.Deploy{Status: model.DeployStatusApplying}).Error
-		// データベースのエラーは、内部エラーにして返す。
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", updateError)
-		}
-		// 元に戻せるよう、変える前の状態を覚える。
+		// 前の状態を覚えてから、モデルに反映の開始を任せる(状態の規則は、モデルが持つ)。
 		previousStatus = deploy.Status
+		if beginError := deploy.BeginConfigApply(); beginError != nil {
+			return beginError
+		}
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", saveError)
+		}
 		return nil
 	})
 	return previousStatus, transactionError
@@ -180,50 +171,13 @@ func (deployRepository *DeployRepository) CommitConfigResult(requestContext cont
 		if findError != nil {
 			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
 		}
-		// applying でなければ、別の処理が先に確定している(または削除が始まっている)ので、何もしない。
-		if deploy.Status != model.DeployStatusApplying {
+		// モデルに、結果の確定を任せる(applying でなければ、何も変わらない)。
+		if !deploy.CommitConfig(succeeded) {
 			return nil
 		}
-		// 失敗のときは、status だけを failed にする(正式な値と pending は、そのまま)。
-		if !succeeded {
-			failError := transaction.Model(&model.Deploy{}).
-				Where(&model.Deploy{ID: deployID}).
-				Updates(&model.Deploy{Status: model.DeployStatusFailed}).Error
-			if failError != nil {
-				return apperror.Wrap(apperror.KindInternal, "起動設定の結果を確定できませんでした", failError)
-			}
-			committed = true
-			return nil
-		}
-		// 成功のときの status を決める。
-		targetStatus := model.DeployStatusActive
-		if deploy.Replicas == 0 {
-			targetStatus = model.DeployStatusScaledZero
-		}
-		// 適用する値が無いとき(通常は起きない)は、正式な値を NULL で壊さないよう、状態だけを変える。
-		if len(deploy.PendingEnv) == 0 {
-			statusError := transaction.Model(&model.Deploy{}).
-				Where(&model.Deploy{ID: deployID}).
-				Updates(&model.Deploy{Status: targetStatus}).Error
-			if statusError != nil {
-				return apperror.Wrap(apperror.KindInternal, "起動設定の結果を確定できませんでした", statusError)
-			}
-			committed = true
-			return nil
-		}
-		// 正式な値を pending の内容にし、pending を NULL に戻す(列を指定して、NULL も書く)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Select("env", "command", "args", "pending_env", "pending_command", "pending_args", "status").
-			Updates(&model.Deploy{
-				Env:     deploy.PendingEnv,
-				Command: deploy.PendingCommand,
-				Args:    deploy.PendingArgs,
-				Status:  targetStatus,
-			}).Error
-		// データベースのエラーは、内部エラーにして返す。
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "起動設定の結果を確定できませんでした", updateError)
+		// 変えた deploy を保存する(正式な値と pending は、NULL も含めて、全ての列を書く)。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "起動設定の結果を確定できませんでした", saveError)
 		}
 		committed = true
 		return nil

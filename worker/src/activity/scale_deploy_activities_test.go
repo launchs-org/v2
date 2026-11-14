@@ -28,9 +28,12 @@ func (fakeStore *fakeScaleStore) FindSpec(_ context.Context, specName string) (m
 	return model.DeploySpec{Name: specName, CPUMillicores: 250, MemoryMiB: 256}, nil
 }
 
-// UpdateStatus は、状態の変更を覚えて、成功する。
-func (fakeStore *fakeScaleStore) UpdateStatus(_ context.Context, _ string, fromStatus string, toStatus string) (bool, error) {
-	fakeStore.updates = append(fakeStore.updates, fromStatus+"->"+toStatus)
+// CompleteScale は、モデルで確定した状態の変更を覚えて、成功する。
+func (fakeStore *fakeScaleStore) CompleteScale(_ context.Context, _ string, succeeded bool) (bool, error) {
+	completed := fakeStore.deploy
+	completed.Status = model.DeployStatusApplying
+	completed.CompleteScale(succeeded)
+	fakeStore.updates = append(fakeStore.updates, model.DeployStatusApplying+"->"+completed.Status)
 	return true, nil
 }
 

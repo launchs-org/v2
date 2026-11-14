@@ -32,20 +32,16 @@ func (deployRepository *DeployRepository) MarkDeleting(requestContext context.Co
 		if lockError != nil {
 			return lockError
 		}
-		// 反映中、起動中、削除中は、削除を受け付けられない。
-		switch deploy.Status {
-		case model.DeployStatusApplying, model.DeployStatusPending, model.DeployStatusDeleting:
-			return apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、削除できません")
+		// モデルに、削除の受け付けを任せる(状態の規則は、モデルが持つ)。
+		acceptedStatus, beginError := deploy.BeginDelete()
+		if beginError != nil {
+			return beginError
 		}
-		// 状態を deleting にする(更新日時は Gorm が更新する)。
-		updateError := transaction.Model(&model.Deploy{}).
-			Where(&model.Deploy{ID: deployID}).
-			Updates(&model.Deploy{Status: model.DeployStatusDeleting}).Error
-		// データベースのエラーは、内部エラーにして返す。
-		if updateError != nil {
-			return apperror.Wrap(apperror.KindInternal, "deploy を削除中にできませんでした", updateError)
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy を削除中にできませんでした", saveError)
 		}
-		previousStatus = deploy.Status
+		previousStatus = acceptedStatus
 		return nil
 	})
 	// 失敗したら、そのエラーを返す。
@@ -67,8 +63,13 @@ func (deployRepository *DeployRepository) MarkDeleting(requestContext context.Co
 // 戻り値:
 //   - データベースのエラー。
 func (deployRepository *DeployRepository) RevertDeleting(requestContext context.Context, deployID string, previousStatus string) error {
-	// 削除中のときだけ、前の状態に戻す(UpdateStatus は、条件の空値も拒否する)。
-	_, revertError := deployRepository.UpdateStatus(requestContext, deployID, model.DeployStatusDeleting, previousStatus)
+	// 条件の値が空のときは拒否し、削除中のときだけ、モデルに前の状態へ戻させる。
+	if hasEmpty(previousStatus) {
+		return newEmptyConditionError()
+	}
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertDeleting(previousStatus)
+	})
 	return revertError
 }
 
@@ -83,8 +84,10 @@ func (deployRepository *DeployRepository) RevertDeleting(requestContext context.
 // 戻り値:
 //   - データベースのエラー。
 func (deployRepository *DeployRepository) MarkDeleteFailed(requestContext context.Context, deployID string) error {
-	// 削除中のときだけ、delete_failed にする。
-	_, markError := deployRepository.UpdateStatus(requestContext, deployID, model.DeployStatusDeleting, model.DeployStatusDeleteFailed)
+	// 削除中のときだけ、モデルに delete_failed へ変えさせる。
+	_, markError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.MarkDeleteFailed()
+	})
 	return markError
 }
 

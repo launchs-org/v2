@@ -139,25 +139,25 @@ func TestServiceRepositoryFind(testingT *testing.T) {
 	})
 }
 
-// TestServiceRepositoryMarkActive は、pending の service だけを active にして、DNS 名と ClusterIP を記録することを確認する。
-func TestServiceRepositoryMarkActive(testingT *testing.T) {
+// TestServiceRepositoryCompleteCreation は、pending の service だけを active にして、DNS 名と ClusterIP を記録することを確認する。
+func TestServiceRepositoryCompleteCreation(testingT *testing.T) {
 	testingT.Run("pending なら active になり、DNS 名と ClusterIP が入る。2回目は何もしない", func(subTest *testing.T) {
 		database, serviceRepository := newServiceTestEnvironment(subTest)
 		_ = serviceRepository.Create(context.Background(), newTestService(1, "deploy-00000001", "user-a"))
-		changed, markError := serviceRepository.MarkActive(context.Background(), "service-00000001", "service-00000001.project-00000001.svc.test.local", "10.112.0.5")
+		changed, markError := serviceRepository.CompleteCreation(context.Background(), "service-00000001", true, "service-00000001.project-00000001.svc.test.local", "10.112.0.5")
 		var stored model.Service
 		database.Where("id = ?", "service-00000001").Take(&stored)
 		if markError != nil || !changed || stored.Status != "active" || stored.DNSName == nil || *stored.DNSName != "service-00000001.project-00000001.svc.test.local" || stored.ClusterIP == nil || *stored.ClusterIP != "10.112.0.5" {
 			subTest.Fatalf("active で、値が入るはず: %v %v %+v", changed, markError, stored)
 		}
-		if again, _ := serviceRepository.MarkActive(context.Background(), "service-00000001", "other", "10.0.0.1"); again {
+		if again, _ := serviceRepository.CompleteCreation(context.Background(), "service-00000001", true, "other", "10.0.0.1"); again {
 			subTest.Errorf("2回目は何もしないはず")
 		}
 	})
 	testingT.Run("ClusterIP が空(None など)なら、NULL のまま", func(subTest *testing.T) {
 		database, serviceRepository := newServiceTestEnvironment(subTest)
 		_ = serviceRepository.Create(context.Background(), newTestService(1, "deploy-00000001", "user-a"))
-		_, _ = serviceRepository.MarkActive(context.Background(), "service-00000001", "dns", "")
+		_, _ = serviceRepository.CompleteCreation(context.Background(), "service-00000001", true, "dns", "")
 		var stored model.Service
 		database.Where("id = ?", "service-00000001").Take(&stored)
 		if stored.Status != "active" || stored.ClusterIP != nil {
@@ -168,7 +168,7 @@ func TestServiceRepositoryMarkActive(testingT *testing.T) {
 		database, serviceRepository := newServiceTestEnvironment(subTest)
 		_ = serviceRepository.Create(context.Background(), newTestService(1, "deploy-00000001", "user-a"))
 		database.Exec("UPDATE services SET status = 'deleting'")
-		if changed, _ := serviceRepository.MarkActive(context.Background(), "service-00000001", "dns", "10.0.0.1"); changed {
+		if changed, _ := serviceRepository.CompleteCreation(context.Background(), "service-00000001", true, "dns", "10.0.0.1"); changed {
 			subTest.Errorf("変えないはず")
 		}
 	})

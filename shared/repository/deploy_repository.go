@@ -194,36 +194,42 @@ func (deployRepository *DeployRepository) DeleteUnstarted(requestContext context
 	return nil
 }
 
-// UpdateStatus は、deploy の状態を、期待する状態から別の状態へ変える。
+// CompleteCreation は、deploy の作成(起動)の結果を確定する。pending の deploy だけが対象。
 //
-// 期待する状態でないとき(別の処理が先に変えたとき)は、何も変えず、false を返す。
-// これで、同時に別の処理が状態を変えても、古い結果で上書きしない。
+// 別の処理が先に決めていたとき(pending でないとき)や、deploy が無いときは、何も変えず false を返す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
-//   - deployID: 状態を変える deploy の ID。
-//   - fromStatus: 変更前に期待する状態。
-//   - toStatus: 変更後の状態。
+//   - deployID: 結果を確定する deploy の ID。
+//   - succeeded: 起動に成功したか。
 //
 // 戻り値:
-//   - 変えられたら true。期待する状態でなかったとき、または deploy が無いときは false。
+//   - 確定したら true。
 //   - データベースのエラー。
-func (deployRepository *DeployRepository) UpdateStatus(requestContext context.Context, deployID string, fromStatus string, toStatus string) (bool, error) {
-	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
-	if hasEmpty(deployID, fromStatus, toStatus) {
-		return false, newEmptyConditionError()
-	}
-	// 期待する状態のときだけ、状態を更新する(更新日時は Gorm が更新する)。
-	updateResult := deployRepository.database.WithContext(requestContext).
-		Model(&model.Deploy{}).
-		Where(&model.Deploy{ID: deployID, Status: fromStatus}).
-		Updates(&model.Deploy{Status: toStatus})
-	// データベースのエラーは、内部エラーにして返す。
-	if updateResult.Error != nil {
-		return false, apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", updateResult.Error)
-	}
-	// 1行以上更新できたときだけ、変えられたことにする。
-	return updateResult.RowsAffected > 0, nil
+func (deployRepository *DeployRepository) CompleteCreation(requestContext context.Context, deployID string, succeeded bool) (bool, error) {
+	// モデルに、結果の確定を任せる。
+	return transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.CompleteCreation(succeeded)
+	})
+}
+
+// CompleteScale は、スケーリングの結果を確定する。applying の deploy だけが対象。
+//
+// 別の処理が先に決めていたとき(applying でないとき)や、deploy が無いときは、何も変えず false を返す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 結果を確定する deploy の ID。
+//   - succeeded: スケーリングに成功したか。
+//
+// 戻り値:
+//   - 確定したら true。
+//   - データベースのエラー。
+func (deployRepository *DeployRepository) CompleteScale(requestContext context.Context, deployID string, succeeded bool) (bool, error) {
+	// モデルに、結果の確定を任せる。
+	return transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.CompleteScale(succeeded)
+	})
 }
 
 // lockDeploy は、ユーザーの deploy を、更新用にロックして取得する(トランザクションの中で使う)。状態は確かめない。
@@ -279,9 +285,30 @@ func lockEditableDeploy(transaction *gorm.DB, userID string, deployID string) (m
 		return model.Deploy{}, lockError
 	}
 	// 反映中や削除の途中は、起動設定を変えられない。
-	switch deploy.Status {
-	case model.DeployStatusApplying, model.DeployStatusDeleting, model.DeployStatusDeleteFailed:
+	if !deploy.CanEditSettings() {
 		return model.Deploy{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、起動設定を操作できません")
 	}
 	return deploy, nil
+}
+
+// RevertApply は、反映の開始に失敗したとき、deploy の状態を、反映を始める前の状態に戻す(起動設定の反映用)。
+//
+// applying でないとき、または deploy が無いときは、何も変えない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 状態を戻す deploy の ID。
+//   - previousStatus: 戻す先の状態(BeginConfigApply が返したもの)。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (deployRepository *DeployRepository) RevertApply(requestContext context.Context, deployID string, previousStatus string) error {
+	// 条件の値が空のときは拒否し、applying のときだけ、モデルに前の状態へ戻させる。
+	if hasEmpty(previousStatus) {
+		return newEmptyConditionError()
+	}
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertApply(previousStatus)
+	})
+	return revertError
 }

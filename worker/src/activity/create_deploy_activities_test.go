@@ -35,9 +35,12 @@ func (fakeStore *fakeDeployStore) FindSpec(_ context.Context, specName string) (
 	return model.DeploySpec{Name: specName, CPUMillicores: 250, MemoryMiB: 256}, fakeStore.specError
 }
 
-// UpdateStatus は、「変更前→変更後」を覚えて、決めたエラーを返す。
-func (fakeStore *fakeDeployStore) UpdateStatus(_ context.Context, _ string, fromStatus string, toStatus string) (bool, error) {
-	fakeStore.updates = append(fakeStore.updates, fromStatus+"->"+toStatus)
+// CompleteCreation は、モデルで確定した「変更前→変更後」を覚えて、決めたエラーを返す。
+func (fakeStore *fakeDeployStore) CompleteCreation(_ context.Context, _ string, succeeded bool) (bool, error) {
+	completed := fakeStore.deploy
+	completed.Status = model.DeployStatusPending
+	completed.CompleteCreation(succeeded)
+	fakeStore.updates = append(fakeStore.updates, model.DeployStatusPending+"->"+completed.Status)
 	return true, fakeStore.updateError
 }
 
