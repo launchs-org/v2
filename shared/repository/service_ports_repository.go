@@ -203,12 +203,12 @@ func (serviceRepository *ServiceRepository) RevertPortsApply(requestContext cont
 		return newEmptyConditionError()
 	}
 	// applying のときだけ、前の状態に戻す(更新日時は Gorm が更新する)。
-	updateError := serviceRepository.database.WithContext(requestContext).
-		Model(&model.Deploy{}).
-		Where(&model.Deploy{ID: deployID, Status: model.DeployStatusApplying}).
-		Updates(&model.Deploy{Status: previousStatus}).Error
+	// applying のときだけ、モデルに前の状態へ戻させる。
+	_, updateError := transitionDeploy(serviceRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertApply(previousStatus)
+	})
 	if updateError != nil {
-		return apperror.Wrap(apperror.KindInternal, "deploy を元の状態に戻せませんでした", updateError)
+		return updateError
 	}
 	return nil
 }

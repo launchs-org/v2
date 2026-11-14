@@ -63,8 +63,13 @@ func (deployRepository *DeployRepository) MarkDeleting(requestContext context.Co
 // 戻り値:
 //   - データベースのエラー。
 func (deployRepository *DeployRepository) RevertDeleting(requestContext context.Context, deployID string, previousStatus string) error {
-	// 削除中のときだけ、前の状態に戻す(UpdateStatus は、条件の空値も拒否する)。
-	_, revertError := deployRepository.UpdateStatus(requestContext, deployID, model.DeployStatusDeleting, previousStatus)
+	// 条件の値が空のときは拒否し、削除中のときだけ、モデルに前の状態へ戻させる。
+	if hasEmpty(previousStatus) {
+		return newEmptyConditionError()
+	}
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertDeleting(previousStatus)
+	})
 	return revertError
 }
 
@@ -79,8 +84,10 @@ func (deployRepository *DeployRepository) RevertDeleting(requestContext context.
 // 戻り値:
 //   - データベースのエラー。
 func (deployRepository *DeployRepository) MarkDeleteFailed(requestContext context.Context, deployID string) error {
-	// 削除中のときだけ、delete_failed にする。
-	_, markError := deployRepository.UpdateStatus(requestContext, deployID, model.DeployStatusDeleting, model.DeployStatusDeleteFailed)
+	// 削除中のときだけ、モデルに delete_failed へ変えさせる。
+	_, markError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.MarkDeleteFailed()
+	})
 	return markError
 }
 

@@ -51,48 +51,32 @@ func (observationRepository *DeployObservationRepository) ListCrashLoopCandidate
 	if limits.UnhealthyFor <= 0 {
 		return nil, newEmptyConditionError()
 	}
-	// 結果の1行分。
-	type candidateRow struct {
-		DeployID         string
-		PodUID           string
-		PodName          string
-		RestartCount     int
-		WaitingReason    string
-		UnhealthySeconds float64
+	// データベースの時計の現在時刻を取る(Pod の時刻と、同じ時計で比べるため)。
+	var databaseNow time.Time
+	if nowError := observationRepository.database.WithContext(requestContext).Raw("SELECT now()").Scan(&databaseNow).Error; nowError != nil {
+		return nil, apperror.Wrap(apperror.KindInternal, "データベースの時刻を取得できませんでした", nowError)
 	}
-	var rows []candidateRow
-	queryError := observationRepository.database.WithContext(requestContext).Raw(`
-		SELECT DISTINCT ON (pod.deploy_id)
-			pod.deploy_id AS deploy_id, pod.pod_uid AS pod_uid, pod.pod_name AS pod_name,
-			pod.restart_count AS restart_count, pod.waiting_reason AS waiting_reason,
-			EXTRACT(EPOCH FROM (now() - pod.unhealthy_since))::float8 AS unhealthy_seconds
-		FROM deploy_pods pod
-		JOIN deploys deploy ON deploy.id = pod.deploy_id
-		WHERE deploy.status = 'active'
-		  AND deploy.replicas > 0
-		  AND pod.status <> 'terminating'
-		  AND pod.unhealthy_since IS NOT NULL
-		  AND NOT (pod.ready AND pod.started_at IS NOT NULL AND pod.started_at <= now() - make_interval(secs => ?))
-		  AND pod.unhealthy_since <= now() - make_interval(secs => ?)
-		  AND NOT EXISTS (
-		        SELECT 1 FROM deploy_pods healthy
-		        WHERE healthy.deploy_id = pod.deploy_id
-		          AND healthy.status <> 'terminating'
-		          AND healthy.ready AND healthy.started_at IS NOT NULL
-		          AND healthy.started_at <= now() - make_interval(secs => ?)
-		  )
-		ORDER BY pod.deploy_id, pod.unhealthy_since`,
-		model.PodStableAfter.Seconds(), limits.UnhealthyFor.Seconds(), model.PodStableAfter.Seconds(),
-	).Scan(&rows).Error
+	// 稼働中でレプリカがあり、不健全な Pod を持つ deploy を、Pod ごと読み込む。
+	var deploys []model.Deploy
+	queryError := observationRepository.database.WithContext(requestContext).
+		Preload("Pods").
+		Where("status = ? AND replicas > 0", model.DeployStatusActive).
+		Where("EXISTS (SELECT 1 FROM deploy_pods WHERE deploy_pods.deploy_id = deploys.id AND deploy_pods.unhealthy_since IS NOT NULL)").
+		Find(&deploys).Error
 	if queryError != nil {
 		return nil, apperror.Wrap(apperror.KindInternal, "止める候補の deploy を取得できませんでした", queryError)
 	}
-	// 結果を、使いやすい形にする。
-	candidates := make([]CrashLoopCandidate, 0, len(rows))
-	for _, row := range rows {
+	// 止めるかどうかの判断は、deploy(モデル)に任せる。
+	candidates := make([]CrashLoopCandidate, 0, len(deploys))
+	for _, deploy := range deploys {
+		// 止める理由になる Pod が無ければ、候補にしない。
+		pod, shouldStop := deploy.CrashLoopingPod(databaseNow, limits.UnhealthyFor)
+		if !shouldStop {
+			continue
+		}
 		candidates = append(candidates, CrashLoopCandidate{
-			DeployID: row.DeployID, PodUID: row.PodUID, PodName: row.PodName, RestartCount: row.RestartCount,
-			WaitingReason: row.WaitingReason, UnhealthyFor: time.Duration(row.UnhealthySeconds * float64(time.Second)),
+			DeployID: deploy.ID, PodUID: pod.PodUID, PodName: pod.PodName, RestartCount: pod.RestartCount,
+			WaitingReason: pod.WaitingReason, UnhealthyFor: databaseNow.Sub(*pod.UnhealthySince),
 		})
 	}
 	return candidates, nil

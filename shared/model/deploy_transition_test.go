@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"gorm.io/datatypes"
 )
@@ -68,5 +69,79 @@ func TestDeployBeginOperations(testing *testing.T) {
 	previous, deleteError := failed.BeginDelete()
 	if deleteError != nil || previous != DeployStatusFailed || failed.Status != DeployStatusDeleting {
 		testing.Error("削除の受け付けが違う")
+	}
+}
+
+// TestDeployRevertAndFinish は、失敗の戻しと crash-loop の停止が、期待する状態のときだけ働くことを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestDeployRevertAndFinish(testing *testing.T) {
+	// 削除中だけが、戻せて、delete_failed にできる。
+	deleting := Deploy{Status: DeployStatusDeleting}
+	if !deleting.MarkDeleteFailed() || deleting.Status != DeployStatusDeleteFailed {
+		testing.Error("deleting は delete_failed にできるはず")
+	}
+	if deleting.RevertDeleting(DeployStatusActive) || deleting.MarkDeleteFailed() {
+		testing.Error("deleting でなければ何もしないはず")
+	}
+	// スケーリングの戻し: applying のときだけ、replicas と状態が戻る。
+	applying := Deploy{Status: DeployStatusApplying, Replicas: 5}
+	if !applying.RevertScale(2, DeployStatusActive) || applying.Replicas != 2 || applying.Status != DeployStatusActive {
+		testing.Error("スケーリングの戻しが違う")
+	}
+	if applying.RevertScale(9, DeployStatusFailed) || applying.Replicas != 2 {
+		testing.Error("applying でなければ戻さないはず")
+	}
+	// crash-loop の停止: active → applying → failed。
+	active := Deploy{Status: DeployStatusActive}
+	if !active.BeginCrashLoopStop() || !active.FinishCrashLoopStop() || active.Status != DeployStatusFailed {
+		testing.Error("停止の流れが違う")
+	}
+	if active.BeginCrashLoopStop() {
+		testing.Error("active でなければ止められないはず")
+	}
+}
+
+// TestDeployCrashLoopingPod は、止めるべき deploy の判定が、仕様どおりであることを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestDeployCrashLoopingPod(testing *testing.T) {
+	// 基準の時刻と、猶予の時間。
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	threshold := 10 * time.Minute
+	// 時刻を作る補助。
+	ago := func(duration time.Duration) *time.Time {
+		moment := now.Add(-duration)
+		return &moment
+	}
+	// 不健全な Pod(猶予を超えている)。
+	crashing := DeployPod{PodUID: "crash", UnhealthySince: ago(30 * time.Minute)}
+	// 猶予に届かない Pod。
+	recent := DeployPod{PodUID: "recent", UnhealthySince: ago(2 * time.Minute)}
+	// 安定している Pod。
+	stable := DeployPod{PodUID: "stable", Ready: true, StartedAt: ago(time.Hour)}
+	// 終了中の Pod。
+	terminating := DeployPod{PodUID: "terminating", Status: PodStatusTerminating, UnhealthySince: ago(time.Hour)}
+
+	// 猶予を超えた不健全な Pod だけなら、止める。
+	if pod, stop := (Deploy{Status: DeployStatusActive, Replicas: 2, Pods: []DeployPod{recent, crashing}}).CrashLoopingPod(now, threshold); !stop || pod.PodUID != "crash" {
+		testing.Error("止めるはず")
+	}
+	// 安定した Pod が1つでもあれば、止めない。
+	if _, stop := (Deploy{Status: DeployStatusActive, Replicas: 2, Pods: []DeployPod{crashing, stable}}).CrashLoopingPod(now, threshold); stop {
+		testing.Error("安定した Pod があれば止めないはず")
+	}
+	// 猶予に届かない、または終了中だけなら、止めない。
+	if _, stop := (Deploy{Status: DeployStatusActive, Replicas: 1, Pods: []DeployPod{recent, terminating}}).CrashLoopingPod(now, threshold); stop {
+		testing.Error("猶予内と終了中だけなら止めないはず")
+	}
+	// active でない、または replicas が 0 なら、止めない。
+	if _, stop := (Deploy{Status: DeployStatusFailed, Replicas: 1, Pods: []DeployPod{crashing}}).CrashLoopingPod(now, threshold); stop {
+		testing.Error("active でなければ止めないはず")
+	}
+	if _, stop := (Deploy{Status: DeployStatusActive, Replicas: 0, Pods: []DeployPod{crashing}}).CrashLoopingPod(now, threshold); stop {
+		testing.Error("replicas 0 は止めないはず")
 	}
 }
