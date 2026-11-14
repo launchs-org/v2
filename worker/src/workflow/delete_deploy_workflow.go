@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -38,15 +37,7 @@ func DeleteDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 	// 失敗したので、deploy を delete_failed にする。キャンセルされていても実行できるよう、切り離した context で呼ぶ。
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
-	compensationContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	compensationContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	markError := sdkworkflow.ExecuteActivity(compensationContext, sharedworkflow.MarkDeployDeleteFailedActivityName,
 		sharedworkflow.MarkDeployDeleteFailedInput{DeployID: input.DeployID}).Get(compensationContext, nil)
 	// 記録にも失敗したときは、両方の原因を返す(deploy は deleting のまま残る)。
@@ -66,15 +57,7 @@ func DeleteDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 //   - いずれかの Activity が、リトライの期限までに成功しなかったときのエラー。
 func deleteDeployEntities(workflowContext sdkworkflow.Context, input sharedworkflow.DeleteDeployInput) error {
 	// Activity の実行時間の上限とリトライの方針を決める。期限までは、復旧を待ってリトライし続ける。
-	activityContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeleteProjectRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	activityContext := sdkworkflow.WithActivityOptions(workflowContext, retryUntil(sharedworkflow.DeleteProjectRetryWindow))
 	// 1. k8s の Deployment を削除する。
 	if deploymentError := sdkworkflow.ExecuteActivity(activityContext, sharedworkflow.DeleteDeploymentActivityName,
 		sharedworkflow.DeleteDeploymentInput{DeployID: input.DeployID}).Get(activityContext, nil); deploymentError != nil {

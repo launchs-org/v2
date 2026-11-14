@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -36,15 +35,7 @@ func ApplyDeployConfigWorkflow(workflowContext sdkworkflow.Context, input shared
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
 	if applyError != nil {
-		rollbackContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-			StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-			ScheduleToCloseTimeout: compensationRetryWindow,
-			RetryPolicy: &temporal.RetryPolicy{
-				MaximumInterval:    activityMaximumRetryInterval,
-				InitialInterval:    activityInitialRetryInterval,
-				BackoffCoefficient: 2,
-			},
-		})
+		rollbackContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 		rollbackError := sdkworkflow.ExecuteActivity(rollbackContext, sharedworkflow.RollbackDeploymentConfigActivityName,
 			sharedworkflow.RollbackDeploymentConfigInput{DeployID: input.DeployID}).Get(rollbackContext, nil)
 		if rollbackError != nil {
@@ -53,15 +44,7 @@ func ApplyDeployConfigWorkflow(workflowContext sdkworkflow.Context, input shared
 	}
 
 	// 結果を DB に確定する。Workflow がキャンセルされていても確定できるよう、切り離した context で呼ぶ。
-	commitContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	commitContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	commitError := sdkworkflow.ExecuteActivity(commitContext, sharedworkflow.CommitConfigResultActivityName,
 		sharedworkflow.CommitConfigResultInput{DeployID: input.DeployID, Succeeded: applyError == nil}).Get(commitContext, nil)
 
@@ -82,15 +65,7 @@ func ApplyDeployConfigWorkflow(workflowContext sdkworkflow.Context, input shared
 //   - 更新に失敗したとき、または、300 秒までに Ready にならなかったときのエラー。
 func runConfigApply(workflowContext sdkworkflow.Context, input sharedworkflow.ApplyDeployConfigInput) error {
 	// k8s への依頼の方針。期限までは、リトライを続ける。
-	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployInfrastructureRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, infrastructureOptions())
 	// 1. pending の値で、Deployment を更新する。更新後の設定の世代を受け取り、起動を待つときの下限にする。
 	var generation int64
 	if applyError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.ApplyPendingConfigActivityName,
@@ -99,16 +74,7 @@ func runConfigApply(workflowContext sdkworkflow.Context, input sharedworkflow.Ap
 	}
 
 	// 2. 起動し直し終えるのを待つ。deploy の作成と同じ Activity を使い、300秒を全体の期限にする。
-	waitContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeployStartTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployStartTimeout,
-		HeartbeatTimeout:       sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    activityInitialRetryInterval,
-			MaximumInterval:    activityMaximumRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	waitContext := sdkworkflow.WithActivityOptions(workflowContext, startupWaitOptions())
 	if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
 		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 		return fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)

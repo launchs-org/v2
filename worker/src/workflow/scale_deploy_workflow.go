@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -27,15 +26,7 @@ import (
 //   - 失敗したときのエラー(status は failed にしてある)。記録もできなかったときは、両方の原因を含む。
 func ScaleDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkflow.ScaleDeployInput) error {
 	// k8s への依頼の方針。期限までは、リトライを続ける。
-	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployInfrastructureRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, infrastructureOptions())
 	// 1. Deployment を更新し、失敗したら待たない。
 	// 更新後の設定の世代を受け取り、起動を待つときの下限にする。
 	var generation int64
@@ -45,16 +36,7 @@ func ScaleDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkfl
 		scaleError = fmt.Errorf("Deployment を更新できませんでした: %w", scaleError)
 	} else {
 		// 2. 起動し終える(または Pod が無くなる)のを待つ。作成と同じ Activity で、300秒が全体の期限。
-		waitContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-			StartToCloseTimeout:    sharedworkflow.DeployStartTimeout,
-			ScheduleToCloseTimeout: sharedworkflow.DeployStartTimeout,
-			HeartbeatTimeout:       sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
-			RetryPolicy: &temporal.RetryPolicy{
-				InitialInterval:    activityInitialRetryInterval,
-				MaximumInterval:    activityMaximumRetryInterval,
-				BackoffCoefficient: 2,
-			},
-		})
+		waitContext := sdkworkflow.WithActivityOptions(workflowContext, startupWaitOptions())
 		if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
 			sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 			scaleError = fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)
@@ -64,15 +46,7 @@ func ScaleDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkfl
 	// 3. 結果を DB に記録する。キャンセルされていても記録できるよう、切り離した context で呼ぶ。
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
-	recordContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	recordContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	markError := sdkworkflow.ExecuteActivity(recordContext, sharedworkflow.MarkScaleResultActivityName,
 		sharedworkflow.MarkScaleResultInput{DeployID: input.DeployID, Succeeded: scaleError == nil}).Get(recordContext, nil)
 	// 記録に失敗したときは、スケーリングの失敗と合わせて、両方の原因を返す(deploy は applying のまま残る)。

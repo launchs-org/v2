@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -29,16 +28,7 @@ import (
 //   - レプリカを 0 にできなかったとき、または failed にできなかったときのエラー。止める必要が無ければ nil。
 func StopCrashLoopWorkflow(workflowContext sdkworkflow.Context, input sharedworkflow.StopCrashLoopInput) error {
 	// ===== 1. 止める準備 =====
-	retryPolicy := &temporal.RetryPolicy{
-		MaximumInterval:    activityMaximumRetryInterval,
-		InitialInterval:    activityInitialRetryInterval,
-		BackoffCoefficient: 2,
-	}
-	beginContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployInfrastructureRetryWindow,
-		RetryPolicy:            retryPolicy,
-	})
+	beginContext := sdkworkflow.WithActivityOptions(workflowContext, infrastructureOptions())
 	var begun sharedworkflow.BeginCrashLoopStopResult
 	if beginError := sdkworkflow.ExecuteActivity(beginContext, sharedworkflow.BeginCrashLoopStopActivityName,
 		sharedworkflow.BeginCrashLoopStopInput{Stop: input}).Get(beginContext, &begun); beginError != nil {
@@ -59,11 +49,7 @@ func StopCrashLoopWorkflow(workflowContext sdkworkflow.Context, input sharedwork
 	// ===== 3. failed にする(キャンセルされていても実行できるよう、切り離した context で) =====
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
-	finishContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy:            retryPolicy,
-	})
+	finishContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	finishError := sdkworkflow.ExecuteActivity(finishContext, sharedworkflow.FinishCrashLoopStopActivityName,
 		sharedworkflow.FinishCrashLoopStopInput{DeployID: input.DeployID}).Get(finishContext, nil)
 	// failed にもできなかったときは、両方の原因を返す(deploy は applying のまま残る)。
