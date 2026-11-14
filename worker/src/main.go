@@ -110,6 +110,13 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(deleteDeployActivities.DeleteDeployRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteDeployRecordActivityName})
 	generalWorker.RegisterActivityWithOptions(deleteDeployActivities.MarkDeployDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkDeployDeleteFailedActivityName})
 
+	// 異常な状態が続く deploy を止める Workflow と、その Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.StopCrashLoopWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.StopCrashLoopWorkflowName})
+	crashLoopActivities := activity.NewCrashLoopActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(crashLoopActivities.BeginCrashLoopStop, sdkactivity.RegisterOptions{Name: sharedworkflow.BeginCrashLoopStopActivityName})
+	generalWorker.RegisterActivityWithOptions(crashLoopActivities.ScaleToZero, sdkactivity.RegisterOptions{Name: sharedworkflow.ScaleToZeroActivityName})
+	generalWorker.RegisterActivityWithOptions(crashLoopActivities.FinishCrashLoopStop, sdkactivity.RegisterOptions{Name: sharedworkflow.FinishCrashLoopStopActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
