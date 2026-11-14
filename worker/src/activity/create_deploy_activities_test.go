@@ -48,6 +48,9 @@ type fakeDeploymentOperator struct {
 	ensureError       error
 	appliedDefinition *DeploymentDefinition
 	applyError        error
+	// deletedDeployments は、削除を頼まれた Deployment("namespace/名前")。
+	deletedDeployments []string
+	deleteError        error
 	// notReadyChecks は、DeploymentReady が「まだ」を返す残りの回数。
 	notReadyChecks int
 	readyChecks    int
@@ -64,6 +67,12 @@ func (fakeOperator *fakeDeploymentOperator) EnsureNamespace(_ context.Context, n
 func (fakeOperator *fakeDeploymentOperator) ApplyDeployment(_ context.Context, definition DeploymentDefinition) error {
 	fakeOperator.appliedDefinition = &definition
 	return fakeOperator.applyError
+}
+
+// DeleteDeployment は、削除の依頼を覚えて、決めたエラーを返す。
+func (fakeOperator *fakeDeploymentOperator) DeleteDeployment(_ context.Context, namespaceName string, deploymentName string) error {
+	fakeOperator.deletedDeployments = append(fakeOperator.deletedDeployments, namespaceName+"/"+deploymentName)
+	return fakeOperator.deleteError
 }
 
 // DeploymentReady は、決めた回数だけ「まだ」を返し、そのあとは「Ready」を返す。

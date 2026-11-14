@@ -161,6 +161,23 @@ DeployService.Scale
    └─ Activity: MarkScaleResult     成功なら active(replicas 0 なら scaled_zero)、失敗なら failed
 ```
 
+## 5.3 deploy の削除: `DELETE /deploy/:deployId`
+
+プロジェクトの削除(4章)と同じ形。違いは、消すのが namespace ではなく **Deployment 1つ**であることと、止まっている deploy(`delete_failed`)のやり直しができること。
+
+```
+DeployService.Delete
+  ├─ DeployRepository.MarkDeleting   行をロックして、status を deleting にする(元の status を覚える)
+  │     (applying・起動中(pending)・すでに deleting なら 409。delete_failed からは、やり直しとして受け付ける)
+  ├─ Temporal に DeleteDeployWorkflow の開始を頼む(開始できなければ、status を元に戻す)
+  └─ すぐ 200 {}
+        ↓ worker が非同期に実行(失敗したらリトライの期限 15 分まで)
+  DeleteDeployWorkflow
+   ├─ Activity: DeleteDeployment      k8s の Deployment を削除する(Pod も消える。無ければ成功。名前の形が違えば拒否)
+   ├─ Activity: DeleteDeployRecord    DB の行を削除する(deleting のものだけ。これで GET が 404 になる)
+   └─ 期限までに終わらなければ Activity: MarkDeployDeleteFailed  delete_failed にして、Workflow は失敗で終わる
+```
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -171,8 +188,8 @@ DeployService.Scale
 | 入力の検証、レスポンスの形 | `backend/src/controller/project_controller.go` |
 | ビジネスルール(状態遷移、Workflow の開始) | `backend/src/service/`(`project_service.go`、`deploy_service.go`、`temporal_*_starter.go`) |
 | DB の読み書き(SQL) | `shared/repository/`(`project_repository.go`、`deploy_repository.go`) |
-| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go` |
-| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go` |
-| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
+| Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go` |
+| Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go` |
+| Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
 | k8s への接続の設定とクライアント | `shared/k8s/` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |

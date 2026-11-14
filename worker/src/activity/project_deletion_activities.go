@@ -20,6 +20,9 @@ import (
 // 何度やり直しても結果は同じなので、Activity は、このエラーをリトライしない。
 var ErrInvalidNamespaceName = errors.New("namespace の名前がプロジェクトの ID の形ではありません")
 
+// ErrInvalidDeploymentName は、Deployment の名前が deploy の ID の形ではないときのエラー。
+var ErrInvalidDeploymentName = errors.New("Deployment の名前が deploy の ID の形ではありません")
+
 // defaultNamespacePollInterval は、namespace が消えたかを確かめる、既定の間隔。
 const defaultNamespacePollInterval = 2 * time.Second
 
@@ -213,6 +216,9 @@ func markNonRetryable(originalError error) error {
 	// 名前の形が不正なら、リトライしても無駄なので、リトライしない印を付ける。
 	if errors.Is(originalError, ErrInvalidNamespaceName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidNamespaceName", originalError)
+	}
+	if errors.Is(originalError, ErrInvalidDeploymentName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidDeploymentName", originalError)
 	}
 	// それ以外は、一時的な障害の可能性があるので、そのまま返す。
 	return originalError

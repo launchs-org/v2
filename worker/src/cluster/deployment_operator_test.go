@@ -251,3 +251,57 @@ func TestKubernetesDeploymentOperatorDeploymentReady(testingT *testing.T) {
 		}
 	})
 }
+
+// TestKubernetesDeploymentOperatorDeleteDeployment は、Deployment を削除でき、無くても成功し、
+// プロジェクトの namespace と deploy の名前の形でないものは、k8s に触れずに拒否することを確認する。
+func TestKubernetesDeploymentOperatorDeleteDeployment(testingT *testing.T) {
+	testingT.Run("Deployment を削除できる", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		operator := NewKubernetesDeploymentOperator(fakeClientset, "")
+		if applyError := operator.ApplyDeployment(context.Background(), newTestDefinition()); applyError != nil {
+			subTest.Fatalf("作成できるはず: %v", applyError)
+		}
+
+		if deleteError := operator.DeleteDeployment(context.Background(), validNamespaceName, testDeploymentName); deleteError != nil {
+			subTest.Fatalf("削除できるはず: %v", deleteError)
+		}
+
+		if _, getError := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{}); !apierrors.IsNotFound(getError) {
+			subTest.Errorf("Deployment が消えているはず: %v", getError)
+		}
+	})
+	testingT.Run("すでに無くても成功する(冪等)", func(subTest *testing.T) {
+		operator := NewKubernetesDeploymentOperator(fake.NewSimpleClientset(), "")
+		if deleteError := operator.DeleteDeployment(context.Background(), validNamespaceName, testDeploymentName); deleteError != nil {
+			subTest.Errorf("成功するはず: %v", deleteError)
+		}
+	})
+	testingT.Run("k8s への依頼の失敗は、エラーとして返す", func(subTest *testing.T) {
+		fakeClientset := fake.NewSimpleClientset()
+		fakeClientset.PrependReactor("delete", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("api down")
+		})
+		if deleteError := NewKubernetesDeploymentOperator(fakeClientset, "").DeleteDeployment(context.Background(), validNamespaceName, testDeploymentName); deleteError == nil {
+			subTest.Errorf("エラーのはず")
+		}
+	})
+	// 不正な名前は、k8s に何も依頼しない。
+	for _, invalidCase := range []struct {
+		name       string
+		namespace  string
+		deployment string
+		expected   error
+	}{
+		{"プロジェクトの形でない namespace(kube-system)は拒否する", "kube-system", testDeploymentName, activity.ErrInvalidNamespaceName},
+		{"deploy の形でない名前(coredns)は拒否する", validNamespaceName, "coredns", activity.ErrInvalidDeploymentName},
+		{"空の名前は拒否する", validNamespaceName, "", activity.ErrInvalidDeploymentName},
+	} {
+		testingT.Run(invalidCase.name, func(subTest *testing.T) {
+			fakeClientset := fake.NewSimpleClientset()
+			deleteError := NewKubernetesDeploymentOperator(fakeClientset, "").DeleteDeployment(context.Background(), invalidCase.namespace, invalidCase.deployment)
+			if !errors.Is(deleteError, invalidCase.expected) || len(fakeClientset.Actions()) != 0 {
+				subTest.Errorf("拒否され、k8s は呼ばれないはず: %v %v", deleteError, fakeClientset.Actions())
+			}
+		})
+	}
+}

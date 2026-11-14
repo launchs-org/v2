@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,6 +31,9 @@ const (
 	// containerName は、deploy の Pod の中の、ユーザーのコンテナの名前。
 	containerName = "app"
 )
+
+// deploymentNamePattern は、削除してよい Deployment の名前の形("deploy-" + UUID v4)。
+var deploymentNamePattern = regexp.MustCompile(`^deploy-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // KubernetesDeploymentOperator は、client-go で、namespace と Deployment を操作する。
 type KubernetesDeploymentOperator struct {
@@ -118,6 +122,38 @@ func (operator *KubernetesDeploymentOperator) ApplyDeployment(requestContext con
 	desiredDeployment.ResourceVersion = existingDeployment.ResourceVersion
 	if _, updateError := deployments.Update(requestContext, desiredDeployment, metav1.UpdateOptions{}); updateError != nil {
 		return fmt.Errorf("Deployment %s を更新できませんでした: %w", definition.Name, updateError)
+	}
+	return nil
+}
+
+// DeleteDeployment は、Deployment を削除する。Pod は、k8s が後から片付ける(バックグラウンドの削除)。
+//
+// 無いときは何もしない(冪等)。消すのは、プロジェクトの namespace の中の、deploy の ID の形の名前だけ。
+// それ以外は、k8s に触れる前に拒否する(誤って別のものを消さないための安全装置)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - namespaceName: Deployment の namespace(プロジェクトの ID)。
+//   - deploymentName: Deployment の名前(deploy の ID)。
+//
+// 戻り値:
+//   - 名前の形が不正なとき(activity.ErrInvalidNamespaceName、activity.ErrInvalidDeploymentName)、
+//     または k8s への依頼に失敗したときのエラー。
+func (operator *KubernetesDeploymentOperator) DeleteDeployment(requestContext context.Context, namespaceName string, deploymentName string) error {
+	// プロジェクトのものではない namespace からは、何も消さない。
+	if validateError := validateProjectNamespace(namespaceName); validateError != nil {
+		return validateError
+	}
+	// deploy のものではない名前の Deployment は、消さない。
+	if !deploymentNamePattern.MatchString(deploymentName) {
+		return fmt.Errorf("%w: %q", activity.ErrInvalidDeploymentName, deploymentName)
+	}
+	// 子(ReplicaSet、Pod)は、バックグラウンドで片付けさせる。
+	propagation := metav1.DeletePropagationBackground
+	deleteError := operator.clientset.AppsV1().Deployments(namespaceName).Delete(requestContext, deploymentName, metav1.DeleteOptions{PropagationPolicy: &propagation})
+	// すでに無いときは、削除済みとして成功にする。
+	if deleteError != nil && !apierrors.IsNotFound(deleteError) {
+		return fmt.Errorf("Deployment %s を削除できませんでした: %w", deploymentName, deleteError)
 	}
 	return nil
 }
