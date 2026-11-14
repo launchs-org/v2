@@ -201,7 +201,15 @@ GET /deploy/:deployId
        └─ DeployService.ListPods   持ち主を確かめてから、DeployObservationRepository.ListPodsByDeploy で Pod を読む
   → pods: [{podId: "pod-" + k8s の Pod の UID, status: pending / running / terminating}]  作られた順
 ```
-watcher が止まっている間は、古い値(または空)になる。ワーカーの起動待ちは、まだ k8s に問い合わせている(次の PR で、DB 読みにする)。
+watcher が止まっている間は、古い値(または空)になる。
+
+**ワーカーの起動待ちも、DB の観測値を読む**(`WaitDeploymentReady`。作成、反映、スケールで共通)。
+```
+ApplyDeployment / ApplyPendingConfig / ApplyScale   Deployment を作る・更新する。更新後の generation を返す
+  → WaitDeploymentReady(DeployID, MinGeneration)
+       ├─ 心拍が新しい(30 秒未満): DB の deploy_observations で判断(世代が MinGeneration 以上で、レプリカ数が揃う)
+       └─ 心拍が古い・無い:       k8s に直接問い合わせる(watcher の障害で、正常な deploy を failed にしない)
+```
 
 ## 6. どのファイルを見ればよいか
 

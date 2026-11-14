@@ -56,8 +56,9 @@ func NewScaleDeployActivities(scaleStore ScaleStore, deploymentOperator Deployme
 //   - input: Deployment を更新する deploy の ID。
 //
 // 戻り値:
+//   - 更新後の Deployment の generation(設定の世代)。起動を待つときの下限になる。
 //   - deploy を読めなかったとき、内容が壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
-func (scaleDeployActivities *ScaleDeployActivities) ApplyScale(requestContext context.Context, input workflow.ApplyScaleInput) error {
+func (scaleDeployActivities *ScaleDeployActivities) ApplyScale(requestContext context.Context, input workflow.ApplyScaleInput) (int64, error) {
 	// どの Activity が何のために動いているかを、ログに残す。
 	scaleDeployActivities.appLogger.Info("レプリカ数を Deployment に反映する",
 		"deploy_id", input.DeployID, "activity", workflow.ApplyScaleActivityName)
@@ -65,16 +66,16 @@ func (scaleDeployActivities *ScaleDeployActivities) ApplyScale(requestContext co
 	// DB から deploy とスペックを読む。
 	deploy, findError := scaleDeployActivities.scaleStore.FindForWorker(requestContext, input.DeployID)
 	if findError != nil {
-		return findError
+		return 0, findError
 	}
 	spec, specError := scaleDeployActivities.scaleStore.FindSpec(requestContext, deploy.Spec)
 	if specError != nil {
-		return specError
+		return 0, specError
 	}
 	// 現在の値から、Deployment の内容を組み立てる。壊れていたら、何度やっても同じなのでリトライしない。
 	definition, definitionError := newDeploymentDefinition(deploy, spec)
 	if definitionError != nil {
-		return temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
+		return 0, temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
 	}
 	// 更新は、k8s を操作するものに任せる。
 	return scaleDeployActivities.deploymentOperator.ApplyDeployment(requestContext, definition)

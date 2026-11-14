@@ -37,8 +37,10 @@ func ScaleDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkfl
 		},
 	})
 	// 1. Deployment を更新し、失敗したら待たない。
+	// 更新後の設定の世代を受け取り、起動を待つときの下限にする。
+	var generation int64
 	scaleError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.ApplyScaleActivityName,
-		sharedworkflow.ApplyScaleInput{DeployID: input.DeployID}).Get(infrastructureContext, nil)
+		sharedworkflow.ApplyScaleInput{DeployID: input.DeployID}).Get(infrastructureContext, &generation)
 	if scaleError != nil {
 		scaleError = fmt.Errorf("Deployment を更新できませんでした: %w", scaleError)
 	} else {
@@ -54,7 +56,7 @@ func ScaleDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkfl
 			},
 		})
 		if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
-			sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID}).Get(waitContext, nil); waitError != nil {
+			sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 			scaleError = fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)
 		}
 	}

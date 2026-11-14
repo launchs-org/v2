@@ -56,6 +56,10 @@ type ApplyDeploymentInput struct {
 type WaitDeploymentReadyInput struct {
 	// DeployID は、起動を待つ deploy の ID。
 	DeployID string
+
+	// MinGeneration は、Deployment の設定の世代の下限。k8s がこの世代以上を処理し終えるまで待つ。
+	// 更新の直後に、古い設定の観測値(すでに Ready)を見て、起動し終えたと誤解しないために使う。
+	MinGeneration int64
 }
 
 // MarkDeployResultInput は、MarkDeployResult Activity の入力。

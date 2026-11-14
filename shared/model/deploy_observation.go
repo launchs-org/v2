@@ -34,6 +34,24 @@ const (
 	PodEventDeleted = "deleted"
 )
 
+const (
+	// WatcherHeartbeatInterval は、watcher が、生きていることを DB に書く間隔。
+	WatcherHeartbeatInterval = 10 * time.Second
+
+	// WatcherHeartbeatStaleAfter は、最後の心拍からこの時間が過ぎたら、watcher が止まっているとみなす時間。
+	// 間隔の3倍にして、一度や二度の書き込みの遅れでは、止まったとみなさない。
+	WatcherHeartbeatStaleAfter = 3 * WatcherHeartbeatInterval
+)
+
+// WatcherHeartbeat は、watcher_heartbeats テーブルの1行(常に ID が 1)。watcher が生きていることを示す。
+type WatcherHeartbeat struct {
+	// ID は、常に 1(1行だけ持つ)。
+	ID int `gorm:"column:id;primaryKey"`
+
+	// BeatAt は、最後に心拍を書いた時刻(データベースの時計)。
+	BeatAt time.Time `gorm:"column:beat_at"`
+}
+
 // DeployObservation は、deploy_observations テーブルの1行。k8s の Deployment の、観測した状態。
 type DeployObservation struct {
 	// DeployID は、deploy の ID(主キー)。
