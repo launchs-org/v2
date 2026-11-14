@@ -106,6 +106,25 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # k8s の Pod と Deployment を観測し、実際の状態を DB に反映する。書き手は、このコンテナだけ。
+  # 複数起動しても、advisory lock で、リーダーになった1つだけが観測する。
+  watcher:
+    build:
+      context: .
+      dockerfile: watcher/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # 既定では k8s につながず、何も観測しない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
   # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
   migrate-app:
     image: migrate/migrate:v4.19.1

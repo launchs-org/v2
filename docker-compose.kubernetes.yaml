@@ -1,4 +1,4 @@
-# ワーカーを、開発用の k8s につなぐための、docker-compose.yaml に重ねる設定。
+# ワーカーと watcher を、開発用の k8s につなぐための、docker-compose.yaml に重ねる設定。
 #
 # 使い方:
 #   docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build worker
@@ -13,5 +13,12 @@ services:
       KUBECONFIG: /kube/config
       # deploy の Pod の RuntimeClass(例: gvisor)。空なら指定せず、クラスターの既定のランタイムを使う。
       RUNTIME_CLASS: ${RUNTIME_CLASS:-}
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
+  # watcher は、k8s を読み取るだけ(Pod と Deployment の get / list / watch)。
+  watcher:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
