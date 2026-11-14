@@ -178,6 +178,21 @@ DeployService.Delete
    └─ 期限までに終わらなければ Activity: MarkDeployDeleteFailed  delete_failed にして、Workflow は失敗で終わる
 ```
 
+## 5.4 k8s の実際の状態の流れ: watcher
+
+ここまでの流れ(作成、反映、スケール、削除)は、k8s に「頼む」側。k8s の実際の状態を DB に「写す」のは、watcher だけ(詳しくは [watcher.md](watcher.md))。
+
+```
+k8s の Pod / Deployment の変化
+  → watcher(リーダーの1つだけ。advisory lock) の informer が受け取る
+  → 作業キュー → DB に反映
+       deploy_observations   Deployment のレプリカ数など(上書き)
+       deploy_pods           Pod の現在の状態
+       deploy_pod_events     Pod の状態変化のログ(created / ready / restarted / waiting ...)
+```
+
+今の段階では、API とワーカーは、まだ観測値を読まない(次の PR で、`pods` の一覧と、ワーカーの起動待ちを、DB 読みにする)。
+
 ## 6. どのファイルを見ればよいか
 
 | 知りたいこと | 見るファイル |
@@ -191,5 +206,6 @@ DeployService.Delete
 | Workflow・Activity の名前、入出力の型、タイムアウト | `shared/workflow/delete_project.go`、`create_deploy.go`、`apply_deploy_config.go`、`scale_deploy.go`、`delete_deploy.go` |
 | Workflow(順序、リトライ、補償) | `worker/src/workflow/delete_project_workflow.go`、`create_deploy_workflow.go`、`apply_deploy_config_workflow.go`、`scale_deploy_workflow.go`、`delete_deploy_workflow.go` |
 | Activity(実際の処理) | `worker/src/activity/`(`project_deletion_activities.go`、`create_deploy_activities.go`、`apply_deploy_config_activities.go`、`scale_deploy_activities.go`、`delete_deploy_activities.go`)、`worker/src/cluster/`(k8s を操作する実装) |
-| k8s への接続の設定とクライアント | `shared/k8s/` |
+| k8s への接続の設定とクライアント、ラベル名 | `shared/k8s/` |
+| watcher(観測、リーダー選出) | `watcher/src/`(`observer/`)、`shared/leader/`、`shared/repository/deploy_observation_repository.go`、`pod_event_diff.go` |
 | 環境変数の読み方 | `shared/config/`、`backend/src/config/`、`worker/src/config/` |

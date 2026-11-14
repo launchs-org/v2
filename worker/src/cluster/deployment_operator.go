@@ -13,15 +13,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"launchs/shared/k8s"
 	"launchs/worker/src/activity"
 )
 
 const (
-	// deployIDLabel は、Deployment と Pod に付ける、deploy の ID のラベル。Pod を deploy に結びつけるために使う。
-	deployIDLabel = "launchs-org/deploy-id"
+	// deployIDLabel は、Deployment と Pod に付ける、deploy の ID のラベル。watcher も、このラベルで観測する。
+	deployIDLabel = k8s.DeployIDLabel
 
 	// projectIDLabel は、namespace と Deployment に付ける、プロジェクトの ID のラベル。
-	projectIDLabel = "launchs-org/project-id"
+	projectIDLabel = k8s.ProjectIDLabel
 
 	// datadogInjectionLabel は、Datadog の admission webhook が、Pod に監視用の設定を差し込むかを決めるラベル。
 	// 差し込まれる設定には hostPath のボリュームが含まれ、PodSecurity(baseline)に拒否されて Pod が作れなくなる。
@@ -29,7 +30,7 @@ const (
 	datadogInjectionLabel = "admission.datadoghq.com/enabled"
 
 	// containerName は、deploy の Pod の中の、ユーザーのコンテナの名前。
-	containerName = "app"
+	containerName = k8s.AppContainerName
 )
 
 // deploymentNamePattern は、削除してよい Deployment の名前の形("deploy-" + UUID v4)。
