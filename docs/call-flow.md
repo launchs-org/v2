@@ -136,11 +136,13 @@ curl → ... → DeployController.ApplyConfig
   ApplyDeployConfigWorkflow
    ├─ Activity: ApplyPendingConfig   pending の値で Deployment を更新する(k8s がコンテナを入れ替える)
    ├─ Activity: WaitDeploymentReady  Ready になるまで待つ(作成と同じ Activity。最長 300 秒)
-   └─ Activity: CommitConfigResult   結果が決まってから、正式な値を pending の内容にして pending を空にし、
-                                      成功なら active(replicas 0 なら scaled_zero)、失敗なら failed にする
+   ├─ (失敗したときだけ) Activity: RollbackDeploymentConfig  Deployment を、現在の正式な値に戻す
+   └─ Activity: CommitConfigResult   結果が決まってから確定する。
+                                      成功: 正式な値を pending の内容にして pending を空にし、active(replicas 0 なら scaled_zero)
+                                      失敗: 正式な値と pending は変えず、failed にする
 ```
 
-仕様どおり、**実際の反映を先に試み、結果が確定してから** DB の正式な値を更新する。失敗しても、正式な値は「最後に反映を試みた値」になる。
+**実際の反映を先に試み、結果が確定してから** DB の正式な値を更新する。正式な値(env など)は常に「いま動いている値」で、失敗した値は pending に残る。PUT した内容が現在の値と同じなら、pending にならない(同じ設定の再適用はできない)。
 
 ## 6. どのファイルを見ればよいか
 

@@ -24,6 +24,7 @@
 
 ### 境界値
 - `env`/`command`/`args` は個別key単位のCRUDではなく、常に全件を送って置き換える方式であること(部分更新は不可)
+- 現在の `env`/`command`/`args` と同じ内容をPUTした場合、`pending_*` は保存されず `null` になること(以前の pending も消える。変更が無いものとして扱う)
 - 既存の `pending_*` が存在する状態で再度PUTした場合、新しい内容で `pending_*` が上書きされること(前回のpendingは破棄される)
 
 ## 仕様
@@ -47,6 +48,7 @@
 ```
 - Note: env/command/args は個別key単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)
 - Note: この時点ではまだコンテナには反映されない。pending_env/pending_command/pending_args として保存され、[適用](007-post-deploy-deployid-config-apply.md) を呼ぶまで env/command/args(現在反映されている値)は変わらない
+- Note: 送った内容が現在の env/command/args と同じ(変更が無い)場合は、pending_* を保存せず null にする
 - Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はconfigに対する変更・apply・discardを排他制御する)
 - Note: deploy の status が "deleting" の間も 409 を返す
 

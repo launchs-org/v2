@@ -15,11 +15,12 @@ import (
 // 処理の順序(仕様どおり、実際の反映を先に試み、結果が決まってから DB の正式な値を更新する):
 //  1. pending の値で Deployment を更新する(コンテナが入れ替わる)
 //  2. 起動し終える(Ready)まで待つ(最長 300 秒)
-//  3. 結果を確定する(正式な値を pending の内容にして、pending を空にし、status を active か failed にする)
+//  3. 結果を確定する(成功なら、正式な値を pending の内容にして pending を空にし、active にする。
+//     失敗なら、Deployment を元の値に戻した上で、正式な値と pending は変えずに failed にする)
 //
 // 1 は、k8s の一時的な障害なら、リトライの期限(2分)までリトライする。
 // 2 は、300 秒(仕様のタイムアウト)で Ready にならなければ失敗とする。ワーカーが入れ替わっても、期限内なら引き継ぐ。
-// 失敗でも、3 で、正式な値は pending の内容になり、status は failed になる。
+// 失敗したときは、k8s を元の値に戻す(リトライの期限は 10 分)ので、正式な値は常に、動いている値を表す。
 //
 // 引数:
 //   - workflowContext: Temporal の Workflow の context。
@@ -31,9 +32,27 @@ func ApplyDeployConfigWorkflow(workflowContext sdkworkflow.Context, input shared
 	// 反映の手順(Deployment の更新、待機)を実行する。
 	applyError := runConfigApply(workflowContext, input)
 
-	// 結果を DB に確定する。Workflow がキャンセルされていても確定できるよう、切り離した context で呼ぶ。
+	// 失敗したときは、k8s の Deployment を、元の値に戻す。戻せなくても、結果の確定は続ける。
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
+	if applyError != nil {
+		rollbackContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
+			StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
+			ScheduleToCloseTimeout: compensationRetryWindow,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumInterval:    activityMaximumRetryInterval,
+				InitialInterval:    activityInitialRetryInterval,
+				BackoffCoefficient: 2,
+			},
+		})
+		rollbackError := sdkworkflow.ExecuteActivity(rollbackContext, sharedworkflow.RollbackDeploymentConfigActivityName,
+			sharedworkflow.RollbackDeploymentConfigInput{DeployID: input.DeployID}).Get(rollbackContext, nil)
+		if rollbackError != nil {
+			applyError = errors.Join(applyError, fmt.Errorf("Deployment を元の値に戻せませんでした: %w", rollbackError))
+		}
+	}
+
+	// 結果を DB に確定する。Workflow がキャンセルされていても確定できるよう、切り離した context で呼ぶ。
 	commitContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
 		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
 		ScheduleToCloseTimeout: compensationRetryWindow,

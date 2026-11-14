@@ -13,8 +13,12 @@ const (
 	// ApplyPendingConfigActivityName は、pending の起動設定で k8s の Deployment を更新する Activity の名前。
 	ApplyPendingConfigActivityName = "ApplyPendingConfig"
 
+	// RollbackDeploymentConfigActivityName は、反映に失敗したとき、k8s の Deployment を、
+	// 現在の正式な値(いま動いていた値)に戻す Activity の名前。
+	RollbackDeploymentConfigActivityName = "RollbackDeploymentConfig"
+
 	// CommitConfigResultActivityName は、反映の結果を DB に確定する Activity の名前。
-	// 正式な値を pending の内容で上書きし、pending を空に戻して、status を決める。
+	// 成功なら、正式な値を pending の内容にして pending を空に戻し、status を決める。失敗なら、status を failed にするだけ。
 	CommitConfigResultActivityName = "CommitConfigResult"
 
 	// ApplyDeployConfigWorkflowTimeout は、起動設定の反映の Workflow 全体の最長の実行時間(仮)。
@@ -30,6 +34,12 @@ type ApplyDeployConfigInput struct {
 // ApplyPendingConfigInput は、ApplyPendingConfig Activity の入力。
 type ApplyPendingConfigInput struct {
 	// DeployID は、Deployment を更新する deploy の ID。
+	DeployID string
+}
+
+// RollbackDeploymentConfigInput は、RollbackDeploymentConfig Activity の入力。
+type RollbackDeploymentConfigInput struct {
+	// DeployID は、Deployment を元の値に戻す deploy の ID。
 	DeployID string
 }
 

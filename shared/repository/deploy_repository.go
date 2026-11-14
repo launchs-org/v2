@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -271,6 +273,7 @@ func lockEditableDeploy(transaction *gorm.DB, userID string, deployID string) (m
 //
 // 3つは、常にまとめて置き換える。すでに適用していない値があるときは、新しい値で上書きする。
 // 現在反映されている値(env、command、args)は変えない。
+// 現在の値と同じ内容を送ったときは、変更が無いものとして、pending を空にする。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -287,14 +290,20 @@ func (deployRepository *DeployRepository) SavePendingConfig(requestContext conte
 	// 取得と更新を、1つのトランザクションで行う。
 	return deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
 		// 編集できる状態であることを、行をロックして確かめる。
-		if _, lockError := lockEditableDeploy(transaction, userID, deployID); lockError != nil {
+		deploy, lockError := lockEditableDeploy(transaction, userID, deployID)
+		if lockError != nil {
 			return lockError
+		}
+		// 現在の値と同じ内容なら、変更が無いので、pending は保存せず空(NULL)にする(以前の pending も消える)。
+		pendingToSave := model.Deploy{PendingEnv: env, PendingCommand: command, PendingArgs: args}
+		if sameConfig(deploy, env, command, args) {
+			pendingToSave = model.Deploy{}
 		}
 		// 3つの列を、nil のものも含めて、まとめて更新する(更新日時は Gorm が更新する)。
 		updateError := transaction.Model(&model.Deploy{}).
 			Where(&model.Deploy{ID: deployID}).
 			Select("pending_env", "pending_command", "pending_args").
-			Updates(&model.Deploy{PendingEnv: env, PendingCommand: command, PendingArgs: args}).Error
+			Updates(&pendingToSave).Error
 		// データベースのエラーは、内部エラーにして返す。
 		if updateError != nil {
 			return apperror.Wrap(apperror.KindInternal, "起動設定を保存できませんでした", updateError)
@@ -391,10 +400,13 @@ func (deployRepository *DeployRepository) BeginConfigApply(requestContext contex
 
 // CommitConfigResult は、起動設定の反映の結果を確定する。
 //
-// applying の deploy だけを対象にする。正式な値(env、command、args)を、反映を試みた pending の内容で上書きし、
-// pending を空に戻し、status を決める。正式な値は「最後に反映を試みた値」を表し、status が成功か失敗かを表す。
-//   - 成功: active(replicas が 0 なら scaled_zero)
-//   - 失敗: failed
+// applying の deploy だけを対象にする。
+//   - 成功: 正式な値(env、command、args)を、反映した pending の内容にし、pending を空に戻し、
+//     status を active(replicas が 0 なら scaled_zero)にする。
+//   - 失敗: 正式な値は変えない(k8s は、古い値に巻き戻してある前提)。pending は、試した値として残し、
+//     status を failed にする。利用者は、pending を直して再度適用するか、破棄できる。
+//
+// 正式な値は常に「いま動いている値」を表し、status が最後の反映の成否を表す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -428,13 +440,21 @@ func (deployRepository *DeployRepository) CommitConfigResult(requestContext cont
 		if deploy.Status != model.DeployStatusApplying {
 			return nil
 		}
-		// 確定する status を決める。
-		targetStatus := model.DeployStatusFailed
-		if succeeded {
-			targetStatus = model.DeployStatusActive
-			if deploy.Replicas == 0 {
-				targetStatus = model.DeployStatusScaledZero
+		// 失敗のときは、status だけを failed にする(正式な値と pending は、そのまま)。
+		if !succeeded {
+			failError := transaction.Model(&model.Deploy{}).
+				Where(&model.Deploy{ID: deployID}).
+				Updates(&model.Deploy{Status: model.DeployStatusFailed}).Error
+			if failError != nil {
+				return apperror.Wrap(apperror.KindInternal, "起動設定の結果を確定できませんでした", failError)
 			}
+			committed = true
+			return nil
+		}
+		// 成功のときの status を決める。
+		targetStatus := model.DeployStatusActive
+		if deploy.Replicas == 0 {
+			targetStatus = model.DeployStatusScaledZero
 		}
 		// 適用する値が無いとき(通常は起きない)は、正式な値を NULL で壊さないよう、状態だけを変える。
 		if len(deploy.PendingEnv) == 0 {
@@ -465,4 +485,54 @@ func (deployRepository *DeployRepository) CommitConfigResult(requestContext cont
 		return nil
 	})
 	return committed, transactionError
+}
+
+// sameConfig は、送られた起動設定が、deploy の現在の値と同じ内容かを返す。
+//
+// 環境変数と引数は、JSON の書式(空白やキーの順)ではなく、中身で比べる。
+//
+// 引数:
+//   - deploy: 現在の値を持つ deploy。
+//   - env: 送られた環境変数(JSON)。
+//   - command: 送られた起動コマンド。
+//   - args: 送られた起動引数(JSON)。nil はイメージの既定。
+//
+// 戻り値:
+//   - 3つとも同じなら true。
+func sameConfig(deploy model.Deploy, env datatypes.JSON, command *string, args datatypes.JSON) bool {
+	// 起動コマンドを比べる(両方 nil なら同じ)。
+	if (command == nil) != (deploy.Command == nil) || (command != nil && *command != *deploy.Command) {
+		return false
+	}
+	// 環境変数を、中身で比べる。
+	if !sameJSON(deploy.Env, env) {
+		return false
+	}
+	// 起動引数を、中身で比べる。
+	return sameJSON(deploy.Args, args)
+}
+
+// sameJSON は、2つの JSON の値が、中身として同じかを返す。空(NULL)と JSON の null は、同じとして扱う。
+//
+// 引数:
+//   - first: 1つ目の JSON。
+//   - second: 2つ目の JSON。
+//
+// 戻り値:
+//   - 同じなら true。どちらかが JSON として読めなければ false。
+func sameJSON(first []byte, second []byte) bool {
+	// 空と null は、どちらも「値なし」にそろえる。
+	var firstValue, secondValue any
+	if len(first) > 0 {
+		if json.Unmarshal(first, &firstValue) != nil {
+			return false
+		}
+	}
+	if len(second) > 0 {
+		if json.Unmarshal(second, &secondValue) != nil {
+			return false
+		}
+	}
+	// 読み込んだ値で比べる。
+	return reflect.DeepEqual(firstValue, secondValue)
 }
