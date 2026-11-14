@@ -56,6 +56,10 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 			return deployRepository.SavePendingConfig(requestContext, "", "deploy-00000001", datatypes.JSON(`{}`), nil, nil)
 		}, expectedKind: apperror.KindNotFound},
 		{name: "起動設定の破棄: ID が空", call: func() error { return deployRepository.DiscardPendingConfig(requestContext, "user-a", "") }, expectedKind: apperror.KindNotFound},
+		{name: "スケーリング開始: ID が空", call: func() error { _, err := deployRepository.BeginScale(requestContext, "user-a", "", 2); return err }, expectedKind: apperror.KindNotFound},
+		{name: "スケーリングの巻き戻し: ID が空", call: func() error {
+			return deployRepository.RevertScale(requestContext, "", ScaleStart{PreviousStatus: "active"})
+		}, expectedKind: apperror.KindInternal},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 状態変更: ID が空", call: func() error {
 			_, err := deployRepository.UpdateStatus(requestContext, "", "pending", "active")
