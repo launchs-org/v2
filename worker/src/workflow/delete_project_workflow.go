@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -56,15 +55,7 @@ func DeleteProjectWorkflow(workflowContext sdkworkflow.Context, input sharedwork
 	// キャンセルから切り離した context で呼ぶ。
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
-	compensationContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	compensationContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	markError := sdkworkflow.ExecuteActivity(compensationContext, sharedworkflow.MarkProjectDeleteFailedActivityName,
 		sharedworkflow.MarkProjectDeleteFailedInput{ProjectID: input.ProjectID}).Get(compensationContext, nil)
 	// 記録にも失敗したときは、両方の原因を返す(プロジェクトは deleting のまま残る)。
@@ -84,18 +75,7 @@ func DeleteProjectWorkflow(workflowContext sdkworkflow.Context, input sharedwork
 //   - いずれかの Activity が、リトライの期限までに成功しなかったときのエラー。
 func deleteProjectEntities(workflowContext sdkworkflow.Context, input sharedworkflow.DeleteProjectInput) error {
 	// Activity の実行時間の上限とリトライの方針を決める。
-	activityContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout: sharedworkflow.DeleteProjectActivityTimeout,
-		HeartbeatTimeout:    sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
-		// リトライの待ち時間も含めた、最初の開始からの期限。回数は無制限(MaximumAttempts を 0)にして、
-		// 期限までなら、復旧を待ってリトライし続ける。
-		ScheduleToCloseTimeout: sharedworkflow.DeleteProjectRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	activityContext := sdkworkflow.WithActivityOptions(workflowContext, retryUntilWithHeartbeat(sharedworkflow.DeleteProjectRetryWindow))
 
 	// 1. k8s の namespace を削除する。
 	namespaceError := sdkworkflow.ExecuteActivity(activityContext, sharedworkflow.DeleteProjectNamespaceActivityName,

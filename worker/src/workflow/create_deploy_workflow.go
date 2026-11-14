@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/sdk/temporal"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	sharedworkflow "launchs/shared/workflow"
@@ -36,15 +35,7 @@ func CreateDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 	// 結果を DB に記録する。Workflow がキャンセルされていても記録できるよう、切り離した context で呼ぶ。
 	disconnectedContext, cancelDisconnected := sdkworkflow.NewDisconnectedContext(workflowContext)
 	defer cancelDisconnected()
-	recordContext := sdkworkflow.WithActivityOptions(disconnectedContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: compensationRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	recordContext := sdkworkflow.WithActivityOptions(disconnectedContext, compensationOptions())
 	markError := sdkworkflow.ExecuteActivity(recordContext, sharedworkflow.MarkDeployResultActivityName,
 		sharedworkflow.MarkDeployResultInput{DeployID: input.DeployID, Succeeded: startError == nil}).Get(recordContext, nil)
 
@@ -65,15 +56,7 @@ func CreateDeployWorkflow(workflowContext sdkworkflow.Context, input sharedworkf
 //   - いずれかの手順に失敗したとき、または、300 秒までに Ready にならなかったときのエラー。
 func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.CreateDeployInput) error {
 	// k8s への依頼(namespace と Deployment の作成)の方針。期限までは、リトライを続ける。
-	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeleteProjectActivityTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployInfrastructureRetryWindow,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumInterval:    activityMaximumRetryInterval,
-			InitialInterval:    activityInitialRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	infrastructureContext := sdkworkflow.WithActivityOptions(workflowContext, infrastructureOptions())
 
 	// 1. プロジェクトの namespace を用意する。deploy の ID から、プロジェクトの ID を調べる必要は無い。
 	//    Activity が DB から読むので、ここでは deploy の ID だけを渡す。
@@ -92,16 +75,7 @@ func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.Creat
 	// 3. 起動し終えるのを待つ。仕様のタイムアウト(300秒)を、リトライを含めた全体の期限(ScheduleToClose)にする。
 	//    ワーカーの再起動などで Activity が途切れても、期限内なら別のワーカーが引き継ぐ(正常に起動できる
 	//    deploy を、ワーカーの入れ替えだけで failed にしないため)。期限を超えたら、失敗とする(リトライしない)。
-	waitContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{
-		StartToCloseTimeout:    sharedworkflow.DeployStartTimeout,
-		ScheduleToCloseTimeout: sharedworkflow.DeployStartTimeout,
-		HeartbeatTimeout:       sharedworkflow.DeleteProjectActivityHeartbeatTimeout,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    activityInitialRetryInterval,
-			MaximumInterval:    activityMaximumRetryInterval,
-			BackoffCoefficient: 2,
-		},
-	})
+	waitContext := sdkworkflow.WithActivityOptions(workflowContext, startupWaitOptions())
 	if waitError := sdkworkflow.ExecuteActivity(waitContext, sharedworkflow.WaitDeploymentReadyActivityName,
 		sharedworkflow.WaitDeploymentReadyInput{DeployID: input.DeployID, MinGeneration: generation}).Get(waitContext, nil); waitError != nil {
 		return fmt.Errorf("Deployment が起動し終えませんでした: %w", waitError)
