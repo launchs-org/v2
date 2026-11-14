@@ -14,8 +14,9 @@ launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエ
 
 ```
 backend/        バックエンド(Golang/Echo)。dockerfile と src/(コード)を持つ
-auth/ worker/ registry/ logcollector/   同じ形のコンテナ用フォルダ(これから作る)
-shared/         バックエンドとワーカーで共有するコード
+watcher/        k8s の Pod と Deployment を観測し、実際の状態を DB に反映するコンテナ(docs/watcher.md)
+auth/ registry/ logcollector/   同じ形のコンテナ用フォルダ(これから作る)
+shared/         バックエンド・ワーカー・watcher で共有するコード
 migrations/     DB のマイグレーション(up のみ)
 docs/
   endpoints/    確定したエンドポイント仕様(実装のソースオブトゥルース)
@@ -45,6 +46,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - Git の運用: `develop` から `feature/<短い説明>` のブランチを切り、細かい単位で作業し、プルリクエストで `develop` に入れる。マージは本人が行う。Claude は、依頼がない限り push やプルリクエストの作成をせず、マージもしない。
 - コンテナ名は `backend`(または `app`)、`worker` など。コンテナの名前と、コンテナ内部のコード構成は別の話として扱う。
 - コンテナ内部のコード構成は `controller / service / repository / model` の層でファイルを分ける。
+- **k8s の実際の状態(Pod、Deployment のレプリカ数など)を DB に書くのは、watcher だけ**(詳細は [docs/watcher.md](docs/watcher.md))。watcher は同時に1つだけ動かし、リーダー選出は PostgreSQL の advisory lock(`shared/leader`)で行う。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様
