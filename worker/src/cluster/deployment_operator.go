@@ -22,6 +22,11 @@ const (
 	// projectIDLabel は、namespace と Deployment に付ける、プロジェクトの ID のラベル。
 	projectIDLabel = "launchs-org/project-id"
 
+	// datadogInjectionLabel は、Datadog の admission webhook が、Pod に監視用の設定を差し込むかを決めるラベル。
+	// 差し込まれる設定には hostPath のボリュームが含まれ、PodSecurity(baseline)に拒否されて Pod が作れなくなる。
+	// また、利用者のコンテナにホストのパスを見せないためにも、deploy の Pod では無効にする。
+	datadogInjectionLabel = "admission.datadoghq.com/enabled"
+
 	// containerName は、deploy の Pod の中の、ユーザーのコンテナの名前。
 	containerName = "app"
 )
@@ -186,6 +191,12 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		projectIDLabel: definition.Namespace,
 	}
 
+	// Pod には、上のラベルに加えて、Datadog の差し込みを無効にするラベルを付ける(selector には使わない)。
+	podLabels := map[string]string{datadogInjectionLabel: "false"}
+	for labelName, labelValue := range labels {
+		podLabels[labelName] = labelValue
+	}
+
 	// 環境変数を、キーの順に並べる。
 	environmentNames := make([]string, 0, len(definition.Env))
 	for environmentName := range definition.Env {
@@ -233,7 +244,7 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{deployIDLabel: definition.Name}},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec:       podSpec,
 			},
 		},
