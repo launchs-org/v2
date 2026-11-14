@@ -47,13 +47,13 @@ func (deployRepository *DeployRepository) BeginCrashLoopStop(requestContext cont
 		if findError != nil {
 			return findError
 		}
-		if !deploy.CanStopForCrashLoop() {
+		// モデルに、止める準備(applying にする)を任せる。止められない状態なら、何もしない。
+		if !deploy.BeginCrashLoopStop() {
 			return nil
 		}
-		// 状態を applying にして、止める理由のイベントを記録する。
-		if updateError := transaction.Model(&model.Deploy{}).Where(&model.Deploy{ID: deployID}).
-			Updates(&model.Deploy{Status: model.DeployStatusApplying}).Error; updateError != nil {
-			return updateError
+		// 変えた deploy を保存して、止める理由のイベントを記録する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return saveError
 		}
 		stopEvent := model.DeployPodEvent{
 			DeployID: deployID, PodUID: podUID, PodName: podName, Type: model.PodEventCrashLoopLimit,
@@ -84,6 +84,8 @@ func (deployRepository *DeployRepository) BeginCrashLoopStop(requestContext cont
 //   - データベースのエラー。
 func (deployRepository *DeployRepository) FinishCrashLoopStop(requestContext context.Context, deployID string) error {
 	// applying のときだけ、failed にする。
-	_, finishError := deployRepository.UpdateStatus(requestContext, deployID, model.DeployStatusApplying, model.DeployStatusFailed)
+	_, finishError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.FinishCrashLoopStop()
+	})
 	return finishError
 }

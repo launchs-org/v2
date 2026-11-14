@@ -226,6 +226,53 @@ func (deployRepository *DeployRepository) UpdateStatus(requestContext context.Co
 	return updateResult.RowsAffected > 0, nil
 }
 
+// transitionDeploy は、deploy の行をロックして読み、モデルの操作を呼び、変わったときだけ保存する。
+//
+// deploy が無いとき、または操作が「変えるものが無い」(false)を返したときは、何も保存せず false を返す。
+// これで、別の処理が先に状態を変えていても、古い結果で上書きしない。
+//
+// 引数:
+//   - database: 使うデータベース。
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 操作する deploy の ID。
+//   - operation: モデルの操作。変えたら true を返す。
+//
+// 戻り値:
+//   - 変えて保存したら true。
+//   - データベースのエラー。
+func transitionDeploy(database *gorm.DB, requestContext context.Context, deployID string, operation func(deploy *model.Deploy) bool) (bool, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
+	if hasEmpty(deployID) {
+		return false, newEmptyConditionError()
+	}
+	// 変えたかを、トランザクションの外へ持ち出す入れ物。
+	changed := false
+	// 取得と更新を、1つのトランザクションで行う。
+	transactionError := database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 行をロックして読む。無いときは、変えるものが無い。
+		var deploy model.Deploy
+		findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(&model.Deploy{ID: deployID}).Take(&deploy).Error
+		if errors.Is(findError, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if findError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
+		}
+		// モデルに操作を任せる。変わらなければ、保存しない。
+		if !operation(&deploy) {
+			return nil
+		}
+		// 変えた deploy を保存する。
+		if saveError := transaction.Save(&deploy).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "deploy の状態を更新できませんでした", saveError)
+		}
+		changed = true
+		return nil
+	})
+	return changed, transactionError
+}
+
 // lockDeploy は、ユーザーの deploy を、更新用にロックして取得する(トランザクションの中で使う)。状態は確かめない。
 //
 // 他のユーザーの deploy は、存在しないものとして扱う。
@@ -283,4 +330,26 @@ func lockEditableDeploy(transaction *gorm.DB, userID string, deployID string) (m
 		return model.Deploy{}, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、起動設定を操作できません")
 	}
 	return deploy, nil
+}
+
+// RevertApply は、反映の開始に失敗したとき、deploy の状態を、反映を始める前の状態に戻す(起動設定の反映用)。
+//
+// applying でないとき、または deploy が無いときは、何も変えない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 状態を戻す deploy の ID。
+//   - previousStatus: 戻す先の状態(BeginConfigApply が返したもの)。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (deployRepository *DeployRepository) RevertApply(requestContext context.Context, deployID string, previousStatus string) error {
+	// 条件の値が空のときは拒否し、applying のときだけ、モデルに前の状態へ戻させる。
+	if hasEmpty(previousStatus) {
+		return newEmptyConditionError()
+	}
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertApply(previousStatus)
+	})
+	return revertError
 }

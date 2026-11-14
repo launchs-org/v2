@@ -82,15 +82,12 @@ func (deployRepository *DeployRepository) RevertScale(requestContext context.Con
 	if hasEmpty(deployID, start.PreviousStatus) {
 		return newEmptyConditionError()
 	}
-	// applying のときだけ、replicas と status を戻す。
-	revertError := deployRepository.database.WithContext(requestContext).
-		Model(&model.Deploy{}).
-		Where(&model.Deploy{ID: deployID, Status: model.DeployStatusApplying}).
-		Select("replicas", "status").
-		Updates(&model.Deploy{Replicas: start.PreviousReplicas, Status: start.PreviousStatus}).Error
-	// データベースのエラーは、内部エラーにして返す。
+	// applying のときだけ、モデルに replicas と status を戻させる。
+	_, revertError := transitionDeploy(deployRepository.database, requestContext, deployID, func(deploy *model.Deploy) bool {
+		return deploy.RevertScale(start.PreviousReplicas, start.PreviousStatus)
+	})
 	if revertError != nil {
-		return apperror.Wrap(apperror.KindInternal, "スケーリングを元に戻せませんでした", revertError)
+		return revertError
 	}
 	return nil
 }

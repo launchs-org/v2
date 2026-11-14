@@ -1,6 +1,10 @@
 package model
 
-import "launchs/shared/apperror"
+import (
+	"time"
+
+	"launchs/shared/apperror"
+)
 
 // このファイルは、deploy の「状態を変える操作」を、モデルのメソッドとして持つ。
 // メソッドは、メモリ上の deploy の値だけを変える(データベースへの保存は、repository が行う)。
@@ -169,4 +173,144 @@ func (deploy *Deploy) CommitServicePorts(succeeded bool) bool {
 		deploy.Status = DeployStatusFailed
 	}
 	return true
+}
+
+// RevertDeleting は、削除中(deleting)の deploy を、削除を受け付ける前の状態に戻す。
+//
+// 削除の Workflow を開始できなかったときに使う。
+//
+// 引数:
+//   - previousStatus: 戻す先の状態(BeginDelete が返したもの)。
+//
+// 戻り値:
+//   - 戻したら true。削除中でないときは、何も変えず false。
+func (deploy *Deploy) RevertDeleting(previousStatus string) bool {
+	// 削除中でなければ、戻すものが無い。
+	if deploy.Status != DeployStatusDeleting {
+		return false
+	}
+	// 前の状態に戻す。
+	deploy.Status = previousStatus
+	return true
+}
+
+// MarkDeleteFailed は、削除中(deleting)の deploy を、削除に失敗した状態(delete_failed)にする。
+//
+// 戻り値:
+//   - 変えたら true。削除中でないときは、何も変えず false。
+func (deploy *Deploy) MarkDeleteFailed() bool {
+	// 削除中でなければ、変えるものが無い。
+	if deploy.Status != DeployStatusDeleting {
+		return false
+	}
+	// 削除に失敗した状態にする。
+	deploy.Status = DeployStatusDeleteFailed
+	return true
+}
+
+// RevertScale は、スケーリングの開始に失敗したとき、replicas と状態を元に戻す。
+//
+// 引数:
+//   - replicas: 戻す先のレプリカ数。
+//   - status: 戻す先の状態。
+//
+// 戻り値:
+//   - 戻したら true。applying でないとき(別の処理が先に変えた)は、何も変えず false。
+func (deploy *Deploy) RevertScale(replicas int, status string) bool {
+	// 反映中でなければ、戻すものが無い。
+	if !deploy.IsApplying() {
+		return false
+	}
+	// 前の値に戻す。
+	deploy.Replicas = replicas
+	deploy.Status = status
+	return true
+}
+
+// RevertApply は、反映の開始に失敗したとき、状態だけを元に戻す(起動設定・ポートの反映用)。
+//
+// 引数:
+//   - status: 戻す先の状態。
+//
+// 戻り値:
+//   - 戻したら true。applying でないときは、何も変えず false。
+func (deploy *Deploy) RevertApply(status string) bool {
+	// 反映中でなければ、戻すものが無い。
+	if !deploy.IsApplying() {
+		return false
+	}
+	// 前の状態に戻す。
+	deploy.Status = status
+	return true
+}
+
+// BeginCrashLoopStop は、crash-loop で止める準備として、稼働中(active)の deploy を applying にする。
+//
+// 戻り値:
+//   - 変えたら true。active でないときは、何も変えず false。
+func (deploy *Deploy) BeginCrashLoopStop() bool {
+	// 止められる状態でなければ、何もしない。
+	if !deploy.CanStopForCrashLoop() {
+		return false
+	}
+	// 反映中にする。
+	deploy.Status = DeployStatusApplying
+	return true
+}
+
+// FinishCrashLoopStop は、止める処理が終わった deploy(applying)を、failed にする。
+//
+// 戻り値:
+//   - 変えたら true。applying でないときは、何も変えず false。
+func (deploy *Deploy) FinishCrashLoopStop() bool {
+	// 反映中でなければ、変えるものが無い。
+	if !deploy.IsApplying() {
+		return false
+	}
+	// 失敗の状態にする。
+	deploy.Status = DeployStatusFailed
+	return true
+}
+
+// CrashLoopingPod は、deploy を crash-loop として止めるべきかを決め、止める理由になる Pod を返す(Pods を読み込んであるとき)。
+//
+// 次の全てを満たすときだけ、止める。
+//   - deploy が稼働中(active)で、replicas が 1 以上。
+//   - 終了中でない Pod の中に、安定して動いている Pod が1つも無い(1つでも健全なら、サービスは続いている)。
+//   - 安定していない Pod のうち、不健全になってから threshold 以上たったものがある。
+//
+// 引数:
+//   - at: 判定する時刻(データベースの時計)。
+//   - threshold: 不健全が続いてよい時間。
+//
+// 戻り値:
+//   - 止める理由になる Pod(不健全が最も長いもの)と、止めるべきなら true。
+func (deploy Deploy) CrashLoopingPod(at time.Time, threshold time.Duration) (DeployPod, bool) {
+	// 稼働中で、レプリカがあるものだけが対象。
+	if !deploy.CanStopForCrashLoop() || deploy.Replicas <= 0 {
+		return DeployPod{}, false
+	}
+	// 不健全が最も長い Pod を探す。
+	var longest DeployPod
+	found := false
+	for _, pod := range deploy.Pods {
+		// 終了中の Pod は、判定に含めない。
+		if pod.Status == PodStatusTerminating {
+			continue
+		}
+		// 安定している Pod が1つでもあれば、止めない。
+		if pod.IsStable(at) {
+			return DeployPod{}, false
+		}
+		// 不健全になった時刻が無い、または、まだ猶予の時間に達していないものは、候補にしない。
+		if pod.UnhealthySince == nil || pod.UnhealthySince.After(at.Add(-threshold)) {
+			continue
+		}
+		// より長く不健全な Pod を選ぶ。
+		if !found || pod.UnhealthySince.Before(*longest.UnhealthySince) {
+			longest = pod
+			found = true
+		}
+	}
+	return longest, found
 }

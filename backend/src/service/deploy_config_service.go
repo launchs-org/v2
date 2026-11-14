@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"launchs/shared/apperror"
-	"launchs/shared/model"
 
 	"gorm.io/datatypes"
 )
@@ -88,7 +87,7 @@ func (deployService *DeployService) ApplyConfig(requestContext context.Context, 
 
 	// 3. 開始できなかったので、状態を元に戻す。リクエストが中断されていても戻せるよう、context を切り離す。
 	revertContext := context.WithoutCancel(requestContext)
-	if _, revertError := deployService.deployStore.UpdateStatus(revertContext, deployID, model.DeployStatusApplying, previousStatus); revertError != nil {
+	if revertError := deployService.deployStore.RevertApply(revertContext, deployID, previousStatus); revertError != nil {
 		// 戻せなかったときは、両方の原因を残す(applying のまま残る)。
 		return apperror.Wrap(apperror.KindInternal, "起動設定の反映を開始できませんでした", joinErrors(startError, revertError))
 	}
