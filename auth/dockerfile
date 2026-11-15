@@ -1,0 +1,17 @@
+FROM golang:1.27 AS Develop
+
+# 各種ツールをインストール
+RUN apt update && apt install -y curl git wget
+
+# curl でインストール
+RUN curl -sSfL https://raw.githubusercontent.com/air-verse/air/master/install.sh | sh -s
+
+# マウントしたリポジトリは所有者がコンテナと違い、git が拒否する(dubious ownership)。
+# そのため go build が Git の情報を取れずに失敗するので、開発用では埋め込まない。
+ENV GOFLAGS=-buildvcs=false
+
+# ワーキングディレクトリ設定(リポジトリルートをマウントする場所)
+WORKDIR /app
+
+# air を実行する(shared/ の変更でもリビルドされるよう、リポジトリルートから実行する)
+CMD [ "air","-c","auth/.air.toml" ]

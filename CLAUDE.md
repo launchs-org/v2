@@ -15,7 +15,8 @@ launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエ
 ```
 backend/        バックエンド(Golang/Echo)。dockerfile と src/(コード)を持つ
 watcher/        k8s の Pod と Deployment を観測し、実際の状態を DB に反映するコンテナ(docs/watcher.md)
-auth/ registry/ logcollector/   同じ形のコンテナ用フォルダ(これから作る)
+auth/           認証(ユーザー登録・ログイン・トークンの発行・JWKS。docs/auth.md)
+registry/ logcollector/   同じ形のコンテナ用フォルダ(これから作る)
 shared/         バックエンド・ワーカー・watcher で共有するコード
 migrations/     DB のマイグレーション(up のみ)
 docs/
@@ -51,7 +52,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - **ingress は、Traefik の IngressRoute として作る**(プロジェクトに属する。ホスト名は「形容詞-色-動物.ベースドメイン」で自動で払い出す。詳細は [docs/ingress.md](docs/ingress.md))。ベースドメインと払い出さない名前は、環境変数 `INGRESS_BASE_DOMAIN`、`INGRESS_RESERVED_SUBDOMAINS`。
 - **volume は、k8s の PVC として作る**(プロジェクトに属する。PVC は、最初にマウントを適用するときに作る。詳細は [docs/volume.md](docs/volume.md))。大きさの上限、StorageClass、アクセスモードは、環境変数 `VOLUME_MAX_SIZE_MB`、`VOLUME_STORAGE_CLASS`、`VOLUME_ACCESS_MODE`。
 - **状態による操作の可否と、状態を変える操作は、`shared/model` のメソッドに置く**(repository は、ロックして読む → メソッドを呼ぶ → 保存する、だけを行う。[docs/coding-conventions.md](docs/coding-conventions.md))。
-- 認証(auth コンテナ)とクォータは、設計の文書 [docs/auth.md](docs/auth.md) でレビュー中(承認のあとに実装する)。
+- **認証は、別のコンテナ(`auth/`)**。URL は `/auth/...`(パスを書き換えずに渡す)。access token は EdDSA で、backend が JWKS の公開鍵で検証する(backend の置き換えは、次の PR)。クォータは、設計の文書 [docs/auth.md](docs/auth.md) の §8(未実装)。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様

@@ -1,6 +1,6 @@
 // Package server は、バックエンドの Echo のサーバーを組み立てる。
 //
-// ミドルウェアとエラーハンドラー(middlewares パッケージ)を登録し、ルーティングを登録する。
+// ミドルウェアとエラーハンドラー(shared/httpmiddleware と、backend の middlewares パッケージ)を登録し、ルーティングを登録する。
 package server
 
 import (
@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 	"gorm.io/gorm"
 
-	"launchs/backend/src/middlewares"
 	"launchs/backend/src/service"
+	"launchs/shared/httpmiddleware"
 )
 
 // Dependencies は、サーバーが外から受け取る、依存するものの一式。
@@ -63,13 +63,13 @@ func New(appLogger *slog.Logger, dependencies Dependencies) *echo.Echo {
 	// ロガーと、エラーを共通の形式に変換するハンドラーを設定して、サーバーを作る。
 	echoServer := echo.NewWithConfig(echo.Config{
 		Logger:           appLogger,
-		HTTPErrorHandler: middlewares.NewErrorHandler(appLogger),
+		HTTPErrorHandler: httpmiddleware.NewErrorHandler(appLogger),
 	})
 
 	// 一番外側で、リクエスト ID を付ける。
 	echoServer.Use(middleware.RequestID())
 	// リクエスト ID を出すため、その内側にアクセスログを置く。
-	echoServer.Use(middlewares.NewAccessLogMiddleware(appLogger))
+	echoServer.Use(httpmiddleware.NewAccessLogMiddleware(appLogger))
 	// ハンドラーのパニックを 500 に変えるため、一番内側に置く。
 	echoServer.Use(middleware.Recover())
 

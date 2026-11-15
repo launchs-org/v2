@@ -4,10 +4,12 @@ go 1.27.1
 
 require (
 	github.com/go-playground/validator/v10 v10.30.6
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v5 v5.4.5
 	github.com/stretchr/testify v1.11.1
 	go.temporal.io/sdk v1.51.0
+	golang.org/x/crypto v0.58.0
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
@@ -68,7 +70,6 @@ require (
 	go.temporal.io/api v1.64.3 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect

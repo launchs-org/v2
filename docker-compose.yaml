@@ -28,6 +28,30 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # 認証のコンテナ。ユーザーの登録・ログイン・トークンの発行と、公開鍵(JWKS)の配信(docs/auth.md)。
+  auth:
+    build:
+      context: .
+      dockerfile: auth/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth?sslmode=disable
+      # 署名鍵(<kid>.pem)を置く場所。開発用は、無ければ作る(本番は、Secret をマウントして、AUTO_GENERATE を使わない)。
+      AUTH_KEYS_DIR: /keys
+      AUTH_KEYS_AUTOGENERATE: "true"
+      # サインアップの公開範囲(open か invite)。
+      AUTH_SIGNUP_MODE: ${AUTH_SIGNUP_MODE:-open}
+      # X-Forwarded-For を信頼するプロキシ(開発用は、同じ Docker のネットワークの nginx)。
+      AUTH_TRUSTED_PROXY_CIDRS: ${AUTH_TRUSTED_PROXY_CIDRS:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+      - auth-keys:/keys
+
   # 開発環境の PostgreSQL。1つのサーバーの中に、app、auth、temporal の各データベースを作る。
   postgres:
     image: postgres:17
@@ -151,6 +175,20 @@ services:
     volumes:
       - ./migrations/app:/migrations:ro
 
+  # auth データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
+  migrate-auth:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/auth?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations/auth:/migrations:ro
+
   # 開発用の自己署名の証明書を作る。1回だけ実行して終わる(すでにあれば何もしない)。
   nginx-certificate:
     image: alpine/openssl:3.5.9
@@ -167,6 +205,8 @@ services:
         condition: service_completed_successfully
       backend:
         condition: service_started
+      auth:
+        condition: service_started
     ports:
       # 手元から呼ぶためのポート。他のものと重なることがあるので、既定は 18443 にして、
       # HTTPS_HOST_PORT で変えられるようにしてある。
@@ -176,6 +216,7 @@ services:
       - nginx-certificates:/etc/nginx/certs:ro
 
 volumes:
+  auth-keys:
   go-module-cache:
   postgres-data:
   nginx-certificates:

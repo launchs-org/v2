@@ -1,6 +1,6 @@
 # 認証とクォータの設計
 
-**状態: 設計のレビュー待ち(実装は、承認のあと)。** API の仕様は [endpoints/auth.md](endpoints/auth.md)、決定の経緯は [pre-implementation-checklist.md](pre-implementation-checklist.md) の C(認証)と G-4(リソース制限)にある。この文書は、それらで決めていない「中身の設計」を決めるためのもの。**「要確認」と書いた所が、レビューしてほしい点。**
+**状態: 承認済み。auth コンテナの土台(§9 の 1)を実装した。** 実装の差分は、末尾の「実装メモ」を見る。 API の仕様は [endpoints/auth.md](endpoints/auth.md)、決定の経緯は [pre-implementation-checklist.md](pre-implementation-checklist.md) の C(認証)と G-4(リソース制限)にある。この文書は、それらで決めていない「中身の設計」を決めるためのもの。**「要確認」と書いた所が、レビューしてほしい点。**
 
 ## 1. 目的と、決まっていること
 
@@ -39,6 +39,7 @@
 | `refresh_tokens` | `jti`(PK)、`user_id`、`issued_at`、`expires_at`、`revoked_at` | refresh token の有効・無効。ログアウトで `revoked_at`、BAN で、そのユーザーの全てに `revoked_at` |
 | `login_failures` | `user_name_lower`(PK)、`failed_count`、`locked_until` | ユーザー名ごとの失敗の回数とロック |
 | `rate_limit_events` | `kind`(`login` / `signup`)、`ip`、`occurred_at` | IP ごとのレート制限(スライディングウィンドウ) |
+| `login_events` | `id`、`user_id`(NULL 可)、`user_name_lower`、`kind`(`signup` / `login`)、`result`(`success` / `failure`)、`reason`、`ip`、`user_agent`、`occurred_at` | ログイン履歴。本人が `GET /auth/login-history` で見られる。レート制限に当たった試行は残さない。既定で180日残す |
 | `invitations` | `code_hash`(UNIQUE)、`created_by`、`expires_at`、`used_by`、`used_at` | 招待制のときの招待(コードは、ハッシュで保存) |
 
 - 期限切れの `refresh_tokens`、古い `rate_limit_events` は、定期的に消す(watcher の pruner と同じ形で、auth コンテナの中で動かす)。
@@ -130,3 +131,15 @@
 5. クォータの項目と、初期値(§8.2)。足りない項目、多すぎる項目、値の変更。
 6. クォータ超過を、409 にしてよいか(§8.1)。
 7. 実装の段階の分け方(§9)。3(クォータ)を、先にしてもよい。
+
+## 11. 実装メモ(PR 1: auth コンテナの土台)
+
+設計から、実装で変えた・足したこと。
+
+- **ログイン履歴を足した**(§3 の `login_events`、`GET /auth/login-history`)。サインアップとログインの成功・失敗を残し、失敗の理由は本人にだけ見せる。存在しないユーザー名への試行も DB には残る(`user_id` が NULL)。
+- **共通のミドルウェアを `shared/httpmiddleware` に移した**(アクセスログとエラーハンドラー。backend と auth が同じものを使う)。
+- **漏洩済みパスワードの照合(HIBP)は、まだ入れていない**(§5。既定 off の想定だったので、後で足す)。よくあるパスワードは、上位1万件の一覧を埋め込んで照合する(末尾の数字や記号を除いた形も照合)。ほかに、同じ文字の繰り返し、短い並びの繰り返し、連続した文字、ユーザー名を含むものを拒否する。
+- **招待制**: 招待コードを検証して使用済みにする部分は入れた(ユーザーの作成と同じトランザクション)。招待を**発行する**手段は、アカウント管理(PR 4)まで無いので、招待制は、それまで、DB に直接招待を入れないと使えない。
+- **管理者**(`users.role = 'admin'`)の列と、access token の `role` は入れた。管理者を作る手段と、管理の API は、PR 4。
+- **refresh と me**: `/refresh` は、BAN されたユーザーを拒否する(refresh token の有効・無効とは別に、ユーザーの状態を見る)。`/me` は、access token の claims だけから返す(DB を見ない)。
+- 設定は、環境変数 `AUTH_*`(`.env.example`)。署名鍵は、`AUTH_KEYS_DIR`(開発用の compose は、`AUTH_KEYS_AUTOGENERATE=true` で、無ければ作る)。

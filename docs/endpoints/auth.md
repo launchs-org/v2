@@ -7,7 +7,7 @@
 ### トークンの仕様
 - access token: 有効期限は15分。署名は EdDSA(Ed25519)で、ヘッダの `kid` が公開鍵を指す。バックエンドは [JWKS 取得](#jwks-取得) で得た公開鍵でローカルに検証する。失効の管理はせず、有効期限だけで切れる(ログアウトや BAN の後も、発行済みのものは最大15分有効)
 - refresh token: 有効期限は90日(固定)。更新(ローテーション)はしない。認証コンテナだけが発行・検証し、`jti` を DB で管理して有効・無効を判定する(ログアウトや BAN で無効になる)
-- どちらも JWT。claims の例:
+- どちらも JWT。claims の例(access token には、役割 `role`(`"user"` か `"admin"`)も入る。backend が管理者の操作を判定するため。refresh token には入らない):
 ```json
 {
   "iss": "launchs-org",
@@ -37,6 +37,7 @@
 {"token": "<refreshToken>"}
 ```
 - Note: token は refresh token。サインアップ後にそのままログイン状態になる
+- Note: 招待制(環境変数 `AUTH_SIGNUP_MODE=invite`)のときは、Body に `"invitationCode": "<招待コード>"` が必要。無い、違う、期限切れ、使用済みの招待は 400。招待は1回だけ使える(ユーザーの作成に失敗したときは、使用済みにならない)
 - Note: `userName` は英数字とハイフンのみ、最大64文字。大文字小文字を区別せずに重複を判定し、重複していたら 409 を返す
 - Note: `password` は12文字以上。組み合わせ規則は課さず、よくあるパスワードと漏洩済みのパスワードは 400 で拒否する
 - Note: 同じ IP からのサインアップは1時間あたり10回まで。超えたら 429(`Retry-After` 付き)を返す
@@ -89,6 +90,32 @@
 ```json
 {"userId": "userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8", "userName": "user1"}
 ```
+
+### ログイン履歴
+- Get: /login-history
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Query(任意)
+```json
+{"limit": 20}
+```
+- Response (200)
+```json
+{
+  "events": [
+    {"kind": "login", "result": "failure", "reason": "wrong_password", "ip": "203.0.113.5", "userAgent": "Mozilla/5.0 ...", "at": "2026-11-15T21:00:00+09:00"},
+    {"kind": "login", "result": "success", "reason": null, "ip": "203.0.113.4", "userAgent": "curl/8.5.0", "at": "2026-11-15T20:59:00+09:00"},
+    {"kind": "signup", "result": "success", "reason": null, "ip": "203.0.113.4", "userAgent": "curl/8.5.0", "at": "2026-11-15T20:58:00+09:00"}
+  ]
+}
+```
+- Note: 自分(access token の持ち主)への、サインアップとログインの試行を、新しい順に返す。成功と失敗の両方で、不正なログインの試行に気づくために使う。ページングは無く、`limit` は 1〜100(既定 20)。範囲外は 400
+- Note: `kind` は `"signup"` か `"login"`、`result` は `"success"` か `"failure"`、`reason` は失敗の理由で、`"wrong_password"` | `"locked"` | `"banned"` のいずれか。成功のときは null。理由は、本人にだけ見える(ログインのレスポンスでは、理由を区別しない)
+- Note: 存在しないユーザー名への試行は、誰の履歴にも出ない(管理者の調査のために、DB には残る)。レート制限(429)に当たった試行は、攻撃で履歴が膨らまないよう、残さない
+- Note: 履歴は、既定で180日残す(環境変数 `AUTH_LOGIN_HISTORY_RETENTION`)。ユーザーを削除すると、そのユーザーの履歴も消える
+- Note: 管理者が、他のユーザーの履歴を見る API は、アカウント管理グループで定義する
 
 ### ログアウト (/logout)
 - Post: /logout
