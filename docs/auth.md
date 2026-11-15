@@ -68,9 +68,9 @@
   - IP のレート制限は、上限に達したら、記録を増やさない(大量に送られても、DB の行が増えない)。同じ種類・IP の判定は、アドバイザリロックで順番に行う。
   - トークンを含むレスポンスには、`Cache-Control: no-store` を付ける(JWKS だけ、5分のキャッシュを許す)。
 
-## 6. アカウント管理(管理者)
+## 6. アカウント管理(管理者)(実装済み。§14)
 
-仕様書の「アカウント管理グループ」にあたる。**最初の PR では作らず、次の PR とする**(要確認)。ここでは、決めておく形だけを書く。
+仕様書の「アカウント管理グループ」にあたる。
 
 - 管理者は、`users.role = 'admin'`。最初の管理者は、auth コンテナのコマンド(`auth admin create <userName>`)で作る(API では作れない)。
 - 管理の API(`/auth/admin/...`、`role=admin` の access token が要る。403):
@@ -169,3 +169,17 @@
 - **`GET /api/v1/quota`**: 自分の上限と使用量(ロックしない)。仕様は `docs/endpoints/quota.md`。
 - **管理の API(上限の変更)は、まだ無い**(PR 4)。いまは、`account_quotas` を SQL で更新する。
 - 認証のコンテナには、クォータの値は無い(アプリの DB にある)。ユーザーの BAN などと、クォータの関係は、PR 4 で決める。
+
+## 14. 実装メモ(PR 4a: アカウント管理)
+
+PR 4 は、小さくするため、4a(auth の管理 API)と 4b(クォータの変更 API。backend)に分けた。ここは 4a。仕様は `docs/endpoints/auth_admin.md`。
+
+- **403 `forbidden`** を、共通のエラー(`shared/apperror`)に足した(管理者用の操作で、管理者でないとき)。
+- **管理者かどうかは、毎回、DB の最新の状態で確かめる**(access token の `role` は見ない)。access token は最大15分有効なので、降格・停止された人が、残りの時間で操作できないようにするため。`role` は、backend(クォータの変更 API。4b)が、DB を持たないので、トークンから見る(最大15分の遅れを許す)。
+- **最初の管理者は、起動時に作れる(Kubernetes 向け)**: 環境変数 `AUTH_BOOTSTRAP_ADMIN_NAME` と、パスワード(`AUTH_BOOTSTRAP_ADMIN_PASSWORD`、または、Secret をマウントしたファイルを指す `AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE`)を、セットで指定する。auth の起動時に、**管理者が1人もいないときだけ**作る(停止中の管理者も「いる」と数える。何度起動しても安全。複数の auth が同時に起動しても、1人だけ作られる)。パスワードの検査は通常と同じで、弱い・同じ名前の一般ユーザーがいる(→ `admin promote` を使う)ときは、設定の間違いに気づけるよう、起動を止める。作った後は、Secret から外してよい。ログに、パスワードは出さない。
+- **コマンドも残す**(開発用と、管理者を失ったときの復旧用): `task admin:create -- <userName>`(`auth admin create <userName>`)。Kubernetes では、`kubectl exec -i deploy/auth -- <auth のバイナリ> admin create <userName>`(パスワードは標準入力)でも作れる。パスワードは、引数に書くと履歴に残るので、環境変数 `AUTH_ADMIN_PASSWORD` か標準入力で渡す。通常のサインアップと同じ強さの検査を通す。`task admin:promote -- <userName>` で、すでにあるユーザーを管理者にできる(停止中は不可)。
+- **BAN**: 状態を `banned` にし、**同じトランザクションで**、そのユーザーの有効な refresh token を全て無効にする。自分自身は停止できない。発行済みの access token は、最大15分、使える(auth が見るもの=管理 API・`/refresh` は、すぐ止まる。backend の API は、access token の期限まで通る)。解除しても、無効にした refresh token は戻らない。
+- **招待**: `id`、`note`、`revoked_at` を足した(`migrations/auth/000002`)。コードは、32バイトの乱数で、発行のレスポンスでだけ返す(保存は、SHA-256 のハッシュだけ)。取り消した招待は、サインアップで使えない。
+- **サインアップの公開範囲を切り替える API は作らない**(§6 の「要確認」の結論)。環境変数 `AUTH_SIGNUP_MODE` で足りる。切り替えは、再起動になる。
+- **管理操作の記録は、ログだけ**(誰が、何を、何に)。DB の監査テーブルは作っていない。必要になったら足す。
+- **ユーザーの削除は作らない**(アカウントを消すと、プロジェクトなどの持ち主が、いなくなるため)。使えなくするのは BAN。

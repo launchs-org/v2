@@ -24,6 +24,7 @@ const RequestIDHeaderName = "X-Request-Id"
 var defaultMessagesByKind = map[apperror.Kind]string{
 	apperror.KindInvalidRequest:  "リクエストが正しくありません",
 	apperror.KindUnauthorized:    "認証が必要です",
+	apperror.KindForbidden:       "この操作をする権限がありません",
 	apperror.KindNotFound:        "指定されたものが見つかりません",
 	apperror.KindConflict:        "現在の状態では実行できません",
 	apperror.KindPayloadTooLarge: "リクエストが大きすぎます",
@@ -130,6 +131,8 @@ func kindFromStatusCode(statusCode int) apperror.Kind {
 	switch statusCode {
 	case http.StatusUnauthorized:
 		return apperror.KindUnauthorized
+	case http.StatusForbidden:
+		return apperror.KindForbidden
 	case http.StatusNotFound:
 		return apperror.KindNotFound
 	case http.StatusConflict:
