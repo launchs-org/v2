@@ -45,6 +45,18 @@ tasks:
     cmds:
       - docker compose run --rm backend go build -o /dev/null ./...
 
+  admin:create:
+    desc: "管理者を作る(例: task admin:create -- alice。パスワードは、環境変数 AUTH_ADMIN_PASSWORD か、標準入力で渡す)"
+    deps: [image]
+    cmds:
+      - docker compose run --rm -T auth go run ./auth/src admin create {{.CLI_ARGS}}
+
+  admin:promote:
+    desc: "すでにあるユーザーを管理者にする(例: task admin:promote -- alice)"
+    deps: [image]
+    cmds:
+      - docker compose run --rm -T auth go run ./auth/src admin promote {{.CLI_ARGS}}
+
   test:
     desc: 全てのテストを実行する
     deps: [image]

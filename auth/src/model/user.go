@@ -129,6 +129,15 @@ func (RefreshToken) TableName() string {
 
 // Invitation は、invitations テーブルの1行。招待制のときの招待。
 type Invitation struct {
+	// ID は、管理 API で招待を指す ID("invitation-" + UUID v4)。コードそのものは、保存しない。
+	ID string `gorm:"column:id"`
+
+	// Note は、管理者が付けるメモ(誰に渡すか、など)。
+	Note string `gorm:"column:note"`
+
+	// RevokedAt は、取り消した日時(取り消していなければ nil)。取り消した招待は、使えない。
+	RevokedAt *time.Time `gorm:"column:revoked_at"`
+
 	// CodeHash は、招待コードのハッシュ(主キー)。
 	CodeHash string `gorm:"column:code_hash;primaryKey"`
 

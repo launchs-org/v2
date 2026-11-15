@@ -85,7 +85,7 @@ func TestUserRepository(testing *testing.T) {
 		testing.Error("空の値では更新しないはず")
 	}
 	// 招待: 有効な招待で作れ、使用済みになる。同じ招待は、もう使えない。期限切れ、無い招待も使えない。
-	database.Exec("INSERT INTO invitations (code_hash, expires_at) VALUES ('valid', now() + interval '1 day'), ('expired', now() - interval '1 day')")
+	database.Exec("INSERT INTO invitations (id, code_hash, expires_at) VALUES ('invitation-valid', 'valid', now() + interval '1 day'), ('invitation-expired', 'expired', now() - interval '1 day')")
 	if inviteError := userRepository.Create(ctx, newUser("bob"), "valid"); inviteError != nil {
 		testing.Fatalf("招待で作れるはず: %v", inviteError)
 	}
@@ -96,7 +96,7 @@ func TestUserRepository(testing *testing.T) {
 		}
 	}
 	// 名前が重なって失敗したときは、招待を使用済みにしない(同じトランザクション)。
-	database.Exec("INSERT INTO invitations (code_hash, expires_at) VALUES ('unused', now() + interval '1 day')")
+	database.Exec("INSERT INTO invitations (id, code_hash, expires_at) VALUES ('invitation-unused', 'unused', now() + interval '1 day')")
 	if conflictError := userRepository.Create(ctx, newUser("alice"), "unused"); conflictError == nil {
 		testing.Fatal("conflict のはず")
 	}
