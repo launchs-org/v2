@@ -111,3 +111,56 @@ func TestQuotaUsageAdd(testingT *testing.T) {
 		testingT.Fatalf("使用量が違う: %+v", usage)
 	}
 }
+
+// TestQuotaOverridesValidate は、上書きの値の範囲(0〜MaxQuotaValue)と、存在しないスペックの拒否を、項目名つきのエラーで確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestQuotaOverridesValidate(testingT *testing.T) {
+	// 存在するスペックを用意し、各ケースの上書きと、エラーに含まれるはずの文字列(通るなら空)を並べる。
+	known := []string{"small", "large"}
+	testCases := []struct {
+		name      string
+		overrides QuotaOverrides
+		piece     string
+	}{
+		{"空は通る", QuotaOverrides{}, ""},
+		{"端の値は通る", QuotaOverrides{MaxProjects: intPointer(0), MaxVolumeTotalMB: intPointer(MaxQuotaValue), MaxDeploysBySpec: map[string]int{"large": 0}}, ""},
+		{"projects が負", QuotaOverrides{MaxProjects: intPointer(-1)}, "projects"},
+		{"deploys が上限超え", QuotaOverrides{MaxDeploys: intPointer(MaxQuotaValue + 1)}, "deploys"},
+		{"volumes が負", QuotaOverrides{MaxVolumes: intPointer(-5)}, "volumes"},
+		{"volumeTotalMB が上限超え", QuotaOverrides{MaxVolumeTotalMB: intPointer(MaxQuotaValue + 1)}, "volumeTotalMB"},
+		{"存在しないスペック", QuotaOverrides{MaxDeploysBySpec: map[string]int{"huge": 1}}, "huge"},
+		{"スペックの値が負", QuotaOverrides{MaxDeploysBySpec: map[string]int{"small": -1}}, "small"},
+		{"スペックの値が上限超え", QuotaOverrides{MaxDeploysBySpec: map[string]int{"small": MaxQuotaValue + 1}}, "small"},
+	}
+	// 全てのケースを確かめる。
+	for _, testCase := range testCases {
+		validateError := testCase.overrides.Validate(known)
+		if testCase.piece == "" {
+			if validateError != nil {
+				testingT.Errorf("%s: 通るはず: %v", testCase.name, validateError)
+			}
+			continue
+		}
+		if apperror.KindOf(validateError) != apperror.KindInvalidRequest || !strings.Contains(validateError.Error(), testCase.piece) {
+			testingT.Errorf("%s: %q を含む invalid_request のはず: %v", testCase.name, testCase.piece, validateError)
+		}
+	}
+}
+
+// TestQuotaOverridesOf は、保存されている行から、上書き一式が作られ、AccountQuota で行に戻せることを確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestQuotaOverridesOf(testingT *testing.T) {
+	// 行から上書きを作る。
+	overrides := QuotaOverridesOf(AccountQuota{UserID: "user-a", MaxProjects: intPointer(3)}, []AccountSpecQuota{{UserID: "user-a", Spec: "large", MaxDeploys: 2}})
+	if overrides.MaxProjects == nil || *overrides.MaxProjects != 3 || overrides.MaxDeploys != nil || overrides.MaxDeploysBySpec["large"] != 2 {
+		testingT.Fatalf("行の内容が写るはず: %+v", overrides)
+	}
+	// 行に戻すと、項目が同じになる(スペックごとの上書きは、含まない)。
+	if row := overrides.AccountQuota("user-b"); row.UserID != "user-b" || row.MaxProjects == nil || *row.MaxProjects != 3 || row.MaxVolumes != nil {
+		testingT.Fatalf("行に戻せるはず: %+v", row)
+	}
+}
