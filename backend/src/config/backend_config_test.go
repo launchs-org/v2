@@ -35,6 +35,7 @@ func newTestReader(environment map[string]string) *sharedconfig.EnvironmentReade
 //   - ingress の設定に、既定値を入れた設定。
 func withIngressDefaults(expected BackendConfig) BackendConfig {
 	// ベースドメインと、払い出さないサブドメインに、既定値を入れる。
+	expected.VolumeMaxSizeMB = 5120
 	expected.IngressBaseDomain = "launchs.org"
 	expected.IngressReservedSubdomains = splitCommaSeparated(defaultIngressReservedSubdomains)
 	return expected
@@ -154,5 +155,23 @@ func TestLoadBackendConfig(testingT *testing.T) {
 				subTest.Errorf("エラーのときは、ゼロ値の設定を返すはず: %+v", actualConfig)
 			}
 		})
+	}
+}
+
+// TestLoadBackendConfigVolume は、volume の大きさの上限を、環境変数で変えられることと、不正な値を拒否することを確認する。
+//
+// 引数:
+//   - testingT: テストの状態。
+func TestLoadBackendConfigVolume(testingT *testing.T) {
+	// 値を指定すると、既定値(5120)を置き換える。
+	loaded, loadError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "VOLUME_MAX_SIZE_MB": "10240"}))
+	if loadError != nil || loaded.VolumeMaxSizeMB != 10240 {
+		testingT.Fatalf("環境変数の値で置き換わるはず: %+v %v", loaded, loadError)
+	}
+	// 0 以下と、整数でない値は、エラーにする。
+	for _, invalid := range []string{"0", "-1", "abc"} {
+		if _, invalidError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "VOLUME_MAX_SIZE_MB": invalid})); invalidError == nil || !strings.Contains(invalidError.Error(), "VOLUME_MAX_SIZE_MB") {
+			testingT.Errorf("%q はエラーになるはず: %v", invalid, invalidError)
+		}
 	}
 }

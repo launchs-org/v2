@@ -14,6 +14,7 @@ import (
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
 	appliedDeployIDs []string
+	mountedDeployIDs []string
 	scaledDeployIDs  []string
 	deletedDeployIDs []string
 	startError       error
@@ -28,6 +29,12 @@ func (fakeStarter *fakeDeployWorkflowStarter) StartDeployCreation(_ context.Cont
 // StartConfigApply は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context, deployID string) error {
 	fakeStarter.appliedDeployIDs = append(fakeStarter.appliedDeployIDs, deployID)
+	return fakeStarter.startError
+}
+
+// StartMountsApply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartMountsApply(_ context.Context, deployID string) error {
+	fakeStarter.mountedDeployIDs = append(fakeStarter.mountedDeployIDs, deployID)
 	return fakeStarter.startError
 }
 

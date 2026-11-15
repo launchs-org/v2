@@ -88,6 +88,8 @@ func run() error {
 		ServiceWorkflowStarter: service.NewTemporalServiceWorkflowStarter(temporalClient),
 		IngressWorkflowStarter: service.NewTemporalIngressWorkflowStarter(temporalClient),
 		IngressHostGenerator:   hostGenerator,
+		VolumeWorkflowStarter:  service.NewTemporalVolumeWorkflowStarter(temporalClient),
+		VolumeMaxSizeMB:        backendConfig.VolumeMaxSizeMB,
 	})
 
 	// SIGINT と SIGTERM を受けると終わる context を作る。これを使って、停止の合図で、サーバーを止める。

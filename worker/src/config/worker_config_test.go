@@ -37,17 +37,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteOnce", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config", "RUNTIME_CLASS": "gvisor"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteOnce", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteOnce", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -233,5 +233,28 @@ func TestLoadWorkerConfigTraefik(testingT *testing.T) {
 	}
 	if _, emptyError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "TRAEFIK_ENTRY_POINTS": " , "})); emptyError == nil || !strings.Contains(emptyError.Error(), "TRAEFIK_ENTRY_POINTS") {
 		testingT.Errorf("entryPoint が空ならエラーになるはず: %v", emptyError)
+	}
+}
+
+// TestLoadWorkerConfigVolume は、PVC の StorageClass とアクセスモードを環境変数で変えられることと、不正な値を拒否することを確認する。
+//
+// 引数:
+//   - testingT: テストの状態。
+func TestLoadWorkerConfigVolume(testingT *testing.T) {
+	// 値を指定すると、既定値を置き換える。
+	loaded, loadError := LoadWorkerConfig(newTestReader(map[string]string{
+		"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "VOLUME_STORAGE_CLASS": "longhorn", "VOLUME_ACCESS_MODE": "ReadWriteMany",
+	}))
+	if loadError != nil || loaded.VolumeStorageClass != "longhorn" || loaded.VolumeAccessMode != "ReadWriteMany" {
+		testingT.Fatalf("環境変数の値で置き換わるはず: %+v %v", loaded, loadError)
+	}
+	// 未指定なら、StorageClass は空(クラスターの既定)、アクセスモードは ReadWriteOnce。
+	defaults, defaultError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"}))
+	if defaultError != nil || defaults.VolumeStorageClass != "" || defaults.VolumeAccessMode != "ReadWriteOnce" {
+		testingT.Errorf("既定のはず: %+v %v", defaults, defaultError)
+	}
+	// 知らないアクセスモードは、エラーにする。
+	if _, invalidError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "VOLUME_ACCESS_MODE": "ReadOnlyMany"})); invalidError == nil || !strings.Contains(invalidError.Error(), "VOLUME_ACCESS_MODE") {
+		testingT.Errorf("エラーになるはず: %v", invalidError)
 	}
 }

@@ -60,6 +60,21 @@ func (fakeStore *fakeDeployStore) BeginConfigApply(_ context.Context, _ string, 
 	return model.DeployStatusActive, nil
 }
 
+// SavePendingMounts は、何もせず成功する。
+func (fakeStore *fakeDeployStore) SavePendingMounts(_ context.Context, _ string, _ string, _ []model.MountSpec) error {
+	return nil
+}
+
+// DiscardPendingMounts は、何もせず成功する。
+func (fakeStore *fakeDeployStore) DiscardPendingMounts(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// BeginMountsApply は、元の状態として active を返す。
+func (fakeStore *fakeDeployStore) BeginMountsApply(_ context.Context, _ string, _ string) (string, error) {
+	return model.DeployStatusActive, nil
+}
+
 // RevertApply は、何もせず成功する。
 func (fakeStore *fakeDeployStore) RevertApply(_ context.Context, _ string, _ string) error {
 	return nil
@@ -102,6 +117,11 @@ func (fakeStore *fakePodStore) ListPodsByDeploy(_ context.Context, deployID stri
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
 	startError       error
+}
+
+// StartMountsApply は、何もせず成功する。
+func (fakeStarter *fakeDeployWorkflowStarter) StartMountsApply(_ context.Context, _ string) error {
+	return nil
 }
 
 // StartDeployCreation は、ID を覚えて、決めたエラーを返す。

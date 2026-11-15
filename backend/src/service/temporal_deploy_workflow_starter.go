@@ -121,3 +121,24 @@ func (starter *TemporalDeployWorkflowStarter) StartDeletion(requestContext conte
 	}
 	return nil
 }
+
+// StartMountsApply は、ボリュームのマウントの反映の Workflow を開始する(開始だけを行い、完了は待たない)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 反映する deploy の ID。
+//
+// 戻り値:
+//   - Workflow を開始できなかったときのエラー。
+func (starter *TemporalDeployWorkflowStarter) StartMountsApply(requestContext context.Context, deployID string) error {
+	// 実行ごとに別の ID で、期限つきで開始する。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewApplyDeployMountsWorkflowID(deployID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.ApplyDeployMountsWorkflowTimeout,
+	}, sharedworkflow.ApplyDeployMountsWorkflowName, sharedworkflow.ApplyDeployMountsInput{DeployID: deployID})
+	if executeError != nil {
+		return fmt.Errorf("マウントの反映の Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}

@@ -229,6 +229,12 @@ func markNonRetryable(originalError error) error {
 	if errors.Is(originalError, ErrInvalidIngressName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidIngressName", originalError)
 	}
+	if errors.Is(originalError, ErrInvalidVolumeName) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidVolumeName", originalError)
+	}
+	if errors.Is(originalError, ErrVolumeExpandTimeout) {
+		return temporal.NewNonRetryableApplicationError(originalError.Error(), "VolumeExpandTimeout", originalError)
+	}
 	if errors.Is(originalError, ErrInvalidDeploymentName) {
 		return temporal.NewNonRetryableApplicationError(originalError.Error(), "InvalidDeploymentName", originalError)
 	}
