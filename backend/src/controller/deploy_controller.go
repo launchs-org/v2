@@ -46,19 +46,21 @@ type CreateDeployResponse struct {
 
 // DeployController は、/deploy の HTTP の入出力を担当する。
 type DeployController struct {
-	deployUseCase DeployUseCase
+	deployUseCase    DeployUseCase
+	deployLogUseCase DeployLogUseCase
 }
 
 // NewDeployController は、DeployController を作る。
 //
 // 引数:
 //   - deployUseCase: deploy のビジネスルール。
+//   - deployLogUseCase: ログの取得のビジネスルール。
 //
 // 戻り値:
 //   - 作成した DeployController。
-func NewDeployController(deployUseCase DeployUseCase) *DeployController {
+func NewDeployController(deployUseCase DeployUseCase, deployLogUseCase DeployLogUseCase) *DeployController {
 	// ビジネスルールを持たせた DeployController を返す。
-	return &DeployController{deployUseCase: deployUseCase}
+	return &DeployController{deployUseCase: deployUseCase, deployLogUseCase: deployLogUseCase}
 }
 
 // Create は、deploy を作成して、起動を開始する(POST /deploy)。
@@ -117,5 +119,11 @@ func (deployController *DeployController) Get(echoContext *echo.Context) error {
 	// モデルを、レスポンスの形にして返す。
 	response := newDeployResponse(deploy)
 	response.Pods = newPodResponses(pods)
+	// ログのある Pod の一覧を読む(logcollector が DB に書いたストリーム)。
+	logStreams, logPodsError := deployController.deployLogUseCase.ListLogPods(echoContext.Request().Context(), userID, deploy.ID)
+	if logPodsError != nil {
+		return logPodsError
+	}
+	response.LogPods = newLogPodResponses(logStreams)
 	return echoContext.JSON(http.StatusOK, response)
 }

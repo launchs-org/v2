@@ -22,7 +22,8 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
 - サービス未作成のdeployでは `service` が `null` であること
 - `replicas` が1以上の場合、`pods` 配列に実際に稼働している Pod の数だけ `podId`/`status` が含まれること
 - `replicas: 0`(`scaled_zero`)の場合、`pods` が空配列になること
-- [デプロイ ログ取得](009-get-deploy-deployid-logs.md) で使う `podId` は、この `pods` 配列から取得できること
+- [デプロイ ログ取得](009-get-deploy-deployid-logs.md) で使う `podId` は、この `pods` 配列(稼働中)か、`logPods`(ログのある Pod。終了した Pod も含む)から取得できること
+- `logPods` が、ログが1行以上ある Pod だけを、新しい Pod が先で、最大 50 件返すこと。終了した Pod は `running: false` と `endedAt`、稼働中は `running: true` と `endedAt: null`。ログが無い Pod、他の deploy の Pod は載らないこと。ログが無ければ空の配列(null にしない)
 
 ### 異常系
 - 存在しない `deployId` を指定した場合 404 が返ること
@@ -52,6 +53,10 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
   "replicas": 1,
   "pods": [
     {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "status": "running"}
+  ],
+  "logPods": [
+    {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "running": true, "startedAt": "2026-09-16T09:00:00+09:00", "endedAt": null},
+    {"podId": "pod-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy", "running": false, "startedAt": "2026-09-16T08:00:00+09:00", "endedAt": "2026-09-16T08:55:00+09:00"}
   ],
   "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
   "createdAt": "2026-09-16T09:00:00+09:00",
@@ -121,6 +126,7 @@ deploy の現在の状態(`status`/`replicas`/`pods`/`imageRef`)に加え、[起
 - Note: service の status(pending / active / failed / deleting)は Service 自体の払い出し状態で、deploy の status とは別。config/volumes/service いずれかの apply 中に変化するのは deploy の status だけで、service の status は変わらない
 - Note: service はまだ作成されていない(サービス未作成の)deployでは null になる(1 deploy = 1 service で、作成は任意)
 - Note: pods は現在稼働している Pod の一覧(replicas が希望レプリカ数という数値であるのに対し、pods は実際の Pod 1つ1つの識別子と状態を返す)。[デプロイ ログ取得](009-get-deploy-deployid-logs.md) で特定の Pod のログを取得する際に、ここで取得した podId を指定する。status は "pending" | "running" | "terminating" のいずれか
+- Note: logPods は、ログが1行以上保存されている Pod の一覧で、既に終了・再作成された Pod も含む(pods には、稼働中の Pod だけが出る)。新しい Pod(startedAt)が先で、最大 50 件。running はログの収集が続いているか、endedAt は収集が終わった時刻(稼働中は null)。ログが無い Pod は載らない。詳細は [デプロイ ログ取得](009-get-deploy-deployid-logs.md) と [docs/endpoints/deploys.md](../../endpoints/deploys.md)
 
 ## 参照
 

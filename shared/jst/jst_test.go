@@ -26,3 +26,18 @@ func TestFormat(testingT *testing.T) {
 		})
 	}
 }
+
+// TestFormatMillis は、JST のミリ秒つきの文字列になること(UTC の入力、ミリ秒より細かい部分の切り捨て、ミリ秒が 0 のときの桁)を確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestFormatMillis(testingT *testing.T) {
+	// UTC の 12:00:01.123456789 は、JST の 21:00:01.123(切り捨て)。
+	if formatted := FormatMillis(time.Date(2026, 11, 15, 12, 0, 1, 123456789, time.UTC)); formatted != "2026-11-15T21:00:01.123+09:00" {
+		testingT.Errorf("JST のミリ秒つきのはず: %s", formatted)
+	}
+	// ミリ秒が 0 でも、3 桁そろう。
+	if formatted := FormatMillis(time.Date(2026, 11, 15, 12, 0, 1, 0, time.UTC)); formatted != "2026-11-15T21:00:01.000+09:00" {
+		testingT.Errorf("3桁そろうはず: %s", formatted)
+	}
+}

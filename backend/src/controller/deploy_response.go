@@ -62,6 +62,9 @@ type DeployResponse struct {
 	// Pods は、いま存在する Pod の一覧(watcher が DB に書いた観測値。作られた順)。無ければ空の配列。
 	Pods []PodResponse `json:"pods"`
 
+	// LogPods は、ログのある Pod の一覧(終了した Pod も含む。新しい Pod が先。最大 50 件)。GET /deploy/:deployId/logs の podId に使える。無ければ空の配列。
+	LogPods []LogPodResponse `json:"logPods"`
+
 	// ImageRef は、起動しているイメージ。
 	ImageRef string `json:"imageRef"`
 
@@ -95,6 +98,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		Replicas: deploy.Replicas,
 		// Pod の一覧は、呼び出し側が設定する(config だけを返す API では使わない)。ここでは、空の配列(null にしない)。
 		Pods:      []PodResponse{},
+		LogPods:   []LogPodResponse{},
 		ImageRef:  deploy.ImageRef,
 		CreatedAt: jst.Format(deploy.CreatedAt),
 		Config: DeployConfigResponse{
