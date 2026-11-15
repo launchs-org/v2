@@ -34,6 +34,12 @@ type Dependencies struct {
 	// IngressHostGenerator は、ingress に払い出すホスト名を作るもの。
 	IngressHostGenerator service.IngressHostGenerator
 
+	// VolumeWorkflowStarter は、volume の拡張の反映・削除の Workflow を開始するもの。
+	VolumeWorkflowStarter service.VolumeWorkflowStarter
+
+	// VolumeMaxSizeMB は、volume の大きさの上限(MB)。0 のときは、既定(5120)を使う。
+	VolumeMaxSizeMB int
+
 	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
 	ProjectDeletionStarter service.ProjectDeletionStarter
 }

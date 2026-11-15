@@ -34,6 +34,9 @@ const (
 	// defaultIngressReservedSubdomains は、INGRESS_RESERVED_SUBDOMAINS が設定されていないときに使う、払い出さないサブドメイン。
 	defaultIngressReservedSubdomains = "www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard"
 
+	// defaultVolumeMaxSizeMB は、VOLUME_MAX_SIZE_MB が設定されていないときに使う、volume の大きさの上限(MB)。
+	defaultVolumeMaxSizeMB = 5120
+
 	// minimumPort と maximumPort は、ポート番号として使える範囲。
 	minimumPort = 1
 	maximumPort = 65535
@@ -62,6 +65,9 @@ type BackendConfig struct {
 
 	// TemporalNamespace は、使う Temporal の namespace(環境変数 TEMPORAL_NAMESPACE)。
 	TemporalNamespace string
+
+	// VolumeMaxSizeMB は、volume 1つの大きさの上限(MB。環境変数 VOLUME_MAX_SIZE_MB)。アカウントごとの上限は、認証のコンテナを作るときに設ける。
+	VolumeMaxSizeMB int
 
 	// IngressBaseDomain は、ingress に払い出すホスト名の、後ろに付けるドメイン(環境変数 INGRESS_BASE_DOMAIN)。
 	IngressBaseDomain string
@@ -100,6 +106,8 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	httpPort := reader.OptionalInt("HTTP_PORT", defaultHTTPPort)
 	// ログレベルを文字列のまま読む。意味の確認は、あとで ParseLevel で行う。
 	logLevelText := reader.OptionalString("LOG_LEVEL", defaultLogLevelText)
+	// volume の大きさの上限を読む。
+	volumeMaxSizeMB := reader.OptionalInt("VOLUME_MAX_SIZE_MB", defaultVolumeMaxSizeMB)
 	// ingress のホスト名に関する設定を読む。
 	ingressBaseDomain := reader.OptionalString("INGRESS_BASE_DOMAIN", defaultIngressBaseDomain)
 	reservedSubdomainsText := reader.OptionalString("INGRESS_RESERVED_SUBDOMAINS", defaultIngressReservedSubdomains)
@@ -122,6 +130,11 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 LOG_LEVEL: %w", levelError))
 	}
 
+	// 上限は、1以上でなければならない。
+	if volumeMaxSizeMB < 1 {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 VOLUME_MAX_SIZE_MB は 1 以上でなければならない: %d", volumeMaxSizeMB))
+	}
+
 	// ベースドメインは、DNS 名の形(小文字の英数字とハイフンを、ドットで区切ったもの)でなければならない。
 	if !ingressDomainPattern.MatchString(ingressBaseDomain) {
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 INGRESS_BASE_DOMAIN は、小文字の英数字とハイフンを、ドットで区切った DNS 名でなければなりません: %q", ingressBaseDomain))
@@ -133,7 +146,7 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	}
 	// 問題が無いので、読み込んだ値で設定を作って返す。
 	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace,
-		IngressBaseDomain: ingressBaseDomain, IngressReservedSubdomains: splitCommaSeparated(reservedSubdomainsText)}, nil
+		VolumeMaxSizeMB: volumeMaxSizeMB, IngressBaseDomain: ingressBaseDomain, IngressReservedSubdomains: splitCommaSeparated(reservedSubdomainsText)}, nil
 }
 
 // splitCommaSeparated は、カンマ区切りの文字列を、前後の空白を除いて分け、空の要素を捨てる。

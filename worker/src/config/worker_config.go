@@ -36,6 +36,9 @@ const (
 	// defaultTraefikAPIVersion は、Traefik の IngressRoute の apiVersion の既定値。
 	defaultTraefikAPIVersion = "traefik.io/v1alpha1"
 
+	// defaultVolumeAccessMode は、PVC のアクセスモードの既定値。
+	defaultVolumeAccessMode = "ReadWriteMany"
+
 	// defaultTraefikEntryPoints は、IngressRoute を受け付ける entryPoint の名前の既定値。
 	defaultTraefikEntryPoints = "web"
 )
@@ -86,6 +89,12 @@ type WorkerConfig struct {
 	// TraefikEntryPoints は、IngressRoute を受け付ける entryPoint の名前(環境変数 TRAEFIK_ENTRY_POINTS。カンマ区切り)。
 	TraefikEntryPoints []string
 
+	// VolumeStorageClass は、PVC に指定する StorageClass(環境変数 VOLUME_STORAGE_CLASS)。空なら、クラスターの既定。拡張に対応したものが前提。
+	VolumeStorageClass string
+
+	// VolumeAccessMode は、PVC のアクセスモード(環境変数 VOLUME_ACCESS_MODE。ReadWriteOnce または ReadWriteMany)。
+	VolumeAccessMode string
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -127,6 +136,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	clusterDomain := reader.OptionalString("CLUSTER_DOMAIN", defaultClusterDomain)
 	traefikAPIVersion := reader.OptionalString("TRAEFIK_API_VERSION", defaultTraefikAPIVersion)
 	traefikEntryPointsText := reader.OptionalString("TRAEFIK_ENTRY_POINTS", defaultTraefikEntryPoints)
+	volumeStorageClass := reader.OptionalString("VOLUME_STORAGE_CLASS", "")
+	volumeAccessMode := reader.OptionalString("VOLUME_ACCESS_MODE", defaultVolumeAccessMode)
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -163,6 +174,11 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 TRAEFIK_API_VERSION は group/version の形でなければなりません: %q", traefikAPIVersion))
 	}
 
+	// アクセスモードは、ReadWriteOnce か ReadWriteMany でなければならない。
+	if volumeAccessMode != "ReadWriteOnce" && volumeAccessMode != "ReadWriteMany" {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 VOLUME_ACCESS_MODE は ReadWriteOnce か ReadWriteMany でなければなりません: %q", volumeAccessMode))
+	}
+
 	// k8s への接続の設定の値を検査し、問題があれば加える。
 	if validateError := kubernetesSettings.Validate(); validateError != nil {
 		loadError = errors.Join(loadError, validateError)
@@ -183,6 +199,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		BlockedNetworks:    blockedNetworks,
 		ServiceType:        serviceType,
 		ClusterDomain:      clusterDomain,
+		VolumeStorageClass: volumeStorageClass,
+		VolumeAccessMode:   volumeAccessMode,
 		TraefikAPIVersion:  traefikAPIVersion,
 		TraefikEntryPoints: traefikEntryPoints,
 		Kubernetes:         kubernetesSettings,

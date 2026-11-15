@@ -24,10 +24,10 @@
 }
 ```
 - Note: volume は project に属する永続ストレージ。deploy を削除してもデータは残り、別の deploy から再マウントできる
-- Note: sizeMB にはアカウントごとの上限(デフォルト 5GB = 5120MB)があり、超過した場合はエラーになる。上限はアカウントごとに個別設定可能で、デフォルトを超える上限が必要な場合は申請して引き上げる(申請の手段・承認フローは別途、アカウント管理側で設計する)
+- Note: sizeMB には上限(デフォルト 5GB = 5120MB。環境変数 VOLUME_MAX_SIZE_MB)があり、超過した場合は 400 になる。現在の上限は volume 1つあたりで、アカウントごとの個別設定は、認証のコンテナを作るときに設ける。上限はアカウントごとに個別設定可能で、デフォルトを超える上限が必要な場合は申請して引き上げる(申請の手段・承認フローは別途、アカウント管理側で設計する)
 - Note: status はボリューム自体の状態。"applying"(拡張の apply 中)| "active" | "failed"(拡張の反映に失敗)| "deleting"(削除中)。作成直後は "active"
 - Note: name は英数字とハイフンのみ、最大64文字(最小1文字(仮))。違反は 400。project 内で重複した場合は 409
-- Note: volume の実体は、環境変数で選んだ StorageClass の PVC。拡張(リサイズ)に対応した StorageClass が前提
+- Note: volume の実体は、環境変数(VOLUME_STORAGE_CLASS、空ならクラスターの既定)で選んだ StorageClass の PVC。拡張(リサイズ)に対応した StorageClass が前提。PVC は、作成の時点では作らず、最初にマウントを適用するとき(namespace がある状態)に、volume の現在の sizeMB で作る([docs/volume.md](../volume.md))
 - Note: project の status が "deleting" の間は volume を作成できず 409 を返す
 
 ### ボリューム一覧
@@ -127,10 +127,10 @@
 {}
 ```
 - Note: pending_sizeMB の内容を sizeMB に反映する処理(ストレージのリサイズ)を開始する。呼び出し自体は即座に応答するが、この時点ではまだ sizeMB は更新されていない。pending_sizeMB が null の場合は 409 を返す
-- Note: 呼び出し直後、volume の status は "applying" になる。この間 pending_sizeMB はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_sizeMB の値を使って先にストレージ側への反映を試み、その結果(成功・失敗)が確定した時点で初めて sizeMB を pending_sizeMB の内容に更新し、pending_sizeMB は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる
+- Note: 呼び出し直後、volume の status は "applying" になる。この間 pending_sizeMB はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_sizeMB の値を使って先にストレージ側への反映を試み、その結果(成功・失敗)が確定した時点で初めて sizeMB を pending_sizeMB の内容に更新し、pending_sizeMB は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる。失敗したときは、sizeMB は動いている値のまま変わらず、pending_sizeMB は試した値として残る(PVC は縮められないので、巻き戻しはしない。同じ値で再度 apply しても問題ない)。failed でも、拡張の保存・apply・discard・削除ができる
 - Note: このapplyは volume をマウントしている deploy のコンテナ再起動を伴わない(ストレージ側の変更のみ)
 - Note: 既に volume の status が "applying" の場合は 409 を返す(多重apply不可)。"deleting" の間も 409 を返す
-- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に反映完了が確認できない場合、強制的に status を "failed" に遷移させる
+- Note: PVC を拡張し、PVC の実際の容量(status.capacity)が新しい sizeMB になるのを待つ。300秒(5分) 以内に増えなければ、status を "failed" にする。PVC がまだ無い(一度もマウントされていない)ときは、何もせず成功する(最初のマウントのとき、新しい sizeMB で作られる)
 
 ### ボリューム 破棄
 - Post: /projects/:projectId/volumes/:volumeId/discard
@@ -157,7 +157,7 @@
 ```
 - Note: 呼び出すと即座に応答し、status は直ちに "deleting" になる。実体の削除は Workflow で非同期に行い、完了するとレコード自体が削除される(以後の GET は 404 を返す)
 - Note: deleting の間は、変更系の操作と再度の削除は 409 を返す。GET は status が "deleting" の状態を返す
-- Note: いずれかの deploy にマウント中の場合は 409 を返す(マウント解除してから削除する)
+- Note: いずれかの deploy にマウント中の場合は 409 を返す(マウント解除してから削除する)。まだ適用していない(pending_mounts にある)マウントも、マウント中として数える(適用の途中で PVC が消えるのを防ぐため)
 - Note: volume の status が "applying" の間は 409 を返す(進行中の拡張applyと排他制御する)
 - Note: project を削除すると、配下の volume は、マウントの有無にかかわらず、データごと削除される
 
@@ -215,12 +215,15 @@
 {}
 ```
 - Note: pending_mounts の内容を mounts に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ mounts は更新されていない。pending_mounts が無い場合は 409 を返す
-- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_mounts はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_mounts の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて mounts を pending_mounts の内容に更新し、pending_mounts は null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる(mounts の内容自体は失敗時も新しい値で上書きされる。実際に起動できているかは status で判断する)([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_mounts はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_mounts の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果(成功・失敗)が確定した時点で初めて mounts を pending_mounts の内容に更新し、pending_mounts は null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる。失敗したときは、Deployment を元の mounts に戻し、mounts は動いている値のまま変わらず、pending_mounts は試した値として残る([デプロイ詳細取得](deploys.md#デプロイ詳細取得) でポーリングして確認する)
 - Note: deploy の replicas が 0(status が "scaled_zero")のときは、再起動する Pod が無いのですぐに完了し、成功しても status は "active" ではなく "scaled_zero" に戻る。失敗は "failed" になる
 - Note: deploy の status が "deleting" の間は 409 を返す
-- Note: pending_mounts に含まれる volumeId の妥当性(同一project内のvolumeであること)は、apply実行時にも改めて検証する。マウント設定から適用までの間にvolume側の状態が変更される可能性があるため
+- Note: path は "/" で始まり、英数字と . _ - / だけの200文字以内で、"/" だけや ".." を含まない。同じ mountPath や volumeId は重複できない。mounts は10件まで。空の配列は、全て外す変更になる。保存の時点で、volume が同じ project にあり、削除中でないことを確かめ、不正なら 400
+- Note: pending_mounts に含まれる volumeId の妥当性(同一project内のvolumeであること、削除中でないこと)は、apply実行時にも改めて検証する(不正なら 409)。マウント設定から適用までの間にvolume側の状態が変更される可能性があるため
 - Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
-- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる
+- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、失敗として、Deployment を元の mounts に戻し、status を "failed" にする
+- Note: マウントを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。アクセスモードが ReadWriteOnce(VOLUME_ACCESS_MODE で選んだ場合)の volume は、別のノードの新しい Pod が、古い Pod が持ったままでは使えないため。既定の ReadWriteMany でも、PVC のアクセスモードの組み合わせによらず安全なように、同じ方式にしている。そのぶん、マウントの適用の間、短い停止がある。アクセスモードは、PVC の作成のときの値で決まり、あとから変えられない。ReadWriteOnce の volume は、replicas を 2 以上にして、別のノードに置くと、2つ目の Pod が起動できない
+- Note: PVC は、このapplyで、無ければ作る。volume を、複数の deploy にマウントすることもできる(同じ volume を、同じ deploy に2回は不可)
 
 ### デプロイ ボリュームマウント 破棄
 - Post: /deploy/:deployId/mounts/discard
