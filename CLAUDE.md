@@ -49,6 +49,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - **k8s の実際の状態(Pod、Deployment のレプリカ数など)を DB に書くのは、watcher だけ**(詳細は [docs/watcher.md](docs/watcher.md))。watcher は同時に1つだけ動かし、リーダー選出は PostgreSQL の advisory lock(`shared/leader`)で行う。
 - **プロジェクトの namespace は、NetworkPolicy で隔離する**(namespace の作成時に適用。詳細は [docs/network-isolation.md](docs/network-isolation.md))。外からの通信を中継する namespace(Traefik など)は、環境変数 `INGRESS_NAMESPACE` で許可する。
 - **ingress は、Traefik の IngressRoute として作る**(プロジェクトに属する。ホスト名は「形容詞-色-動物.ベースドメイン」で自動で払い出す。詳細は [docs/ingress.md](docs/ingress.md))。ベースドメインと払い出さない名前は、環境変数 `INGRESS_BASE_DOMAIN`、`INGRESS_RESERVED_SUBDOMAINS`。
+- **volume は、k8s の PVC として作る**(プロジェクトに属する。PVC は、最初にマウントを適用するときに作る。詳細は [docs/volume.md](docs/volume.md))。大きさの上限、StorageClass、アクセスモードは、環境変数 `VOLUME_MAX_SIZE_MB`、`VOLUME_STORAGE_CLASS`、`VOLUME_ACCESS_MODE`。
 - **状態による操作の可否と、状態を変える操作は、`shared/model` のメソッドに置く**(repository は、ロックして読む → メソッドを呼ぶ → 保存する、だけを行う。[docs/coding-conventions.md](docs/coding-conventions.md))。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
