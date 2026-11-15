@@ -34,11 +34,8 @@ type QuotaResponse struct {
 	// Deploys は、deploy の数。
 	Deploys QuotaItem `json:"deploys"`
 
-	// CPUMillicores は、deploy の CPU の合計(ミリコア)。
-	CPUMillicores QuotaItem `json:"cpuMillicores"`
-
-	// MemoryMiB は、deploy のメモリの合計(MiB)。
-	MemoryMiB QuotaItem `json:"memoryMiB"`
+	// Instances は、スペックの名前ごとの、インスタンス(replicas の合計)の数。
+	Instances map[string]QuotaItem `json:"instances"`
 
 	// Volumes は、volume の数。
 	Volumes QuotaItem `json:"volumes"`
@@ -85,11 +82,14 @@ func (quotaController *QuotaController) Get(echoContext *echo.Context) error {
 	if getError != nil {
 		return getError
 	}
+	instances := make(map[string]QuotaItem, len(report.Limits.MaxInstancesBySpec))
+	for specName, limit := range report.Limits.MaxInstancesBySpec {
+		instances[specName] = QuotaItem{Limit: limit, Used: report.Usage.InstancesBySpec[specName]}
+	}
 	return echoContext.JSON(http.StatusOK, QuotaResponse{
 		Projects:        QuotaItem{Limit: report.Limits.MaxProjects, Used: report.Usage.Projects},
 		Deploys:         QuotaItem{Limit: report.Limits.MaxDeploys, Used: report.Usage.Deploys},
-		CPUMillicores:   QuotaItem{Limit: report.Limits.MaxCPUMillicores, Used: report.Usage.CPUMillicores},
-		MemoryMiB:       QuotaItem{Limit: report.Limits.MaxMemoryMiB, Used: report.Usage.MemoryMiB},
+		Instances:       instances,
 		Volumes:         QuotaItem{Limit: report.Limits.MaxVolumes, Used: report.Usage.Volumes},
 		VolumeTotalMB:   QuotaItem{Limit: report.Limits.MaxVolumeTotalMB, Used: report.Usage.VolumeTotalMB},
 		MaxVolumeSizeMB: report.MaxVolumeSizeMB,

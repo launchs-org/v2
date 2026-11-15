@@ -97,7 +97,7 @@ func (Deploy) TableName() string {
 	return "deploys"
 }
 
-// DeploySpec は、deploy_specs テーブルの1行。スペック(small など)の CPU とメモリの大きさ。
+// DeploySpec は、deploy_specs テーブルの1行。スペック(small など)の CPU とメモリの大きさと、クォータの既定。
 type DeploySpec struct {
 	// Name は、スペックの名前(small、medium、large)。
 	Name string `gorm:"column:name;primaryKey"`
@@ -107,6 +107,9 @@ type DeploySpec struct {
 
 	// MemoryMiB は、メモリの大きさ(MiB)。
 	MemoryMiB int `gorm:"column:memory_mib"`
+
+	// DefaultMaxInstances は、1アカウントが動かせる、このスペックのインスタンス(replicas)の数の既定(クォータ)。
+	DefaultMaxInstances int `gorm:"column:default_max_instances"`
 }
 
 // TableName は、Gorm にテーブル名を教える。

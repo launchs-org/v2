@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,23 @@ func setQuotaOverride(testingT *testing.T, database *gorm.DB, userID string, col
 		testingT.Fatal(execError)
 	}
 	if execError := database.Exec(fmt.Sprintf("UPDATE account_quotas SET %s = ? WHERE user_id = ?", column), value, userID).Error; execError != nil {
+		testingT.Fatal(execError)
+	}
+}
+
+// setSpecQuotaOverride は、ユーザーごとの、スペックのインスタンス数の上限を設定する。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+//   - database: 保存先。
+//   - userID: ユーザー ID。
+//   - spec: スペックの名前。
+//   - value: 上限の値。
+func setSpecQuotaOverride(testingT *testing.T, database *gorm.DB, userID string, spec string, value int) {
+	// 失敗したとき、このヘルパーではなく呼び出し元の行が表示されるようにする。
+	testingT.Helper()
+	// 行を作る(あれば更新する)。
+	if execError := database.Exec("INSERT INTO account_spec_quotas (user_id, spec, max_instances) VALUES (?, ?, ?) ON CONFLICT (user_id, spec) DO UPDATE SET max_instances = EXCLUDED.max_instances", userID, spec, value).Error; execError != nil {
 		testingT.Fatal(execError)
 	}
 }
@@ -115,51 +133,71 @@ func TestQuotaProjectLimitIsRaceFree(testingT *testing.T) {
 	}
 }
 
-// TestQuotaDeployAndScale は、deploy の数、CPU の合計、メモリの合計の上限と、スケールの増加の判定(減らすのは確かめない)を確かめる。
+// TestQuotaDeployAndScale は、deploy の数と、スペックごとのインスタンス数の上限、スペックの既定とユーザーの上書き、
+// スケールの増加の判定(減らすのは確かめない)を確かめる。
 //
 // 引数:
 //   - testingT: 呼び出し元のテスト。
 func TestQuotaDeployAndScale(testingT *testing.T) {
-	// スペック small は、250 ミリコア、256 MiB。CPU の上限を 600 にする。
+	// small を3個までにする(replicas 1 の deploy を3つ作れる)。
 	database, deployRepository := newDeployTestEnvironment(testingT)
 	ctx := context.Background()
-	setQuotaOverride(testingT, database, "user-a", "max_cpu_millicores", 600)
-	// 2つ(合計 500)までは作れ、3つ目(750)は、CPU で conflict になる。
-	for number := 1; number <= 2; number++ {
+	setSpecQuotaOverride(testingT, database, "user-a", "small", 3)
+	// 3つまでは作れ、4つ目は、small のインスタンスの数で conflict になる。
+	for number := 1; number <= 3; number++ {
 		if createError := deployRepository.Create(ctx, newTestDeploy(number, "project-00000001", "user-a")); createError != nil {
 			testingT.Fatalf("%d つ目は作れるはず: %v", number, createError)
 		}
 	}
-	requireConflictContaining(testingT, deployRepository.Create(ctx, newTestDeploy(3, "project-00000001", "user-a")), "CPU の合計が上限(600ミリコア)")
-	// 状態を active にして、スケールを試す。増やす(1 → 2: 合計が 750)は conflict、変わらない。
+	requireConflictContaining(testingT, deployRepository.Create(ctx, newTestDeploy(4, "project-00000001", "user-a")), "small のインスタンスの合計が上限(3個)")
+	// 状態を active にして、スケールを試す。増やす(1 → 2: 合計 4)は conflict で、変わらない。
 	database.Exec("UPDATE deploys SET status = 'active'")
 	_, scaleError := deployRepository.BeginScale(ctx, "user-a", "deploy-00000001", 2)
-	requireConflictContaining(testingT, scaleError, "CPU の合計")
+	requireConflictContaining(testingT, scaleError, "small のインスタンスの合計")
 	unchanged, _ := deployRepository.FindByID(ctx, "user-a", "deploy-00000001")
 	if unchanged.Replicas != 1 || unchanged.Status != model.DeployStatusActive {
 		testingT.Fatalf("超えたときは、変わらないはず: %d %s", unchanged.Replicas, unchanged.Status)
 	}
-	// 減らす(0 にする)ときは確かめず、空いた分で、増やせる(2つ目を 0 にしたあと、1つ目を 2 にする: 合計 500)。
+	// 減らす(0 にする)ときは確かめず、空いた分で、増やせる(2つ目を 0 にしたあと、1つ目を 2 にする: 合計 3)。
 	if _, downError := deployRepository.BeginScale(ctx, "user-a", "deploy-00000002", 0); downError != nil {
 		testingT.Fatalf("減らせるはず: %v", downError)
 	}
 	if _, upError := deployRepository.BeginScale(ctx, "user-a", "deploy-00000001", 2); upError != nil {
 		testingT.Fatalf("空いた分で、増やせるはず: %v", upError)
 	}
-	// deleting の deploy は数えない: 1つ目を deleting にすると、新しく作れる。
+	// deleting の deploy は数えない: 1つ目(2個)を deleting にすると、新しく作れる。
 	database.Exec("UPDATE deploys SET status = 'deleting' WHERE id = 'deploy-00000001'")
-	if createError := deployRepository.Create(ctx, newTestDeploy(3, "project-00000001", "user-a")); createError != nil {
+	if createError := deployRepository.Create(ctx, newTestDeploy(4, "project-00000001", "user-a")); createError != nil {
 		testingT.Fatalf("deleting を数えないので、作れるはず: %v", createError)
 	}
-	// メモリの上限(256 MiB の small は、300 までに1つ)と、deploy の数の上限も確かめる。
-	setQuotaOverride(testingT, database, "user-a", "max_memory_mib", 300)
+	// 他のスペックは、別々に数える。large は、スペックの既定(5個)に従い、ユーザーの上書き(1個)で置き換わる。
+	large := func(number int, replicas int) *model.Deploy {
+		deploy := newTestDeploy(number, "project-00000001", "user-a")
+		deploy.Spec, deploy.Replicas = "large", replicas
+		return deploy
+	}
+	if createError := deployRepository.Create(ctx, large(5, 5)); createError != nil {
+		testingT.Fatalf("large は既定で 5 個まで作れるはず: %v", createError)
+	}
+	requireConflictContaining(testingT, deployRepository.Create(ctx, large(6, 1)), "large のインスタンスの合計が上限(5個)")
+	database.Exec("DELETE FROM deploys WHERE id = 'deploy-00000005'")
+	setSpecQuotaOverride(testingT, database, "user-a", "large", 1)
+	requireConflictContaining(testingT, deployRepository.Create(ctx, large(5, 2)), "large のインスタンスの合計が上限(1個)")
+	if createError := deployRepository.Create(ctx, large(5, 1)); createError != nil {
+		testingT.Fatalf("1個なら作れるはず: %v", createError)
+	}
+	// 存在しないスペックは、クォータではなく、リクエストの値の不正(400)。
+	unknown := newTestDeploy(7, "project-00000001", "user-a")
+	unknown.Spec = "unknown"
+	if unknownError := deployRepository.Create(ctx, unknown); apperror.KindOf(unknownError) != apperror.KindInvalidRequest {
+		testingT.Fatalf("存在しないスペックは 400 のはず: %v", unknownError)
+	}
+	// deploy の数の上限も確かめる(いまの deploy を全て消して、上限を1にする)。
 	database.Exec("DELETE FROM deploys")
+	setQuotaOverride(testingT, database, "user-a", "max_deploys", 1)
 	if createError := deployRepository.Create(ctx, newTestDeploy(1, "project-00000001", "user-a")); createError != nil {
 		testingT.Fatalf("1つ目は作れるはず: %v", createError)
 	}
-	requireConflictContaining(testingT, deployRepository.Create(ctx, newTestDeploy(2, "project-00000001", "user-a")), "メモリの合計が上限(300MiB)")
-	setQuotaOverride(testingT, database, "user-a", "max_memory_mib", 100000)
-	setQuotaOverride(testingT, database, "user-a", "max_deploys", 1)
 	requireConflictContaining(testingT, deployRepository.Create(ctx, newTestDeploy(2, "project-00000001", "user-a")), "deploy の数が上限(1)")
 }
 
@@ -232,22 +270,24 @@ func TestQuotaRepositoryGet(testingT *testing.T) {
 	volumeRepository := NewVolumeRepository(database)
 	_ = volumeRepository.Create(ctx, &model.Volume{ID: "volume-00000001", ProjectID: "project-00000001", UserID: "user-a", Name: "data", SizeMB: 60})
 	_ = volumeRepository.SavePendingSize(ctx, "user-a", "project-00000001", "volume-00000001", 90, 5120)
-	// 取得する(上書きは、メモリだけ)。
-	setQuotaOverride(testingT, database, "user-a", "max_memory_mib", 1000)
+	// 取得する(上書きは、small のインスタンス数だけ)。
+	setSpecQuotaOverride(testingT, database, "user-a", "small", 7)
 	limits, usage, getError := NewQuotaRepository(database).Get(ctx, "user-a")
 	if getError != nil {
 		testingT.Fatal(getError)
 	}
-	expectedLimits := model.QuotaLimits{MaxProjects: 10, MaxDeploys: 20, MaxCPUMillicores: 4000, MaxMemoryMiB: 1000, MaxVolumes: 10, MaxVolumeTotalMB: 20480}
-	expectedUsage := model.QuotaUsage{Projects: 1, Deploys: 1, CPUMillicores: 500, MemoryMiB: 512, Volumes: 1, VolumeTotalMB: 90}
-	if limits != expectedLimits || usage != expectedUsage {
-		testingT.Fatalf("上限と使用量が違う:\n上限 %+v\n使用量 %+v", limits, usage)
+	expectedInstanceLimits := map[string]int{"small": 7, "medium": 10, "large": 5}
+	if limits.MaxProjects != 10 || limits.MaxDeploys != 20 || limits.MaxVolumes != 10 || limits.MaxVolumeTotalMB != 20480 || !reflect.DeepEqual(limits.MaxInstancesBySpec, expectedInstanceLimits) {
+		testingT.Fatalf("上限が違う: %+v", limits)
+	}
+	if usage.Projects != 1 || usage.Deploys != 1 || usage.Volumes != 1 || usage.VolumeTotalMB != 90 || !reflect.DeepEqual(usage.InstancesBySpec, map[string]int{"small": 2}) {
+		testingT.Fatalf("使用量が違う: %+v", usage)
 	}
 	// 何もしていないユーザーは、全て既定で、使用量は 0。読むだけなので、行は作らない。
 	otherLimits, otherUsage, _ := NewQuotaRepository(database).Get(ctx, "user-new")
 	var rows int64
 	database.Model(&model.AccountQuota{}).Where("user_id = ?", "user-new").Count(&rows)
-	if otherLimits.MaxMemoryMiB != 8192 || otherUsage != (model.QuotaUsage{}) || rows != 0 {
+	if otherLimits.MaxInstancesBySpec["small"] != 20 || otherUsage.Projects != 0 || otherUsage.Deploys != 0 || len(otherUsage.InstancesBySpec) != 0 || rows != 0 {
 		testingT.Fatalf("既定で、使用量 0、行は作らないはず: %+v %+v %d", otherLimits, otherUsage, rows)
 	}
 }
