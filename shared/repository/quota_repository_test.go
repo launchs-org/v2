@@ -291,3 +291,123 @@ func TestQuotaRepositoryGet(testingT *testing.T) {
 		testingT.Fatalf("既定で、使用量 0、行は作らないはず: %+v %+v %d", otherLimits, otherUsage, rows)
 	}
 }
+
+// TestQuotaRepositoryOverrides は、上書きの設定が、一式の置き換えであること(指定しなかった項目は既定に戻る)、
+// 上限に反映されること、不正な値や存在しないスペックを拒否して何も変えないこと、
+// 使用量が新しい上限を超えても消さず新しく作れないだけであること、他のユーザーに影響しないことを確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestQuotaRepositoryOverrides(testingT *testing.T) {
+	// プロジェクトを2つ持つユーザーを用意する。
+	database, deployRepository := newDeployTestEnvironment(testingT)
+	projectRepository := NewProjectRepository(database)
+	quotaRepository := NewQuotaRepository(database)
+	ctx := context.Background()
+	if createError := projectRepository.Create(ctx, newTestProject(2, "user-a", time.Now())); createError != nil {
+		testingT.Fatal(createError)
+	}
+	two, three := 2, 3
+	// 最初は、上書きが無い(全て既定)。
+	if overrides, getError := quotaRepository.GetOverrides(ctx, "user-a"); getError != nil || overrides.MaxProjects != nil || len(overrides.MaxDeploysBySpec) != 0 {
+		testingT.Fatalf("上書きは無いはず: %+v %v", overrides, getError)
+	}
+	// 設定すると、上限に反映され、読み戻せる。
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{MaxProjects: &three, MaxDeploysBySpec: map[string]int{"large": 7}}); setError != nil {
+		testingT.Fatalf("設定できるはず: %v", setError)
+	}
+	limits, _, _ := quotaRepository.Get(ctx, "user-a")
+	if limits.MaxProjects != 3 || limits.MaxDeploysBySpec["large"] != 7 || limits.MaxDeploysBySpec["small"] != 20 || limits.MaxDeploys != 20 {
+		testingT.Fatalf("上限に反映されるはず: %+v", limits)
+	}
+	overrides, _ := quotaRepository.GetOverrides(ctx, "user-a")
+	if overrides.MaxProjects == nil || *overrides.MaxProjects != 3 || overrides.MaxDeploysBySpec["large"] != 7 {
+		testingT.Fatalf("読み戻せるはず: %+v", overrides)
+	}
+	// 一式の置き換え: projects を指定せず、small だけを指定すると、projects と large は既定に戻る。
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{MaxDeploysBySpec: map[string]int{"small": 1}}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	limits, _, _ = quotaRepository.Get(ctx, "user-a")
+	if limits.MaxProjects != 10 || limits.MaxDeploysBySpec["large"] != 5 || limits.MaxDeploysBySpec["small"] != 1 {
+		testingT.Fatalf("指定しなかった項目は、既定に戻るはず: %+v", limits)
+	}
+	// 不正な値と、存在しないスペックは、400 で、何も変えない。
+	negative := -1
+	for name, invalid := range map[string]model.QuotaOverrides{
+		"負の値": {MaxProjects: &negative}, "存在しないスペック": {MaxDeploysBySpec: map[string]int{"huge": 1}}, "スペックの値が負": {MaxDeploysBySpec: map[string]int{"small": -1}},
+	} {
+		if setError := quotaRepository.SetOverrides(ctx, "user-a", invalid); apperror.KindOf(setError) != apperror.KindInvalidRequest {
+			testingT.Errorf("%s: 400 のはず: %v", name, setError)
+		}
+	}
+	if after, _, _ := quotaRepository.Get(ctx, "user-a"); after.MaxDeploysBySpec["small"] != 1 || after.MaxProjects != 10 {
+		testingT.Fatalf("拒否したら、変わらないはず: %+v", after)
+	}
+	// 使用量(プロジェクト2つ)より小さい上限にしても、消えない。新しく作れないだけ。
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{MaxProjects: &two, MaxDeploys: &two}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	one := 1
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{MaxProjects: &one}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	var projectCount int64
+	database.Model(&model.Project{}).Where("user_id = ?", "user-a").Count(&projectCount)
+	if projectCount != 2 {
+		testingT.Fatalf("既存のプロジェクトは消えないはず: %d", projectCount)
+	}
+	requireConflictContaining(testingT, projectRepository.Create(ctx, newTestProject(3, "user-a", time.Now())), "プロジェクトの数が上限(1)")
+	// 0 にすると、そのスペックの deploy を作れなくなる。上書きを外す(空で置き換える)と、また作れる。
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{MaxDeploysBySpec: map[string]int{"small": 0}}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	requireConflictContaining(testingT, deployRepository.Create(ctx, newTestDeploy(1, "project-00000001", "user-a")), "small の deploy の数が上限(0)")
+	if setError := quotaRepository.SetOverrides(ctx, "user-a", model.QuotaOverrides{}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	if createError := deployRepository.Create(ctx, newTestDeploy(1, "project-00000001", "user-a")); createError != nil {
+		testingT.Fatalf("既定に戻れば、作れるはず: %v", createError)
+	}
+	// 他のユーザーには影響しない。
+	if other, _, _ := quotaRepository.Get(ctx, "user-b"); other.MaxProjects != 10 {
+		testingT.Fatalf("他のユーザーは既定のはず: %+v", other)
+	}
+}
+
+// TestQuotaOverridesRaceWithCreate は、上限の設定と、同じユーザーの作成が、同時に起きても、エラーや上限超過にならないことを確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestQuotaOverridesRaceWithCreate(testingT *testing.T) {
+	// 上限を3にして、プロジェクトの作成12個と、上限の設定(同じ値)を、同時に行う。
+	database := testdatabase.New(testingT)
+	projectRepository := NewProjectRepository(database)
+	quotaRepository := NewQuotaRepository(database)
+	three := 3
+	if setError := quotaRepository.SetOverrides(context.Background(), "user-a", model.QuotaOverrides{MaxProjects: &three}); setError != nil {
+		testingT.Fatal(setError)
+	}
+	var group sync.WaitGroup
+	var setFailures atomic.Int64
+	for number := 1; number <= 12; number++ {
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			_ = projectRepository.Create(context.Background(), newTestProject(number, "user-a", time.Now()))
+		}()
+		go func() {
+			defer group.Done()
+			if setError := quotaRepository.SetOverrides(context.Background(), "user-a", model.QuotaOverrides{MaxProjects: &three}); setError != nil {
+				setFailures.Add(1)
+			}
+		}()
+	}
+	group.Wait()
+	// 設定は全て成功し、プロジェクトは、ちょうど3つ。
+	var stored int64
+	database.Model(&model.Project{}).Where("user_id = ?", "user-a").Count(&stored)
+	if setFailures.Load() != 0 || stored != 3 {
+		testingT.Fatalf("設定は全て成功し、プロジェクトは3つのはず: 失敗 %d、保存 %d", setFailures.Load(), stored)
+	}
+}
