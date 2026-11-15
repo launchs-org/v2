@@ -57,13 +57,13 @@ type KubernetesVolumeOperator struct {
 //
 // 引数:
 //   - clientset: k8s のクライアント。
-//   - settings: StorageClass とアクセスモード。アクセスモードが空なら ReadWriteOnce。
+//   - settings: StorageClass とアクセスモード。アクセスモードが空なら ReadWriteMany。
 //
 // 戻り値:
 //   - 作成した KubernetesVolumeOperator。
 func NewKubernetesVolumeOperator(clientset kubernetes.Interface, settings VolumeSettings) *KubernetesVolumeOperator {
-	// アクセスモードの既定は、ReadWriteOnce。
-	accessMode := corev1.ReadWriteOnce
+	// アクセスモードの既定は、ReadWriteMany(複数のノードの Pod から、同時に使える)。
+	accessMode := corev1.ReadWriteMany
 	if settings.AccessMode != "" {
 		accessMode = corev1.PersistentVolumeAccessMode(settings.AccessMode)
 	}

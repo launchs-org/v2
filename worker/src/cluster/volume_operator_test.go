@@ -44,23 +44,23 @@ func TestKubernetesVolumeOperatorEnsure(testingT *testing.T) {
 
 	testingT.Run("PVC を作り、大きさ(MiB)・アクセスモード・StorageClass が設定される", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
-		if ensureError := newTestVolumeOperator(fakeClientset, VolumeSettings{StorageClass: "longhorn", AccessMode: "ReadWriteMany"}).EnsureVolumeClaim(ctx, definition); ensureError != nil {
+		if ensureError := newTestVolumeOperator(fakeClientset, VolumeSettings{StorageClass: "longhorn", AccessMode: "ReadWriteOnce"}).EnsureVolumeClaim(ctx, definition); ensureError != nil {
 			subTest.Fatalf("作れるはず: %v", ensureError)
 		}
 		claim, _ := fakeClientset.CoreV1().PersistentVolumeClaims(validNamespaceName).Get(ctx, testVolumeName, metav1.GetOptions{})
 		storage := claim.Spec.Resources.Requests[corev1.ResourceStorage]
-		if storage.Value() != 1024*1024*1024 || claim.Spec.AccessModes[0] != corev1.ReadWriteMany || claim.Spec.StorageClassName == nil || *claim.Spec.StorageClassName != "longhorn" {
+		if storage.Value() != 1024*1024*1024 || claim.Spec.AccessModes[0] != corev1.ReadWriteOnce || claim.Spec.StorageClassName == nil || *claim.Spec.StorageClassName != "longhorn" {
 			subTest.Errorf("内容が違う: %+v", claim.Spec)
 		}
 		if claim.Labels[projectIDLabel] != validNamespaceName {
 			subTest.Errorf("プロジェクトのラベルが付くはず: %v", claim.Labels)
 		}
 	})
-	testingT.Run("StorageClass が空なら指定せず(既定を使う)、アクセスモードの既定は ReadWriteOnce", func(subTest *testing.T) {
+	testingT.Run("StorageClass が空なら指定せず(既定を使う)、アクセスモードの既定は ReadWriteMany", func(subTest *testing.T) {
 		fakeClientset := fake.NewSimpleClientset()
 		_ = newTestVolumeOperator(fakeClientset, VolumeSettings{}).EnsureVolumeClaim(ctx, definition)
 		claim, _ := fakeClientset.CoreV1().PersistentVolumeClaims(validNamespaceName).Get(ctx, testVolumeName, metav1.GetOptions{})
-		if claim.Spec.StorageClassName != nil || claim.Spec.AccessModes[0] != corev1.ReadWriteOnce {
+		if claim.Spec.StorageClassName != nil || claim.Spec.AccessModes[0] != corev1.ReadWriteMany {
 			subTest.Errorf("既定のはず: %+v", claim.Spec)
 		}
 	})

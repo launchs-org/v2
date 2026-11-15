@@ -17,12 +17,13 @@ API の仕様は [endpoints/volumes.md](endpoints/volumes.md)、呼び出しの�
 |---|---|---|---|
 | `VOLUME_MAX_SIZE_MB` | backend | 5120 | volume 1つの大きさの上限(MB)。アカウントごとの上限は、認証のコンテナを作るときに設ける |
 | `VOLUME_STORAGE_CLASS` | worker | (空) | PVC の StorageClass。空なら、クラスターの既定。**拡張に対応したものが前提** |
-| `VOLUME_ACCESS_MODE` | worker | `ReadWriteOnce` | PVC のアクセスモード(`ReadWriteOnce` か `ReadWriteMany`) |
+| `VOLUME_ACCESS_MODE` | worker | `ReadWriteMany` | PVC のアクセスモード(`ReadWriteMany` か `ReadWriteOnce`)。作成済みの PVC には効かない(k8s がアクセスモードの変更を許さない) |
 
 ## 利用者が知っておくこと
 
 - 大きさの単位は、MB と書いているが、実際は MiB で PVC を作る。
-- **ReadWriteOnce(既定)の volume は、1つのノードにしか付けられない**。replicas を 2 以上にして、Pod が別のノードに置かれると、2つ目以降の Pod が起動できない。複数の Pod で共有したいときは `ReadWriteMany`(対応する StorageClass、例: Longhorn の RWX)を使う。
+- **既定は ReadWriteMany**(複数のノードの Pod から、同時に使える。replicas を 2 以上にしても、deploy をまたいで同じ volume をマウントしても動く)。StorageClass が RWX に対応している必要がある(Longhorn は、NFS で提供する。ノードに NFS クライアントが要る)。書き込みの排他は、利用者のアプリが行う。
+- `VOLUME_ACCESS_MODE=ReadWriteOnce` にすると、volume は 1つのノードにしか付けられない。replicas を 2 以上にして、Pod が別のノードに置かれると、2つ目以降の Pod が起動できない。
 - マウントを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。マウントの適用の間は、短く止まる。
 - コンテナのユーザーが root でないとき、ボリュームに書けないことがある(所有者は、StorageClass とイメージ次第)。fsGroup は設定していない。
 
@@ -41,3 +42,5 @@ VOLUME_STORAGE_CLASS=longhorn task up:k8s
 確認した流れ: volume を作る(PVC は無い)→ マウントを適用(PVC が `Bound`、Deployment が Recreate)→ ファイルを書く → マウント中の削除は 409 →
 拡張して apply(PVC の要求と容量が 2Gi、Pod の中の `df` も増える、ファイルは残る)→ マウントを外す → 別の path に付け直すと、ファイルが残っている →
 外して volume を削除(PVC とレコードが消える)→ プロジェクトを削除。
+
+ReadWriteMany(既定)は、replicas を 3 にして、3つのノードに Pod を置き、1つの Pod が書いたファイルを、全ての Pod が読めることも確認した。
