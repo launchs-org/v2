@@ -8,6 +8,7 @@ import (
 
 	"launchs/backend/src/middlewares"
 	"launchs/backend/src/service"
+	"launchs/shared/model"
 )
 
 // QuotaUseCase は、QuotaController が呼ぶ、上限と使用量の取得。
@@ -34,8 +35,11 @@ type QuotaResponse struct {
 	// Deploys は、deploy の数。
 	Deploys QuotaItem `json:"deploys"`
 
-	// Instances は、スペックの名前ごとの、インスタンス(replicas の合計)の数。
-	Instances map[string]QuotaItem `json:"instances"`
+	// DeploysBySpec は、スペックの名前ごとの、deploy の数。
+	DeploysBySpec map[string]QuotaItem `json:"deploysBySpec"`
+
+	// MaxReplicas は、1つの deploy のレプリカ数(スケール)の最大。クォータとは別で、全体で同じ。
+	MaxReplicas int `json:"maxReplicas"`
 
 	// Volumes は、volume の数。
 	Volumes QuotaItem `json:"volumes"`
@@ -82,14 +86,15 @@ func (quotaController *QuotaController) Get(echoContext *echo.Context) error {
 	if getError != nil {
 		return getError
 	}
-	instances := make(map[string]QuotaItem, len(report.Limits.MaxInstancesBySpec))
-	for specName, limit := range report.Limits.MaxInstancesBySpec {
-		instances[specName] = QuotaItem{Limit: limit, Used: report.Usage.InstancesBySpec[specName]}
+	deploysBySpec := make(map[string]QuotaItem, len(report.Limits.MaxDeploysBySpec))
+	for specName, limit := range report.Limits.MaxDeploysBySpec {
+		deploysBySpec[specName] = QuotaItem{Limit: limit, Used: report.Usage.DeploysBySpec[specName]}
 	}
 	return echoContext.JSON(http.StatusOK, QuotaResponse{
 		Projects:        QuotaItem{Limit: report.Limits.MaxProjects, Used: report.Usage.Projects},
 		Deploys:         QuotaItem{Limit: report.Limits.MaxDeploys, Used: report.Usage.Deploys},
-		Instances:       instances,
+		DeploysBySpec:   deploysBySpec,
+		MaxReplicas:     model.MaxReplicas,
 		Volumes:         QuotaItem{Limit: report.Limits.MaxVolumes, Used: report.Usage.Volumes},
 		VolumeTotalMB:   QuotaItem{Limit: report.Limits.MaxVolumeTotalMB, Used: report.Usage.VolumeTotalMB},
 		MaxVolumeSizeMB: report.MaxVolumeSizeMB,

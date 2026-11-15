@@ -13,7 +13,7 @@ import (
 
 // countUsage は、ユーザーの使用量を数える。数え方は docs/auth.md §8.2。
 //
-// プロジェクトと deploy は deleting 以外、volume は全て数える。スペックごとのインスタンスの数や、volume の大きさの足し算は、モデルのメソッドに任せる。
+// プロジェクトと deploy は deleting 以外、volume は全て数える。スペックごとの deploy の数や、volume の大きさの足し算は、モデルのメソッドに任せる。
 // どの操作も、クォータの行をロックしてから呼ぶので、数えている間に、同じユーザーの作成・拡張は入り込まない。
 //
 // 引数:
@@ -31,13 +31,13 @@ func countUsage(database *gorm.DB, userID string) (model.QuotaUsage, error) {
 		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", countError)
 	}
 	usage.Projects = int(projectCount)
-	// deploy を読んで、数と、スペックごとのインスタンスの数を足す(deleting 以外)。
+	// deploy を読んで、数と、スペックごとの数を足す(deleting 以外。replicas は数えない)。
 	var deploys []model.Deploy
-	if findError := database.Select("spec", "replicas").Where("user_id = ? AND status <> ?", userID, model.DeployStatusDeleting).Find(&deploys).Error; findError != nil {
+	if findError := database.Select("spec").Where("user_id = ? AND status <> ?", userID, model.DeployStatusDeleting).Find(&deploys).Error; findError != nil {
 		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", findError)
 	}
 	for _, deploy := range deploys {
-		usage.AddDeploy(deploy.Spec, deploy.Replicas)
+		usage.AddDeploy(deploy.Spec)
 	}
 	// volume を読んで、数と、大きさを足す(全て)。
 	var volumes []model.Volume

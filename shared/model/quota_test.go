@@ -27,15 +27,15 @@ func intPointer(value int) *int {
 func TestQuotaLimitsFor(testingT *testing.T) {
 	// 既定に、2項目だけの上書きと、large だけの上書きを重ねる。
 	defaults := QuotaDefaults{MaxProjects: 10, MaxDeploys: 20, MaxVolumes: 10, MaxVolumeTotalMB: 20480}
-	specs := []DeploySpec{{Name: "small", DefaultMaxInstances: 20}, {Name: "large", DefaultMaxInstances: 5}}
-	limits := defaults.LimitsFor(AccountQuota{MaxProjects: intPointer(0), MaxDeploys: intPointer(99)}, specs, []AccountSpecQuota{{Spec: "large", MaxInstances: 1}})
+	specs := []DeploySpec{{Name: "small", DefaultMaxDeploys: 20}, {Name: "large", DefaultMaxDeploys: 5}}
+	limits := defaults.LimitsFor(AccountQuota{MaxProjects: intPointer(0), MaxDeploys: intPointer(99)}, specs, []AccountSpecQuota{{Spec: "large", MaxDeploys: 1}})
 	// 上書きした項目だけが変わる。
 	if limits.MaxProjects != 0 || limits.MaxDeploys != 99 || limits.MaxVolumes != 10 || limits.MaxVolumeTotalMB != 20480 {
 		testingT.Fatalf("上書きした項目だけ変わるはず: %+v", limits)
 	}
 	// スペックごとの上限は、large だけが上書きされる(small は、スペックの既定)。
-	if limits.MaxInstancesBySpec["small"] != 20 || limits.MaxInstancesBySpec["large"] != 1 || len(limits.MaxInstancesBySpec) != 2 {
-		testingT.Fatalf("large だけ上書きされるはず: %v", limits.MaxInstancesBySpec)
+	if limits.MaxDeploysBySpec["small"] != 20 || limits.MaxDeploysBySpec["large"] != 1 || len(limits.MaxDeploysBySpec) != 2 {
+		testingT.Fatalf("large だけ上書きされるはず: %v", limits.MaxDeploysBySpec)
 	}
 }
 
@@ -44,8 +44,8 @@ func TestQuotaLimitsFor(testingT *testing.T) {
 // 引数:
 //   - testingT: 呼び出し元のテスト。
 func TestQuotaChecks(testingT *testing.T) {
-	// 上限(small は 3 個まで、large は 1 個まで)を用意する。
-	limits := QuotaLimits{MaxProjects: 2, MaxDeploys: 2, MaxVolumes: 2, MaxVolumeTotalMB: 100, MaxInstancesBySpec: map[string]int{"small": 3, "large": 1}}
+	// 上限(deploy は合計 4 個、small は 3 個まで、large は 1 個まで)を用意する。
+	limits := QuotaLimits{MaxProjects: 2, MaxDeploys: 4, MaxVolumes: 2, MaxVolumeTotalMB: 100, MaxDeploysBySpec: map[string]int{"small": 3, "large": 1}}
 	// ケースごとに、判定の結果と、メッセージに含まれる文字列(通るなら空)を並べる。
 	testCases := []struct {
 		name  string
@@ -54,15 +54,11 @@ func TestQuotaChecks(testingT *testing.T) {
 	}{
 		{"プロジェクト: 上限未満", limits.CheckProjectCreate(QuotaUsage{Projects: 1}), ""},
 		{"プロジェクト: 上限に達している", limits.CheckProjectCreate(QuotaUsage{Projects: 2}), "プロジェクトの数が上限(2)に達しています(使用中 2)"},
-		{"deploy: ちょうど上限に収まる", limits.CheckDeployCreate(QuotaUsage{Deploys: 1, InstancesBySpec: map[string]int{"small": 2}}, "small", 1), ""},
-		{"deploy: 数が上限", limits.CheckDeployCreate(QuotaUsage{Deploys: 2}, "small", 1), "deploy の数が上限(2)"},
-		{"deploy: スペックの数が超える", limits.CheckDeployCreate(QuotaUsage{Deploys: 1, InstancesBySpec: map[string]int{"large": 1}}, "large", 1), "large のインスタンスの合計が上限(1個)を超えます(使用中 1、追加 1)"},
-		{"deploy: 他のスペックの使用量は影響しない", limits.CheckDeployCreate(QuotaUsage{Deploys: 1, InstancesBySpec: map[string]int{"large": 1}}, "small", 1), ""},
-		{"deploy: レプリカ数の分だけ増える", limits.CheckDeployCreate(QuotaUsage{}, "small", 4), "small のインスタンスの合計"},
-		{"deploy: 上限が無いスペックは 0 個", limits.CheckDeployCreate(QuotaUsage{}, "huge", 1), "huge のインスタンスの合計が上限(0個)"},
-		{"deploy: レプリカ 0 なら、上限 0 でも作れる", limits.CheckDeployCreate(QuotaUsage{}, "huge", 0), ""},
-		{"スケール: 収まる", limits.CheckScaleUp(QuotaUsage{InstancesBySpec: map[string]int{"small": 2}}, "small", 1), ""},
-		{"スケール: 超える", limits.CheckScaleUp(QuotaUsage{InstancesBySpec: map[string]int{"small": 2}}, "small", 2), "small のインスタンスの合計"},
+		{"deploy: 最後の1つは作れる", limits.CheckDeployCreate(QuotaUsage{Deploys: 3, DeploysBySpec: map[string]int{"small": 2}}, "small"), ""},
+		{"deploy: 合計の数が上限", limits.CheckDeployCreate(QuotaUsage{Deploys: 4, DeploysBySpec: map[string]int{"small": 1}}, "small"), "deploy の数が上限(4)に達しています(使用中 4)"},
+		{"deploy: スペックの数が上限", limits.CheckDeployCreate(QuotaUsage{Deploys: 1, DeploysBySpec: map[string]int{"large": 1}}, "large"), "large の deploy の数が上限(1)に達しています(使用中 1)"},
+		{"deploy: 他のスペックの使用量は影響しない", limits.CheckDeployCreate(QuotaUsage{Deploys: 1, DeploysBySpec: map[string]int{"large": 1}}, "small"), ""},
+		{"deploy: 上限が無いスペックは 0 個", limits.CheckDeployCreate(QuotaUsage{}, "huge"), "huge の deploy の数が上限(0)"},
 		{"volume: 収まる", limits.CheckVolumeCreate(QuotaUsage{Volumes: 1, VolumeTotalMB: 60}, 40), ""},
 		{"volume: 数が上限", limits.CheckVolumeCreate(QuotaUsage{Volumes: 2}, 1), "volume の数が上限(2)"},
 		{"volume: 大きさが超える", limits.CheckVolumeCreate(QuotaUsage{Volumes: 1, VolumeTotalMB: 60}, 41), "volume の大きさの合計が上限(100MB)を超えます(使用中 60、追加 41)"},
@@ -98,20 +94,20 @@ func TestVolumeReservedMB(testingT *testing.T) {
 	}
 }
 
-// TestQuotaUsageAdd は、deploy と volume を足して、数・スペックごとのインスタンス数・大きさ(予約)が求まることを確かめる。
+// TestQuotaUsageAdd は、deploy と volume を足して、数・スペックごとの deploy の数・大きさ(予約)が求まることを確かめる。
 //
 // 引数:
 //   - testingT: 呼び出し元のテスト。
 func TestQuotaUsageAdd(testingT *testing.T) {
-	// 2レプリカの small、1レプリカの small、0レプリカの large、60MB(pending 90)と 10MB の volume を足す。
+	// small を2つ、large を1つ、60MB(pending 90)と 10MB の volume を足す。
 	var usage QuotaUsage
-	usage.AddDeploy("small", 2)
-	usage.AddDeploy("small", 1)
-	usage.AddDeploy("large", 0)
+	usage.AddDeploy("small")
+	usage.AddDeploy("small")
+	usage.AddDeploy("large")
 	usage.AddVolume(&Volume{SizeMB: 60, PendingSizeMB: intPointer(90)})
 	usage.AddVolume(&Volume{SizeMB: 10})
-	// 数と合計が、期待どおりになる(large は、レプリカ 0 なので、0 個)。
-	if usage.Deploys != 3 || usage.InstancesBySpec["small"] != 3 || usage.InstancesBySpec["large"] != 0 || usage.Volumes != 2 || usage.VolumeTotalMB != 100 {
+	// 数と合計が、期待どおりになる。
+	if usage.Deploys != 3 || usage.DeploysBySpec["small"] != 2 || usage.DeploysBySpec["large"] != 1 || usage.Volumes != 2 || usage.VolumeTotalMB != 100 {
 		testingT.Fatalf("使用量が違う: %+v", usage)
 	}
 }

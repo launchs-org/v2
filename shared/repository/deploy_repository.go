@@ -67,7 +67,7 @@ func (deployRepository *DeployRepository) FindSpec(requestContext context.Contex
 //   - requestContext: キャンセルや期限を伝える context。
 //   - deploy: 保存する deploy。ID は、呼び出し側で作っておく。
 //
-// 保存の前に、ユーザーのクォータ(deploy の数、スペックのインスタンスの数)も、行をロックして確かめる。
+// 保存の前に、ユーザーのクォータ(deploy の合計の数、スペックごとの deploy の数)も、行をロックして確かめる。
 //
 // 戻り値:
 //   - プロジェクトが無い、または他のユーザーのものなら not_found。
@@ -110,8 +110,8 @@ func (deployRepository *DeployRepository) Create(requestContext context.Context,
 			}
 			return apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", specError)
 		}
-		// deploy の数と、スペックのインスタンスの数が、上限に収まるかを確かめる。
-		if limitError := limits.CheckDeployCreate(usage, spec.Name, deploy.Replicas); limitError != nil {
+		// deploy の合計の数と、そのスペックの deploy の数が、上限に収まるかを確かめる。
+		if limitError := limits.CheckDeployCreate(usage, spec.Name); limitError != nil {
 			return limitError
 		}
 
