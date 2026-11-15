@@ -48,14 +48,14 @@ func withIngressDefaults(expected BackendConfig) BackendConfig {
 func TestLoadBackendConfigIngress(testingT *testing.T) {
 	// 値を指定すると、既定値を置き換える(空の要素と前後の空白は捨てる)。
 	loaded, loadError := LoadBackendConfig(newTestReader(map[string]string{
-		"DATABASE_URL": "postgres://db", "INGRESS_BASE_DOMAIN": "apps.example.test", "INGRESS_RESERVED_SUBDOMAINS": " admin, ,root ",
+		"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "INGRESS_BASE_DOMAIN": "apps.example.test", "INGRESS_RESERVED_SUBDOMAINS": " admin, ,root ",
 	}))
 	if loadError != nil || loaded.IngressBaseDomain != "apps.example.test" || !reflect.DeepEqual(loaded.IngressReservedSubdomains, []string{"admin", "root"}) {
 		testingT.Fatalf("環境変数の値で置き換わるはず: %+v %v", loaded, loadError)
 	}
 	// DNS 名の形でないベースドメインは、エラーにする。
 	for _, invalid := range []string{"Launchs.org", "localhost", "a..b", "-a.org", "a b.org"} {
-		if _, invalidError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "INGRESS_BASE_DOMAIN": invalid})); invalidError == nil || !strings.Contains(invalidError.Error(), "INGRESS_BASE_DOMAIN") {
+		if _, invalidError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "INGRESS_BASE_DOMAIN": invalid})); invalidError == nil || !strings.Contains(invalidError.Error(), "INGRESS_BASE_DOMAIN") {
 			testingT.Errorf("%q はエラーになるはず: %v", invalid, invalidError)
 		}
 	}
@@ -72,19 +72,44 @@ func TestLoadBackendConfig(testingT *testing.T) {
 		expectedErrorPieces []string
 	}{
 		{
-			name:           "DATABASE_URL だけ設定すれば、他は既定値になる",
-			environment:    map[string]string{"DATABASE_URL": "postgres://db"},
-			expectedConfig: withIngressDefaults(BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default"}),
+			name:           "DATABASE_URL と認証の設定だけ設定すれば、他は既定値になる",
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev"},
+			expectedConfig: withIngressDefaults(BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", DevUserID: "user-dev", TemporalAddress: "temporal:7233", TemporalNamespace: "default"}),
 		},
 		{
 			name:           "全て設定すると、その値になる",
-			environment:    map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "9090", "LOG_LEVEL": "debug", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns"},
-			expectedConfig: withIngressDefaults(BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns"}),
+			environment:    map[string]string{"DATABASE_URL": "postgres://db", "HTTP_PORT": "9090", "LOG_LEVEL": "debug", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "AUTH_JWKS_URL": "http://auth/jwks", "AUTH_REQUIRE_JWKS": "true"},
+			expectedConfig: withIngressDefaults(BackendConfig{HTTPPort: 9090, LogLevel: slog.LevelDebug, DatabaseURL: "postgres://db", AuthJWKSURL: "http://auth/jwks", AuthRequireJWKS: true, TemporalAddress: "host:1", TemporalNamespace: "ns"}),
 		},
 		{
 			name:           "DEV_USER_ID を設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev"},
 			expectedConfig: withIngressDefaults(BackendConfig{HTTPPort: 8080, LogLevel: slog.LevelInfo, DatabaseURL: "postgres://db", DevUserID: "user-dev", TemporalAddress: "temporal:7233", TemporalNamespace: "default"}),
+		},
+		{
+			name:                "認証の設定が何も無いとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db"},
+			expectedErrorPieces: []string{"AUTH_JWKS_URL", "DEV_USER_ID"},
+		},
+		{
+			name:                "AUTH_JWKS_URL と DEV_USER_ID の両方があるとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "AUTH_JWKS_URL": "http://auth/jwks", "DEV_USER_ID": "user-dev"},
+			expectedErrorPieces: []string{"同時に指定できません"},
+		},
+		{
+			name:                "AUTH_REQUIRE_JWKS=true で DEV_USER_ID があるとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "AUTH_REQUIRE_JWKS": "true"},
+			expectedErrorPieces: []string{"AUTH_REQUIRE_JWKS"},
+		},
+		{
+			name:                "AUTH_REQUIRE_JWKS=true で AUTH_JWKS_URL が無いとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "AUTH_REQUIRE_JWKS": "true"},
+			expectedErrorPieces: []string{"AUTH_REQUIRE_JWKS"},
+		},
+		{
+			name:                "AUTH_REQUIRE_JWKS が true でも false でもないとエラー",
+			environment:         map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "AUTH_REQUIRE_JWKS": "yes"},
+			expectedErrorPieces: []string{"AUTH_REQUIRE_JWKS"},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -164,13 +189,13 @@ func TestLoadBackendConfig(testingT *testing.T) {
 //   - testingT: テストの状態。
 func TestLoadBackendConfigVolume(testingT *testing.T) {
 	// 値を指定すると、既定値(5120)を置き換える。
-	loaded, loadError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "VOLUME_MAX_SIZE_MB": "10240"}))
+	loaded, loadError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "VOLUME_MAX_SIZE_MB": "10240"}))
 	if loadError != nil || loaded.VolumeMaxSizeMB != 10240 {
 		testingT.Fatalf("環境変数の値で置き換わるはず: %+v %v", loaded, loadError)
 	}
 	// 0 以下と、整数でない値は、エラーにする。
 	for _, invalid := range []string{"0", "-1", "abc"} {
-		if _, invalidError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "VOLUME_MAX_SIZE_MB": invalid})); invalidError == nil || !strings.Contains(invalidError.Error(), "VOLUME_MAX_SIZE_MB") {
+		if _, invalidError := LoadBackendConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "DEV_USER_ID": "user-dev", "VOLUME_MAX_SIZE_MB": invalid})); invalidError == nil || !strings.Contains(invalidError.Error(), "VOLUME_MAX_SIZE_MB") {
 			testingT.Errorf("%q はエラーになるはず: %v", invalid, invalidError)
 		}
 	}

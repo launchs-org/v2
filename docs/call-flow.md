@@ -70,7 +70,7 @@ chooseClusterOperators(設定, RUNTIME_CLASS)
 ```
 curl ──HTTPS──▶ nginx ──HTTP──▶ backend (Echo)
   ① ミドルウェア: リクエスト ID → アクセスログ → Recover
-  ② 認証ミドルウェア(今は DEV_USER_ID の仮)が、ユーザー ID をコンテキストに入れる
+  ② 認証ミドルウェア(access token を JWKS の公開鍵で検証する。shared/jwtverify)が、ユーザー ID をコンテキストに入れる
   ③ ProjectController.Delete
        ユーザー ID と projectId を取り出して、service に渡す
   ④ ProjectService.Delete                             ビジネスルール

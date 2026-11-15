@@ -2,9 +2,9 @@ package server
 
 import (
 	"github.com/labstack/echo/v5"
+	"launchs/backend/src/middlewares"
 
 	"launchs/backend/src/controller"
-	"launchs/backend/src/middlewares"
 	"launchs/backend/src/service"
 	"launchs/shared/repository"
 )
@@ -24,8 +24,13 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	// 認証不要のヘルスチェックを、/api/v1 の外に登録する。
 	echoServer.GET("/healthz", healthController.Check)
 
-	// /api/v1 のグループを作り、開発用の仮の認証を付ける。
-	apiGroup := echoServer.Group("/api/v1", middlewares.NewDevAuthenticationMiddleware(dependencies.DevUserID))
+	// 認証のミドルウェアが渡されていないときは、誰も通さない(開かれたままにしない)。
+	authentication := dependencies.Authentication
+	if authentication == nil {
+		authentication = middlewares.NewDevAuthenticationMiddleware("")
+	}
+	// /api/v1 のグループを作り、認証のミドルウェアを付ける。
+	apiGroup := echoServer.Group("/api/v1", authentication)
 
 	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)

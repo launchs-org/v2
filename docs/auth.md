@@ -148,3 +148,15 @@
 - **管理者**(`users.role = 'admin'`)の列と、access token の `role` は入れた。管理者を作る手段と、管理の API は、PR 4。
 - **refresh と me**: `/refresh` は、BAN されたユーザーを拒否する(refresh token の有効・無効とは別に、ユーザーの状態を見る)。`/me` は、access token の claims だけから返す(DB を見ない)。
 - 設定は、環境変数 `AUTH_*`(`.env.example`)。署名鍵は、`AUTH_KEYS_DIR`(開発用の compose は、`AUTH_KEYS_AUTOGENERATE=true` で、無ければ作る)。
+
+## 12. 実装メモ(PR 2: backend の JWKS 検証)
+
+- **検証は `shared/jwtverify`**(backend 以外のコンテナ、たとえばログ収集も、同じものを使える)。ミドルウェアは `backend/src/middlewares/access_token_middleware.go`。`UserIDFrom` は、そのまま(controller 以降は変えていない)。役割は `UserRoleFrom` で取れる(PR 4 の管理 API で使う)。
+- **JWKS の扱い**:
+  - 起動時に1度取得する。取得できなくても、起動は止めない(auth が遅れて起動しても、最初のリクエストのときに取得し直す。まだ1度も取れていないときの間隔は 5 秒)。
+  - 知らない `kid` が来たら取得し直す。ただし、取得を試みる間隔は 1 分以上(偽の `kid` で、auth を攻撃させない)。
+  - キャッシュが 10 分より古ければ、取得し直す。成功したら、鍵を丸ごと置き換える(auth が外した鍵は、使えなくなる)。失敗したら、キャッシュの鍵で、検証を続ける。
+  - JWKS のレスポンスは 1MiB まで。使える鍵(OKP / Ed25519 / 署名用)だけを取り出す。
+- **失敗は、理由を区別せず、全て 401**(`WWW-Authenticate: Bearer` つき)。
+- **設定**(`docs/auth.md` §7 のとおり): `AUTH_JWKS_URL` か `DEV_USER_ID` の、ちょうど一方が必須(両方、どちらも無いときは、起動しない)。`AUTH_REQUIRE_JWKS=true`(本番)のときは、`AUTH_JWKS_URL` が必須で、`DEV_USER_ID` は指定できない。`DEV_USER_ID` で起動したときは、警告をログに出す。
+- 開発用の compose は、`AUTH_JWKS_URL=http://auth:8080/auth/.well-known/jwks.json` を指定する(`DEV_USER_ID` は、もう指定しない)。`user-dev` のデータは、DB に残るが、誰のものでもない。

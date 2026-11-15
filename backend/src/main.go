@@ -80,9 +80,12 @@ func run() error {
 		return fmt.Errorf("ホスト名の払い出しを準備できませんでした: %w", hostGeneratorError)
 	}
 
+	// 認証のミドルウェアを決める(JWKS で access token を検証する。指定が無ければ、開発用の仮の認証)。
+	authentication := newAuthentication(appLogger, backendConfig)
+
 	echoServer := server.New(appLogger, server.Dependencies{
 		Database:               appDatabase,
-		DevUserID:              backendConfig.DevUserID,
+		Authentication:         authentication,
 		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),
 		DeployWorkflowStarter:  service.NewTemporalDeployWorkflowStarter(temporalClient),
 		ServiceWorkflowStarter: service.NewTemporalServiceWorkflowStarter(temporalClient),
