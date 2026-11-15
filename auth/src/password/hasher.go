@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -45,6 +46,57 @@ func DefaultParameters() Parameters {
 type Hasher struct {
 	// parameters は、新しく作るハッシュのパラメータ。
 	parameters Parameters
+
+	// slots は、同時に計算できる数を表す。空きが無いときは、計算を待たせる(nil なら、制限しない)。
+	slots chan struct{}
+
+	// slotWait は、空きを待つ時間の上限。
+	slotWait time.Duration
+}
+
+// ErrBusy は、同時に計算できる数の上限に達していて、待っても空かなかったときのエラー。
+var ErrBusy = errors.New("パスワードの計算が混み合っています")
+
+// WithConcurrencyLimit は、同時に計算できる数に上限を付けた Hasher を返す。
+//
+// argon2id は、1回の計算で、数十 MiB のメモリを使う。同時に何百も走ると、メモリが尽きるので、上限を付ける。
+// 上限に達したら、slotWait だけ空きを待ち、それでも空かなければ ErrBusy を返す。
+//
+// 引数:
+//   - maxConcurrent: 同時に計算できる数(1以上)。
+//   - slotWait: 空きを待つ時間の上限。
+//
+// 戻り値:
+//   - 上限を付けた、新しい Hasher(元の Hasher は変えない)。
+func (hasher *Hasher) WithConcurrencyLimit(maxConcurrent int, slotWait time.Duration) *Hasher {
+	// 数の分だけ、空きのある仕切りを作って、コピーに持たせる。
+	return &Hasher{parameters: hasher.parameters, slots: make(chan struct{}, maxConcurrent), slotWait: slotWait}
+}
+
+// acquire は、計算の空きを1つ取る。
+//
+// 戻り値:
+//   - 空きを返すための関数(計算が終わったら呼ぶ)。待っても空かなければ ErrBusy。
+func (hasher *Hasher) acquire() (func(), error) {
+	// 制限が無いときは、何もしない。
+	if hasher.slots == nil {
+		return func() {}, nil
+	}
+	// すぐに取れるなら、取る。
+	select {
+	case hasher.slots <- struct{}{}:
+		return func() { <-hasher.slots }, nil
+	default:
+	}
+	// 取れないなら、少しだけ待つ(短い混雑は、待てば取れる)。
+	timer := time.NewTimer(hasher.slotWait)
+	defer timer.Stop()
+	select {
+	case hasher.slots <- struct{}{}:
+		return func() { <-hasher.slots }, nil
+	case <-timer.C:
+		return nil, ErrBusy
+	}
 }
 
 // NewHasher は、Hasher を作る。
@@ -67,6 +119,12 @@ func NewHasher(parameters Parameters) *Hasher {
 // 戻り値:
 //   - "$argon2id$v=19$m=...,t=...,p=...$<ソルト>$<ハッシュ>" の形の文字列。乱数を得られなければエラー。
 func (hasher *Hasher) Hash(plainPassword string) (string, error) {
+	// 計算の空きを取る(取れなければ ErrBusy)。
+	release, busyError := hasher.acquire()
+	if busyError != nil {
+		return "", busyError
+	}
+	defer release()
 	// ランダムなソルトを作る。
 	salt := make([]byte, saltLength)
 	if _, readError := rand.Read(salt); readError != nil {
@@ -95,6 +153,12 @@ func (hasher *Hasher) Verify(plainPassword string, encodedHash string) (bool, bo
 	if parseError != nil {
 		return false, false, parseError
 	}
+	// 計算の空きを取る(取れなければ ErrBusy)。
+	release, busyError := hasher.acquire()
+	if busyError != nil {
+		return false, false, busyError
+	}
+	defer release()
 	// 同じパラメータで計算して、定数時間で比べる。
 	actualKey := argon2.IDKey([]byte(plainPassword), salt, parameters.Iterations, parameters.MemoryKiB, parameters.Parallelism, uint32(len(expectedKey)))
 	if subtle.ConstantTimeCompare(actualKey, expectedKey) != 1 {

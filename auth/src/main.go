@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,6 +30,9 @@ const gracefulShutdownTimeout = 10 * time.Second
 
 // cleanupInterval は、期限切れの行を消す間隔。
 const cleanupInterval = time.Hour
+
+// hashSlotWait は、パスワードの計算の空きを待つ時間の上限(超えたら、429 で待たせる)。
+const hashSlotWait = 2 * time.Second
 
 // main は、run を呼んで、失敗したときは、原因を表示して、異常終了する。
 func main() {
@@ -78,7 +82,7 @@ func run() error {
 	rateLimitRepository := repository.NewRateLimitRepository(appDatabase)
 	loginEventRepository := repository.NewLoginEventRepository(appDatabase)
 	authService, serviceError := service.NewAuthService(userRepository, refreshTokenRepository, loginFailureRepository, rateLimitRepository, loginEventRepository, appLogger,
-		password.NewHasher(password.DefaultParameters()), token.NewService(keyStore, time.Now), service.Settings{
+		password.NewHasher(password.DefaultParameters()).WithConcurrencyLimit(authConfig.HashMaxConcurrency, hashSlotWait), token.NewService(keyStore, time.Now), service.Settings{
 			SignupMode: authConfig.SignupMode, LoginMaxFailures: authConfig.LoginMaxFailures, LoginLockDuration: authConfig.LoginLockDuration,
 			LoginIPLimit: authConfig.LoginIPLimit, LoginIPWindow: authConfig.LoginIPWindow,
 			SignupIPLimit: authConfig.SignupIPLimit, SignupIPWindow: authConfig.SignupIPWindow,
@@ -98,6 +102,14 @@ func run() error {
 	// 起動する。
 	startConfig := echo.StartConfig{
 		Address: fmt.Sprintf(":%d", authConfig.HTTPPort), HideBanner: true, HidePort: true, GracefulTimeout: gracefulShutdownTimeout,
+		// 遅い接続(slowloris など)で、接続を占有されないように、読み書きの時間に上限を付ける。
+		BeforeServeFunc: func(httpServer *http.Server) error {
+			httpServer.ReadHeaderTimeout = 5 * time.Second
+			httpServer.ReadTimeout = 10 * time.Second
+			httpServer.WriteTimeout = 30 * time.Second
+			httpServer.IdleTimeout = 60 * time.Second
+			return nil
+		},
 	}
 	appLogger.Info("認証サーバーを起動する", "port", authConfig.HTTPPort, "signup_mode", authConfig.SignupMode)
 	if startError := startConfig.Start(shutdownContext, echoServer); startError != nil {

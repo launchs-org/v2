@@ -12,6 +12,9 @@ const (
 	rateLimitKindSignup = "signup"
 )
 
+// busyRetryAfter は、パスワードの計算が混み合っているときに、利用者に待たせる時間。
+const busyRetryAfter = time.Second
+
 // Settings は、認証のユースケースの設定。回数と時間は、仮の値で、環境変数で変えられる。
 type Settings struct {
 	// SignupMode は、サインアップの公開範囲(open か invite)。
