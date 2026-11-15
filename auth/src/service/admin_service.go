@@ -36,6 +36,9 @@ type AdminUserStore interface {
 
 	// PromoteToAdmin は、小文字のユーザー名で、管理者にする。
 	PromoteToAdmin(requestContext context.Context, userNameLower string) error
+
+	// HasAdmin は、管理者(状態を問わない)が1人でもいるかを返す。
+	HasAdmin(requestContext context.Context) (bool, error)
 }
 
 // AdminInvitationStore は、管理のユースケースが使う、招待の保存先。
@@ -333,6 +336,45 @@ func (adminService *AdminService) CreateAdmin(requestContext context.Context, us
 	}
 	adminService.record("command", "admin_create", user.ID)
 	return user, nil
+}
+
+// BootstrapAdmin は、管理者が1人もいないときだけ、最初の管理者を作る(起動時に呼ぶ。何度呼んでも安全)。
+//
+// Kubernetes では、コマンドを手で実行しにくいので、Secret から渡した名前とパスワードで、起動時に作る。
+//   - 管理者が1人でもいれば(停止中を含む)、何もしない。
+//   - 複数の auth が同時に起動して、同時に作ろうとしても、片方が名前の重複で失敗するだけで、管理者は1人だけ作られる(失敗した方は、管理者がいることを確かめて、成功とする)。
+//   - 同じ名前の一般ユーザーがすでにいるときは、管理者を作らず、エラーにする(`admin promote` で昇格する)。
+//   - パスワードの検査は、通常のサインアップと同じ。弱ければ、エラー(起動を止めて、設定の間違いに気づけるようにする)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userName: 最初の管理者のユーザー名。
+//   - plainPassword: パスワード。
+//
+// 戻り値:
+//   - 作成したら true。すでに管理者がいて、何もしなかったら false。
+//   - 入力が不正、同じ名前の一般ユーザーがいる、データベースのエラーのときのエラー。
+func (adminService *AdminService) BootstrapAdmin(requestContext context.Context, userName string, plainPassword string) (bool, error) {
+	// 管理者がいれば、何もしない。
+	exists, existsError := adminService.userStore.HasAdmin(requestContext)
+	if existsError != nil {
+		return false, existsError
+	}
+	if exists {
+		return false, nil
+	}
+	// 管理者を作る。
+	if _, createError := adminService.CreateAdmin(requestContext, userName, plainPassword); createError != nil {
+		// 同時に作られた(別の auth が先に作った)なら、管理者がいるので、成功とする。
+		if apperror.KindOf(createError) == apperror.KindConflict {
+			if nowExists, recheckError := adminService.userStore.HasAdmin(requestContext); recheckError == nil && nowExists {
+				return false, nil
+			}
+			return false, apperror.Wrap(apperror.KindConflict, "同じ名前のユーザーがすでにいます(管理者にするには、admin promote を使う)", createError)
+		}
+		return false, createError
+	}
+	return true, nil
 }
 
 // PromoteToAdmin は、すでにあるユーザーを、管理者にする(コマンドから使う)。

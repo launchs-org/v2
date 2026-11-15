@@ -101,6 +101,14 @@ func run() error {
 	invitationRepository := repository.NewInvitationRepository(appDatabase)
 	adminService := service.NewAdminService(userRepository, invitationRepository, loginFailureRepository, appLogger,
 		password.NewHasher(password.DefaultParameters()), token.NewService(keyStore, time.Now))
+	// 最初の管理者の指定があれば、管理者が1人もいないときだけ作る(失敗したら、設定の間違いに気づけるよう、起動しない)。
+	if authConfig.BootstrapAdminName != "" {
+		created, bootstrapError := adminService.BootstrapAdmin(context.Background(), authConfig.BootstrapAdminName, authConfig.BootstrapAdminPassword)
+		if bootstrapError != nil {
+			return fmt.Errorf("最初の管理者を作れませんでした: %w", bootstrapError)
+		}
+		appLogger.Info("最初の管理者の確認を済ませた", "created", created, "user_name", authConfig.BootstrapAdminName)
+	}
 	echoServer := server.New(appLogger, authService, adminService, keyStore, resolver)
 
 	// 停止の合図で終わる context を作る。
