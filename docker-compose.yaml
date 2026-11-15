@@ -11,10 +11,12 @@ services:
         condition: service_healthy
       temporal-namespace:
         condition: service_completed_successfully
+      auth:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
-      # 認証のコンテナができるまでの、開発用の仮のユーザー。
-      DEV_USER_ID: user-dev
+      # access token を検証する公開鍵(auth の JWKS)。auth を起動せずに backend だけを試すときは、これを消して、DEV_USER_ID=user-dev にする。
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       # ingress に払い出すホスト名の、ベースドメインと、払い出さないサブドメイン(カンマ区切り。指定すると既定の一覧を置き換える)。
