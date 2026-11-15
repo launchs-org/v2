@@ -3,12 +3,8 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -17,112 +13,6 @@ import (
 	"launchs/auth/src/token"
 	"launchs/shared/apperror"
 )
-
-const (
-	// SignupModeOpen と SignupModeInvite は、サインアップの公開範囲。
-	SignupModeOpen   = "open"
-	SignupModeInvite = "invite"
-
-	// rateLimitKindLogin と rateLimitKindSignup は、IP ごとのレート制限の種類。
-	rateLimitKindLogin  = "login"
-	rateLimitKindSignup = "signup"
-)
-
-// UserStore は、ユースケースが使う、ユーザーの保存先。
-type UserStore interface {
-	// Create は、ユーザーを保存する(招待のハッシュがあれば、同じトランザクションで使用済みにする)。
-	Create(requestContext context.Context, user *model.User, invitationCodeHash string) error
-
-	// FindByNameLower は、小文字の名前で、ユーザーを探す。
-	FindByNameLower(requestContext context.Context, userNameLower string) (model.User, bool, error)
-
-	// FindByID は、ID で、ユーザーを探す。
-	FindByID(requestContext context.Context, userID string) (model.User, bool, error)
-
-	// UpdatePasswordHash は、パスワードのハッシュを、新しいものにする。
-	UpdatePasswordHash(requestContext context.Context, userID string, passwordHash string) error
-}
-
-// RefreshTokenStore は、ユースケースが使う、refresh token の有効・無効の管理。
-type RefreshTokenStore interface {
-	// Create は、発行した refresh token を、有効なものとして保存する。
-	Create(requestContext context.Context, jti string, userID string, expiresAt time.Time) error
-
-	// FindActiveOwner は、jti が有効なら、持ち主のユーザーの ID を返す。
-	FindActiveOwner(requestContext context.Context, jti string) (string, bool, error)
-
-	// Revoke は、jti を無効にする。無効にしたら true。
-	Revoke(requestContext context.Context, jti string) (bool, error)
-}
-
-// LoginFailureStore は、ユースケースが使う、ユーザー名ごとのログイン失敗とロックの管理。
-type LoginFailureStore interface {
-	// IsLocked は、ユーザー名が、いまロック中かを返す。
-	IsLocked(requestContext context.Context, userNameLower string) (bool, error)
-
-	// RecordFailure は、失敗を1回記録し、上限に達したらロックする。
-	RecordFailure(requestContext context.Context, userNameLower string, maxFailures int, lockDuration time.Duration) error
-
-	// Reset は、失敗の記録を消す。
-	Reset(requestContext context.Context, userNameLower string) error
-}
-
-// RateLimitStore は、ユースケースが使う、IP ごとのレート制限。
-type RateLimitStore interface {
-	// Hit は、試行を1回記録し、許されるかと、許されないときの待ち時間を返す。
-	Hit(requestContext context.Context, kind string, ip string, limit int, window time.Duration) (bool, time.Duration, error)
-}
-
-// LoginEventStore は、ユースケースが使う、ログイン履歴の保存先。
-type LoginEventStore interface {
-	// Create は、履歴を1件保存する。
-	Create(requestContext context.Context, event model.LoginEvent) error
-
-	// ListByUser は、ユーザーの履歴を、新しい順に取得する。
-	ListByUser(requestContext context.Context, userID string, limit int) ([]model.LoginEvent, error)
-}
-
-// PasswordHasher は、ユースケースが使う、パスワードのハッシュの作成と検証。
-type PasswordHasher interface {
-	// Hash は、パスワードのハッシュを作る。
-	Hash(plainPassword string) (string, error)
-
-	// Verify は、パスワードがハッシュと一致するか、ハッシュを作り直すべきか、を返す。
-	Verify(plainPassword string, encodedHash string) (bool, bool, error)
-}
-
-// Settings は、認証のユースケースの設定。回数と時間は、仮の値で、環境変数で変えられる。
-type Settings struct {
-	// SignupMode は、サインアップの公開範囲(open か invite)。
-	SignupMode string
-
-	// LoginMaxFailures と LoginLockDuration は、ユーザー名ごとの、ロックする失敗の回数と、ロックの時間。
-	LoginMaxFailures  int
-	LoginLockDuration time.Duration
-
-	// LoginIPLimit と LoginIPWindow は、IP ごとのログイン試行の上限と、時間枠。
-	LoginIPLimit  int
-	LoginIPWindow time.Duration
-
-	// SignupIPLimit と SignupIPWindow は、IP ごとのサインアップの上限と、時間枠。
-	SignupIPLimit  int
-	SignupIPWindow time.Duration
-}
-
-// RateLimitedError は、レート制限に達したときのエラー。何秒待てばよいかを持つ(429 の Retry-After に使う)。
-type RateLimitedError struct {
-	// RetryAfter は、待つ時間。
-	RetryAfter time.Duration
-}
-
-// Error は、エラーの文字列を返す。
-//
-// 戻り値:
-//   - エラーの説明。
-func (rateLimitedError *RateLimitedError) Error() string {
-	// 待つ時間を含める。
-	return "リクエストが多すぎます。しばらくしてから、もう一度試してください: " + rateLimitedError.RetryAfter.String()
-}
 
 // AuthService は、認証のユースケース。
 type AuthService struct {
@@ -165,82 +55,6 @@ func NewAuthService(userStore UserStore, refreshTokenStore RefreshTokenStore, lo
 		userStore: userStore, refreshTokenStore: refreshTokenStore, loginFailureStore: loginFailureStore,
 		rateLimitStore: rateLimitStore, loginEventStore: loginEventStore, appLogger: appLogger, hasher: hasher, tokenService: tokenService, settings: settings, dummyHash: dummyHash,
 	}, nil
-}
-
-// checkRateLimit は、IP ごとのレート制限を確かめる。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - kind: 種類("login" か "signup")。
-//   - clientIP: クライアントの IP。
-//   - limit: 時間枠の中で許す回数。
-//   - window: 時間枠。
-//
-// 戻り値:
-//   - 上限を超えたときは RateLimitedError。データベースのエラーは、そのまま。
-func (authService *AuthService) checkRateLimit(requestContext context.Context, kind string, clientIP string, limit int, window time.Duration) error {
-	// 記録して、判定する。
-	allowed, retryAfter, hitError := authService.rateLimitStore.Hit(requestContext, kind, clientIP, limit, window)
-	if hitError != nil {
-		return hitError
-	}
-	if !allowed {
-		return &RateLimitedError{RetryAfter: retryAfter}
-	}
-	return nil
-}
-
-// maxUserAgentLength は、履歴に保存する User-Agent の長さの上限(バイト)。
-const maxUserAgentLength = 256
-
-// record は、ログイン履歴を1件残す。
-//
-// 履歴の保存に失敗しても、ログインやサインアップは、失敗にしない(警告だけ残す)。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - userID: 持ち主のユーザーの ID(存在しないユーザー名なら空)。
-//   - userNameLower: 試行で指定された名前(小文字)。
-//   - kind: 種類(signup か login)。
-//   - failureReason: 失敗の理由(成功なら空)。
-//   - clientIP: クライアントの IP。
-//   - userAgent: クライアントの User-Agent。
-func (authService *AuthService) record(requestContext context.Context, userID string, userNameLower string, kind string, failureReason string, clientIP string, userAgent string) {
-	// 履歴の内容を組み立てる(User-Agent は、長いときは切り詰める)。
-	if len(userAgent) > maxUserAgentLength {
-		userAgent = userAgent[:maxUserAgentLength]
-	}
-	event := model.LoginEvent{UserNameLower: userNameLower, Kind: kind, Result: model.LoginEventSuccess, IP: clientIP, UserAgent: userAgent}
-	if userID != "" {
-		event.UserID = &userID
-	}
-	if failureReason != "" {
-		event.Result, event.Reason = model.LoginEventFailure, &failureReason
-	}
-	// 保存する(失敗は、警告だけ)。
-	if createError := authService.loginEventStore.Create(requestContext, event); createError != nil {
-		authService.appLogger.Warn("ログイン履歴を保存できなかった", "kind", kind, "error", createError)
-	}
-}
-
-// issueRefreshToken は、refresh token を発行して、有効なものとして保存する。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - user: 持ち主のユーザー。
-//
-// 戻り値:
-//   - refresh token の文字列。
-func (authService *AuthService) issueRefreshToken(requestContext context.Context, user model.User) (string, error) {
-	// 発行して、jti を DB に保存する。
-	issued, issueError := authService.tokenService.IssueRefresh(user.ID, user.UserName)
-	if issueError != nil {
-		return "", apperror.Wrap(apperror.KindInternal, "トークンを発行できませんでした", issueError)
-	}
-	if saveError := authService.refreshTokenStore.Create(requestContext, issued.ID, user.ID, issued.ExpiresAt); saveError != nil {
-		return "", saveError
-	}
-	return issued.Token, nil
 }
 
 // Signup は、ユーザーを登録して、refresh token を返す(サインアップ後は、そのままログイン状態になる)。
@@ -293,19 +107,6 @@ func (authService *AuthService) Signup(requestContext context.Context, clientIP 
 	// 5. 履歴に残して、refresh token を発行する。
 	authService.record(requestContext, user.ID, user.UserNameLower, model.LoginEventKindSignup, "", clientIP, userAgent)
 	return authService.issueRefreshToken(requestContext, user)
-}
-
-// HashInvitationCode は、招待コードを、保存用のハッシュ(SHA-256 の16進数)にする。
-//
-// 引数:
-//   - invitationCode: 招待コード。
-//
-// 戻り値:
-//   - ハッシュ。
-func HashInvitationCode(invitationCode string) string {
-	// 前後の空白を除いて、SHA-256 にする。
-	digest := sha256.Sum256([]byte(strings.TrimSpace(invitationCode)))
-	return hex.EncodeToString(digest[:])
 }
 
 // errLoginFailed は、ログインできなかったときの、共通の内部エラー(理由を区別しない)。
@@ -496,20 +297,4 @@ func (authService *AuthService) LoginHistory(requestContext context.Context, acc
 	}
 	// 持ち主の履歴を取る。
 	return authService.loginEventStore.ListByUser(requestContext, claims.Subject, limit)
-}
-
-// IsRateLimited は、エラーが、レート制限のものかを調べ、そうなら待つ時間を返す。
-//
-// 引数:
-//   - checkedError: 調べるエラー。
-//
-// 戻り値:
-//   - 待つ時間と、レート制限のエラーだったか。
-func IsRateLimited(checkedError error) (time.Duration, bool) {
-	// RateLimitedError に変換できるか。
-	var rateLimitedError *RateLimitedError
-	if errors.As(checkedError, &rateLimitedError) {
-		return rateLimitedError.RetryAfter, true
-	}
-	return 0, false
 }
