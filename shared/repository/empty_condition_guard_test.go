@@ -133,6 +133,50 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 			_, err := NewIngressRepository(database).CommitRulesApply(requestContext, "", true)
 			return err
 		}, expectedKind: apperror.KindInternal},
+		{name: "volume 取得: ユーザー ID が空", call: func() error {
+			_, _, err := NewVolumeRepository(database).FindByID(requestContext, "", "project-00000001", "volume-1")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "volume 取得(ワーカー): ID が空(先頭の1件を返さない)", call: func() error { _, err := NewVolumeRepository(database).FindForWorker(requestContext, ""); return err }, expectedKind: apperror.KindNotFound},
+		{name: "volume のまとめ取得(ワーカー): プロジェクトの ID が空", call: func() error {
+			_, err := NewVolumeRepository(database).FindManyForWorker(requestContext, "", []string{"volume-1"})
+			return err
+		}, expectedKind: apperror.KindInternal},
+		{name: "volume の一覧: プロジェクトの ID が空", call: func() error {
+			_, _, err := NewVolumeRepository(database).ListByProject(requestContext, "user-a", "", 20, nil)
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "volume の作成: ID が空", call: func() error { return NewVolumeRepository(database).Create(requestContext, &model.Volume{}) }, expectedKind: apperror.KindInternal},
+		{name: "volume の名前変更: 名前が空", call: func() error {
+			return NewVolumeRepository(database).Rename(requestContext, "user-a", "project-00000001", "volume-1", "")
+		}, expectedKind: apperror.KindInternal},
+		{name: "volume の名前変更: volume の ID が空", call: func() error {
+			return NewVolumeRepository(database).Rename(requestContext, "user-a", "project-00000001", "", "x")
+		}, expectedKind: apperror.KindNotFound},
+		{name: "volume の削除の受付: volume の ID が空", call: func() error {
+			_, err := NewVolumeRepository(database).MarkDeleting(requestContext, "user-a", "project-00000001", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "volume のレコード削除: ID が空(削除中の全ての行を消さない)", call: func() error { return NewVolumeRepository(database).DeleteRecord(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "volume の削除の巻き戻し: ID が空", call: func() error { return NewVolumeRepository(database).RevertDeleting(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "volume の削除失敗の記録: ID が空(削除中の全ての行を変えない)", call: func() error { return NewVolumeRepository(database).MarkDeleteFailed(requestContext, "") }, expectedKind: apperror.KindInternal},
+		{name: "volume の拡張の反映の開始: volume の ID が空", call: func() error {
+			_, err := NewVolumeRepository(database).BeginSizeApply(requestContext, "user-a", "project-00000001", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "volume の拡張の反映の巻き戻し: ID が空(applying の全ての行を変えない)", call: func() error { return NewVolumeRepository(database).RevertApply(requestContext, "", "active") }, expectedKind: apperror.KindInternal},
+		{name: "volume の拡張の反映の確定: ID が空", call: func() error {
+			_, err := NewVolumeRepository(database).CommitSizeApply(requestContext, "", true)
+			return err
+		}, expectedKind: apperror.KindInternal},
+		{name: "deploy のマウントの反映の確定: ID が空", call: func() error {
+			_, err := deployRepository.CommitMountsResult(requestContext, "", true)
+			return err
+		}, expectedKind: apperror.KindInternal},
+		{name: "deploy のマウントの反映の開始: deploy の ID が空", call: func() error {
+			_, err := deployRepository.BeginMountsApply(requestContext, "user-a", "")
+			return err
+		}, expectedKind: apperror.KindNotFound},
 		{name: "deploy 取り消し: ID が空(pending の全ての行を消さない)", call: func() error { return deployRepository.DeleteUnstarted(requestContext, "") }, expectedKind: apperror.KindInternal},
 		{name: "deploy 作成の確定: ID が空", call: func() error {
 			_, err := deployRepository.CompleteCreation(requestContext, "", true)

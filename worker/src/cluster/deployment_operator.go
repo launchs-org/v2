@@ -290,16 +290,30 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		AutomountServiceAccountToken: boolPointer(false),
 		EnableServiceLinks:           boolPointer(false),
 	}
+	// マウントするボリュームがあれば、Pod のボリュームと、コンテナのマウントを足す(PVC の名前は、volume の ID)。
+	for _, mount := range definition.Mounts {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name:         mount.ClaimName,
+			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: mount.ClaimName}},
+		})
+		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: mount.ClaimName, MountPath: mount.MountPath})
+	}
 	if operator.runtimeClassName != "" {
 		podSpec.RuntimeClassName = &operator.runtimeClassName
 	}
 
 	// Deployment 全体を組み立てる。
 	replicas := definition.Replicas
+	// ボリュームを持つときは、古い Pod を止めてから、新しい Pod を起動する(RWO の PVC は、古い Pod が持ったままだと、別のノードの新しい Pod が使えないため)。
+	strategy := appsv1.DeploymentStrategy{}
+	if len(definition.Mounts) > 0 {
+		strategy.Type = appsv1.RecreateDeploymentStrategyType
+	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: definition.Name, Namespace: definition.Namespace, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: strategy,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{deployIDLabel: definition.Name}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},

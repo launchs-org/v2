@@ -69,7 +69,8 @@ func run() error {
 	// k8s を操作する役を、設定に合わせて選ぶ。
 	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, cluster.OperatorSettings{
 		RuntimeClass: workerConfig.RuntimeClass, IngressNamespace: workerConfig.IngressNamespace, BlockedNetworks: workerConfig.BlockedNetworks,
-	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints}, appLogger)
+	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints},
+		cluster.VolumeSettings{StorageClass: workerConfig.VolumeStorageClass, AccessMode: workerConfig.VolumeAccessMode}, appLogger)
 	if operatorsError != nil {
 		return operatorsError
 	}
@@ -147,6 +148,22 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(ingressActivities.DeleteIngressRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteIngressRecordActivityName})
 	generalWorker.RegisterActivityWithOptions(ingressActivities.MarkIngressDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkIngressDeleteFailedActivityName})
 
+	// volume(拡張の反映と削除)と、マウントの反映の Workflow と Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyVolumeSizeWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyVolumeSizeWorkflowName})
+	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteVolumeWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteVolumeWorkflowName})
+	volumeRepository := repository.NewVolumeRepository(appDatabase)
+	volumeActivities := activity.NewVolumeActivities(volumeRepository, operators.volumeOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(volumeActivities.ExpandVolumeClaim, sdkactivity.RegisterOptions{Name: sharedworkflow.ExpandVolumeClaimActivityName})
+	generalWorker.RegisterActivityWithOptions(volumeActivities.CommitVolumeSizeResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitVolumeSizeResultActivityName})
+	generalWorker.RegisterActivityWithOptions(volumeActivities.DeleteVolumeClaim, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteVolumeClaimActivityName})
+	generalWorker.RegisterActivityWithOptions(volumeActivities.DeleteVolumeRecord, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteVolumeRecordActivityName})
+	generalWorker.RegisterActivityWithOptions(volumeActivities.MarkVolumeDeleteFailed, sdkactivity.RegisterOptions{Name: sharedworkflow.MarkVolumeDeleteFailedActivityName})
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployMountsWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployMountsWorkflowName})
+	mountsActivities := activity.NewApplyDeployMountsActivities(repository.NewDeployRepository(appDatabase), volumeRepository, operators.deploymentOperator, operators.volumeOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(mountsActivities.ApplyPendingMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingMountsActivityName})
+	generalWorker.RegisterActivityWithOptions(mountsActivities.RollbackDeploymentMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentMountsActivityName})
+	generalWorker.RegisterActivityWithOptions(mountsActivities.CommitMountsResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitMountsResultActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
@@ -165,6 +182,9 @@ type clusterOperators struct {
 	// serviceOperator は、k8s の Service を作る・削除する役。
 	serviceOperator activity.ServiceOperator
 
+	// volumeOperator は、PVC を作る・拡張する・削除する役。
+	volumeOperator activity.VolumeOperator
+
 	// ingressOperator は、Traefik の IngressRoute を作る・削除する役。
 	ingressOperator activity.IngressOperator
 }
@@ -180,12 +200,13 @@ type clusterOperators struct {
 //   - kubernetesSettings: k8s への接続の設定。
 //   - operatorSettings: k8s を操作する役の設定(RuntimeClass、外からの通信を中継する namespace、除くネットワーク)。
 //   - ingressSettings: Traefik の IngressRoute の apiVersion と entryPoint。
+//   - volumeSettings: PVC の StorageClass とアクセスモード。
 //   - appLogger: ログを出すロガー。
 //
 // 戻り値:
 //   - k8s を操作する役の一式。
 //   - k8s への接続の設定を読めなかったときのエラー。
-func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cluster.OperatorSettings, ingressSettings cluster.IngressRouteSettings, appLogger *slog.Logger) (clusterOperators, error) {
+func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cluster.OperatorSettings, ingressSettings cluster.IngressRouteSettings, volumeSettings cluster.VolumeSettings, appLogger *slog.Logger) (clusterOperators, error) {
 	// k8s のクライアントを作る(クラスタへの通信は、最初の操作まで行われない)。
 	clientset, clientsetError := k8s.NewClientset(kubernetesSettings)
 
@@ -197,6 +218,7 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 			deploymentOperator: activity.NewLoggingDeploymentOperator(appLogger),
 			serviceOperator:    activity.NewLoggingServiceOperator(appLogger),
 			ingressOperator:    activity.NewLoggingIngressOperator(appLogger),
+			volumeOperator:     activity.NewLoggingVolumeOperator(appLogger),
 		}, nil
 	}
 	// それ以外のエラーは、起動を止める。
@@ -218,5 +240,6 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, operatorSettings),
 		serviceOperator:    cluster.NewKubernetesServiceOperator(clientset),
 		ingressOperator:    ingressOperator,
+		volumeOperator:     cluster.NewKubernetesVolumeOperator(clientset, volumeSettings),
 	}, nil
 }
