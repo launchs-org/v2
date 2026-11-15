@@ -3,7 +3,7 @@
 // リクエスト全体にかかわる処理(アクセスログ、エラーの変換)をここに置き、
 // どのエンドポイントからも、同じ振る舞いで使えるようにする。
 // 組み立てて Echo に登録するのは、server パッケージの役目。
-package middlewares
+package httpmiddleware
 
 import (
 	"errors"

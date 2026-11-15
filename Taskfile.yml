@@ -29,9 +29,10 @@ tasks:
       - docker compose down --volumes
 
   migrate:
-    desc: app データベースのマイグレーションを流す
+    desc: app と auth のデータベースのマイグレーションを流す
     cmds:
       - docker compose --profile tools run --rm migrate-app
+      - docker compose --profile tools run --rm migrate-auth
 
   logs:
     desc: バックエンドのログを表示する

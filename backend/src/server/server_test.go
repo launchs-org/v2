@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"launchs/backend/src/middlewares"
 	"launchs/shared/apperror"
+	"launchs/shared/httpmiddleware"
 	"launchs/shared/logger"
 )
 
@@ -36,7 +36,7 @@ func TestServerHealthCheck(testingT *testing.T) {
 		testingT.Errorf("ボディが違う: %s", recorder.Body.String())
 	}
 	// リクエスト ID がレスポンスに付いていることを確認する。
-	if recorder.Header().Get(middlewares.RequestIDHeaderName) == "" {
+	if recorder.Header().Get(httpmiddleware.RequestIDHeaderName) == "" {
 		testingT.Errorf("レスポンスにリクエスト ID が付いていない")
 	}
 }
@@ -52,14 +52,14 @@ func TestServerKeepsIncomingRequestID(testingT *testing.T) {
 	// リクエストを作る。
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	// クライアントが決めたリクエスト ID を付ける。
-	request.Header.Set(middlewares.RequestIDHeaderName, "request-from-client")
+	request.Header.Set(httpmiddleware.RequestIDHeaderName, "request-from-client")
 	// レスポンスの記録用の入れ物を作る。
 	recorder := httptest.NewRecorder()
 	// サーバーに処理させる。
 	echoServer.ServeHTTP(recorder, request)
 
 	// レスポンスのリクエスト ID が、クライアントの値のままであることを確認する。
-	if actualRequestID := recorder.Header().Get(middlewares.RequestIDHeaderName); actualRequestID != "request-from-client" {
+	if actualRequestID := recorder.Header().Get(httpmiddleware.RequestIDHeaderName); actualRequestID != "request-from-client" {
 		testingT.Errorf("リクエスト ID が引き継がれていない: %q", actualRequestID)
 	}
 	// アクセスログにも、同じ ID が出ていることを確認する。

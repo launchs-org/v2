@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"launchs/shared/httpmiddleware"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,7 +28,7 @@ func TestDevAuthenticationMiddleware(testingT *testing.T) {
 	for _, testCase := range testCases {
 		testingT.Run(testCase.name, func(subTest *testing.T) {
 			// 認証のエラーを、本番と同じ形式に変換するため、エラーハンドラーを設定したサーバーを作る(ログは出さないので、ロガーは nil)。
-			echoServer := echo.NewWithConfig(echo.Config{HTTPErrorHandler: NewErrorHandler(nil)})
+			echoServer := echo.NewWithConfig(echo.Config{HTTPErrorHandler: httpmiddleware.NewErrorHandler(nil)})
 			// ハンドラーが取り出したユーザー ID を、テストの側で確認するために受け取る変数。
 			var actualUserID string
 			// 認証のミドルウェアを付けた保護されたルートを登録する。
