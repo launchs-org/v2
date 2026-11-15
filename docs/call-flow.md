@@ -328,7 +328,7 @@ PUT /deploy/:deployId/mounts  →  POST .../mounts/apply  →  POST .../mounts/d
 ```
 
 - 現在のマウントは、`newDeploymentDefinition` が `deploy.Mounts` から Deployment の内容に入れる。作成・スケーリング・起動設定の反映・crash-loop の停止の、どの経路でも、マウントが落ちない。
-- マウントを持つ Deployment は、更新方式を Recreate にする(ReadWriteOnce の PVC を、古い Pod が持ったままにしないため)。
+- マウントを持つ Deployment は、更新方式を Recreate にする(ReadWriteOnce の PVC を、古い Pod が持ったままにしないため。既定の ReadWriteMany でも、同じ方式にしている)。
 - volume の行は、マウントの保存・適用(行をロック)と、削除の受け付け(行をロック)で、同時には進まない。
 - プロジェクトのレコードを消すとき、配下の volume の行も消す。PVC は、namespace の削除で消える。
 

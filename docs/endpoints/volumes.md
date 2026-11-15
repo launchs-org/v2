@@ -222,7 +222,7 @@
 - Note: pending_mounts に含まれる volumeId の妥当性(同一project内のvolumeであること、削除中でないこと)は、apply実行時にも改めて検証する(不正なら 409)。マウント設定から適用までの間にvolume側の状態が変更される可能性があるため
 - Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、失敗として、Deployment を元の mounts に戻し、status を "failed" にする
-- Note: マウントを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。アクセスモードが ReadWriteOnce(既定。VOLUME_ACCESS_MODE)の volume は、別のノードの新しい Pod が、古い Pod が持ったままでは使えないため。そのぶん、マウントの適用の間、短い停止がある。replicas を 2 以上にして、別のノードに置くと、ReadWriteOnce の volume は、2つ目の Pod が起動できない
+- Note: マウントを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。アクセスモードが ReadWriteOnce(VOLUME_ACCESS_MODE で選んだ場合)の volume は、別のノードの新しい Pod が、古い Pod が持ったままでは使えないため。既定の ReadWriteMany でも、PVC のアクセスモードの組み合わせによらず安全なように、同じ方式にしている。そのぶん、マウントの適用の間、短い停止がある。アクセスモードは、PVC の作成のときの値で決まり、あとから変えられない。ReadWriteOnce の volume は、replicas を 2 以上にして、別のノードに置くと、2つ目の Pod が起動できない
 - Note: PVC は、このapplyで、無ければ作る。volume を、複数の deploy にマウントすることもできる(同じ volume を、同じ deploy に2回は不可)
 
 ### デプロイ ボリュームマウント 破棄

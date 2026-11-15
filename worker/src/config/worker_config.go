@@ -37,7 +37,7 @@ const (
 	defaultTraefikAPIVersion = "traefik.io/v1alpha1"
 
 	// defaultVolumeAccessMode は、PVC のアクセスモードの既定値。
-	defaultVolumeAccessMode = "ReadWriteOnce"
+	defaultVolumeAccessMode = "ReadWriteMany"
 
 	// defaultTraefikEntryPoints は、IngressRoute を受け付ける entryPoint の名前の既定値。
 	defaultTraefikEntryPoints = "web"
