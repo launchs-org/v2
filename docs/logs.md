@@ -1,4 +1,4 @@
-# ログ収集(logcollector)の設計(レビュー待ち)
+# ログ収集(logcollector)の設計
 
 目的: deploy のコンテナの出力(標準出力・標準エラー)を、Pod が消えたあとも、保持期間の間、`GET /deploy/:deployId/logs` で見られるようにする。仕様は [docs/endpoints/deploys.md](endpoints/deploys.md) の「デプロイ ログ取得」、元の決定は [pre-implementation-checklist.md](pre-implementation-checklist.md) の I-3。
 
@@ -165,3 +165,20 @@
 4. **実機での確認**(Talos): `sinceTime` の挙動(同じ秒の行の重複と、取りこぼし)、コンテナの再起動(`previous`)、リーダーの切り替え(2つ起動して、片方を止める)、ログのローテーション、書き込みの速さの上限。本番の権限(`pods/log` の ClusterRole)。
 
 2 と 3 を、1つにまとめることもできる(大きくなるので、分ける案)。
+
+## 12. 実装メモ(PR 2: logcollector の土台)
+
+設計から、実装で変えた・足したこと。コードは `logcollector/src/`(`collector`、`retention`、`config`)、`shared/repository/deploy_log_repository.go`、`shared/model/deploy_log.go`、`migrations/app/000012_create_deploy_logs.up.sql`。
+
+- **`deploy_log_streams` に、`restart_count` を足した**(§3 の表に無かった列)。最後に処理した、コンテナの再起動の回数。`deploy_pods.restart_count` がこれより大きければ、前のコンテナのログを読む(§5)。
+- **リーダー選出の鍵**は `7100002`(watcher は `7100001`)。
+- **設定の値の単位**: `LOG_MAX_BYTES_PER_POD`、`LOG_MAX_LINE_BYTES`、`LOG_INGEST_BYTES_PER_SEC` は、**バイトの整数**(`52428800` など)。`LOG_MAX_LINE_BYTES` が `LOG_INGEST_BYTES_PER_SEC` より大きいと、起動時に拒否する(1行も書けない秒ができるため)。
+- **書き込みの速さの上限**: 1秒ごとの窓で数え、窓の始めの1行は、上限より大きくても通す。捨てた行の数は、次の窓の始め(または、つながりが終わるとき)に、`[logcollector] 書き込みの速さの上限を超えたため、N 行を捨てました` の行で残す。捨てた行の分も、読み取り位置は進む。
+- **行の読み取り**: 1行は、本文の上限(+時刻の分の余裕)まで読み、残りは読み捨てる(巨大な行で、メモリを使い切らない)。時刻を読めない行は、直前の行の時刻で保存し、読み取り位置は動かさない(通常は起こらない)。
+- **前のコンテナが無い・まだ読めない**(k8s の 400)は、エラーにせず、処理済みにして、いまのコンテナを読む(`ErrLogUnavailable`)。Pod が無い(404)は、ストリームを終了にして、収集を止める。
+- **コンテナが終了した Pod**(phase が `Succeeded` / `Failed`)は、読み切ったら、ストリームを終了にして、もう追わない。
+- **deploy が削除された**(ストリームが CASCADE で消えた)ときは、保存が `ErrLogStreamGone` になり、その Pod の収集を止める。
+- **止める合図(リーダーでなくなったとき、停止)**では、まだ書いていない行を、切り離した context で書いてから終わる(最大 10 秒待つ)。
+- **テスト**: k8s の取得は `LogSource` の後ろに置き、偽物(`scriptedSource`)と、使い捨ての DB で確かめた。重複の除き方、再接続、`previous`、引き継ぎ、保存期間と上限の削除、書き込みの速さの上限、止める合図での書き切り、同時の数の上限。
+- **まだ確かめていないこと**(PR 4。実機): k8s の `sinceTime` が、同じ秒の行を含むか。kubelet のログのローテーション。リーダーの切り替え。本番の権限(`pods/log` の ClusterRole)。**いまのコードは、`sinceTime` が「その秒の行から返す」(同じ秒を含む)ことを前提にしている**。含まない場合は、同じ秒の、まだ保存していない行を取りこぼす。
+- **未実装**: API(`GET /deploy/:deployId/logs`、`logPods`)は、PR 3。
