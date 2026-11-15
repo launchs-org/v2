@@ -19,8 +19,8 @@ type Dependencies struct {
 	// Database は、app データベースの接続。
 	Database *gorm.DB
 
-	// DevUserID は、開発用の仮の認証で、全てのリクエストのユーザーとして扱う ID。空なら API は全て 401。
-	DevUserID string
+	// Authentication は、/api/v1 に付ける認証のミドルウェア(access token の検証、または開発用の仮の認証)。
+	Authentication echo.MiddlewareFunc
 
 	// DeployWorkflowStarter は、deploy の起動(k8s への作成)の Workflow を開始するもの。
 	DeployWorkflowStarter service.DeployWorkflowStarter

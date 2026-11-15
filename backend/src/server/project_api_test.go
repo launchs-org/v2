@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"launchs/backend/src/middlewares"
 	"launchs/shared/database/testdatabase"
 	"launchs/shared/logger"
 )
@@ -52,7 +53,7 @@ func newProjectAPIClient(testingT *testing.T, devUserID string, dependencies Dep
 		dependencies.Database = testdatabase.New(testingT)
 	}
 	// このクライアントのユーザーとして扱う ID を設定する。
-	dependencies.DevUserID = devUserID
+	dependencies.Authentication = middlewares.NewDevAuthenticationMiddleware(devUserID)
 	// deploy の起動の開始が指定されていなければ、何もしない fake を使う。
 	if dependencies.DeployWorkflowStarter == nil {
 		dependencies.DeployWorkflowStarter = &fakeDeployWorkflowStarter{}
