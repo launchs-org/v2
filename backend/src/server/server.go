@@ -28,6 +28,12 @@ type Dependencies struct {
 	// ServiceWorkflowStarter は、service の作成・削除の Workflow を開始するもの。
 	ServiceWorkflowStarter service.ServiceWorkflowStarter
 
+	// IngressWorkflowStarter は、ingress のルールの反映・削除の Workflow を開始するもの。
+	IngressWorkflowStarter service.IngressWorkflowStarter
+
+	// IngressHostGenerator は、ingress に払い出すホスト名を作るもの。
+	IngressHostGenerator service.IngressHostGenerator
+
 	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
 	ProjectDeletionStarter service.ProjectDeletionStarter
 }

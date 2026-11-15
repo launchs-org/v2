@@ -37,17 +37,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config", "RUNTIME_CLASS": "gvisor"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -212,5 +212,26 @@ func TestLoadWorkerConfigServiceTypeAndClusterDomain(testingT *testing.T) {
 				subTest.Errorf("名前を含むエラーのはず: %v %v", invalid, loadError)
 			}
 		})
+	}
+}
+
+// TestLoadWorkerConfigTraefik は、Traefik の apiVersion と entryPoint を、環境変数で変えられることと、不正な値を拒否することを確認する。
+//
+// 引数:
+//   - testingT: テストの状態。
+func TestLoadWorkerConfigTraefik(testingT *testing.T) {
+	// 値を指定すると、既定値を置き換える(カンマ区切りで、空白と空の要素は捨てる)。
+	loaded, loadError := LoadWorkerConfig(newTestReader(map[string]string{
+		"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "TRAEFIK_API_VERSION": "traefik.containo.us/v1alpha1", "TRAEFIK_ENTRY_POINTS": " web, websecure ,",
+	}))
+	if loadError != nil || loaded.TraefikAPIVersion != "traefik.containo.us/v1alpha1" || !reflect.DeepEqual(loaded.TraefikEntryPoints, []string{"web", "websecure"}) {
+		testingT.Fatalf("環境変数の値で置き換わるはず: %+v %v", loaded, loadError)
+	}
+	// group/version の形でない apiVersion と、空の entryPoint は、エラーにする。
+	if _, invalidError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "TRAEFIK_API_VERSION": "v1alpha1"})); invalidError == nil || !strings.Contains(invalidError.Error(), "TRAEFIK_API_VERSION") {
+		testingT.Errorf("apiVersion の形が不正ならエラーになるはず: %v", invalidError)
+	}
+	if _, emptyError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "TRAEFIK_ENTRY_POINTS": " , "})); emptyError == nil || !strings.Contains(emptyError.Error(), "TRAEFIK_ENTRY_POINTS") {
+		testingT.Errorf("entryPoint が空ならエラーになるはず: %v", emptyError)
 	}
 }
