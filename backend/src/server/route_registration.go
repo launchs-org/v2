@@ -89,6 +89,10 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	// 自分の上限(クォータ)と使用量。
 	quotaController := controller.NewQuotaController(service.NewQuotaService(repository.NewQuotaRepository(dependencies.Database), volumeMaxSizeMB))
 	apiGroup.GET("/quota", quotaController.Get)
+	// 管理者だけの API(access token の role が admin のときだけ通る)。ユーザーごとの上限(クォータ)の確認と設定。
+	adminGroup := apiGroup.Group("/admin", middlewares.RequireAdmin)
+	adminGroup.GET("/users/:userId/quota", quotaController.GetForUser)
+	adminGroup.PUT("/users/:userId/quota", quotaController.PutForUser)
 	apiGroup.POST("/projects/:projectId/volumes", volumeController.Create)
 	apiGroup.GET("/projects/:projectId/volumes", volumeController.List)
 	apiGroup.GET("/projects/:projectId/volumes/:volumeId", volumeController.Get)
