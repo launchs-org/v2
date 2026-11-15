@@ -35,6 +35,19 @@ const adminDatabaseURLName = "TEST_ADMIN_DATABASE_URL"
 // 戻り値:
 //   - 使い捨てのデータベースの接続。
 func New(testingT *testing.T) *gorm.DB {
+	// app データベースのマイグレーションを流した、データベースを返す。
+	return NewWithMigrations(testingT, "app")
+}
+
+// NewWithMigrations は、指定したフォルダ(migrations/<フォルダ>)のマイグレーションを流した、使い捨てのデータベースを作る。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+//   - migrationDirectory: migrations 直下のフォルダの名前("app" や "auth")。
+//
+// 戻り値:
+//   - マイグレーション済みの、使い捨てのデータベースへの接続。テストが終わると、削除される。
+func NewWithMigrations(testingT *testing.T, migrationDirectory string) *gorm.DB {
 	// 失敗したとき、このヘルパーではなく呼び出し元の行が表示されるようにする。
 	testingT.Helper()
 
@@ -84,7 +97,7 @@ func New(testingT *testing.T) *gorm.DB {
 	})
 
 	// 作ったばかりの空のデータベースに、テーブルを作るマイグレーションを流す。
-	applyMigrations(testingT, testDatabase)
+	applyMigrations(testingT, testDatabase, migrationDirectory)
 	// 使える状態になったデータベースを返す。
 	return testDatabase
 }
@@ -116,7 +129,7 @@ func replaceDatabaseName(rawURL string, databaseName string) (string, error) {
 // 引数:
 //   - testingT: 呼び出し元のテスト。
 //   - testDatabase: 流す先のデータベース。
-func applyMigrations(testingT *testing.T, testDatabase *gorm.DB) {
+func applyMigrations(testingT *testing.T, testDatabase *gorm.DB, migrationDirectory string) {
 	// 失敗したとき、このヘルパーではなく呼び出し元の行が表示されるようにする。
 	testingT.Helper()
 
@@ -125,7 +138,7 @@ func applyMigrations(testingT *testing.T, testDatabase *gorm.DB) {
 	// このファイルは shared/database/testdatabase にあるので、3つ上がリポジトリのルート。
 	repositoryRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
 	// マイグレーションの .up.sql を全て集める。
-	migrationFiles, globError := filepath.Glob(filepath.Join(repositoryRoot, "migrations", "app", "*.up.sql"))
+	migrationFiles, globError := filepath.Glob(filepath.Join(repositoryRoot, "migrations", migrationDirectory, "*.up.sql"))
 	// 1つも無いのは、設定の間違いなので、テストを止める。
 	if globError != nil || len(migrationFiles) == 0 {
 		testingT.Fatalf("マイグレーションのファイルが見つからない: %v", globError)
