@@ -91,3 +91,20 @@ func TestVolumeReservedMB(testingT *testing.T) {
 		testingT.Errorf("pending が小さければ現在の大きさのはず: %d", reserved)
 	}
 }
+
+// TestQuotaUsageAdd は、deploy と volume を足して、数・CPU・メモリ・大きさ(予約)が求まることを確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestQuotaUsageAdd(testingT *testing.T) {
+	// 2レプリカの small、0レプリカの large、60MB(pending 90)と 10MB の volume を足す。
+	var usage QuotaUsage
+	usage.AddDeploy(DeploySpec{CPUMillicores: 250, MemoryMiB: 256}, 2)
+	usage.AddDeploy(DeploySpec{CPUMillicores: 1000, MemoryMiB: 1024}, 0)
+	usage.AddVolume(&Volume{SizeMB: 60, PendingSizeMB: intPointer(90)})
+	usage.AddVolume(&Volume{SizeMB: 10})
+	// 数と合計が、期待どおりになる。
+	if expected := (QuotaUsage{Deploys: 2, CPUMillicores: 500, MemoryMiB: 512, Volumes: 2, VolumeTotalMB: 100}); usage != expected {
+		testingT.Fatalf("使用量が違う: %+v", usage)
+	}
+}

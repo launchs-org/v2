@@ -11,18 +11,53 @@ import (
 	"launchs/shared/model"
 )
 
-// usageQuery は、ユーザーの使用量を、1つの SQL で数える(引数は、全て同じユーザー ID を6回)。
-// 数え方は docs/auth.md §8.2: プロジェクトと deploy は deleting 以外、volume は全て(大きさは、size と pending の大きい方)。
-const usageQuery = `
-SELECT
-  (SELECT count(*) FROM projects WHERE user_id = ? AND status <> 'deleting') AS projects,
-  (SELECT count(*) FROM deploys WHERE user_id = ? AND status <> 'deleting') AS deploys,
-  COALESCE((SELECT sum(deploy.replicas * spec.cpu_millicores) FROM deploys deploy JOIN deploy_specs spec ON spec.name = deploy.spec
-            WHERE deploy.user_id = ? AND deploy.status <> 'deleting'), 0) AS cpu_millicores,
-  COALESCE((SELECT sum(deploy.replicas * spec.memory_mib) FROM deploys deploy JOIN deploy_specs spec ON spec.name = deploy.spec
-            WHERE deploy.user_id = ? AND deploy.status <> 'deleting'), 0) AS memory_mib,
-  (SELECT count(*) FROM volumes WHERE user_id = ?) AS volumes,
-  COALESCE((SELECT sum(GREATEST(size_mb, COALESCE(pending_size_mb, 0))) FROM volumes WHERE user_id = ?), 0) AS volume_total_mb`
+// countUsage は、ユーザーの使用量を数える。数え方は docs/auth.md §8.2。
+//
+// プロジェクトと deploy は deleting 以外、volume は全て数える。CPU・メモリ・volume の大きさの足し算は、モデルのメソッドに任せる。
+// どの操作も、クォータの行をロックしてから呼ぶので、数えている間に、同じユーザーの作成・拡張は入り込まない。
+//
+// 引数:
+//   - database: 使うデータベース。
+//   - userID: 持ち主のユーザー ID。
+//
+// 戻り値:
+//   - 使用量。データベースのエラーは internal_error。
+func countUsage(database *gorm.DB, userID string) (model.QuotaUsage, error) {
+	// 使用量を、足していく入れ物。
+	var usage model.QuotaUsage
+	// プロジェクトの数を数える(deleting 以外)。
+	var projectCount int64
+	if countError := database.Model(&model.Project{}).Where("user_id = ? AND status <> ?", userID, model.ProjectStatusDeleting).Count(&projectCount).Error; countError != nil {
+		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", countError)
+	}
+	usage.Projects = int(projectCount)
+	// スペックの一覧を読む(deploy の CPU・メモリを求めるため)。
+	var specs []model.DeploySpec
+	if findError := database.Find(&specs).Error; findError != nil {
+		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", findError)
+	}
+	specsByName := make(map[string]model.DeploySpec, len(specs))
+	for _, spec := range specs {
+		specsByName[spec.Name] = spec
+	}
+	// deploy を読んで、数と、CPU・メモリを足す(deleting 以外)。
+	var deploys []model.Deploy
+	if findError := database.Select("spec", "replicas").Where("user_id = ? AND status <> ?", userID, model.DeployStatusDeleting).Find(&deploys).Error; findError != nil {
+		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", findError)
+	}
+	for _, deploy := range deploys {
+		usage.AddDeploy(specsByName[deploy.Spec], deploy.Replicas)
+	}
+	// volume を読んで、数と、大きさを足す(全て)。
+	var volumes []model.Volume
+	if findError := database.Select("size_mb", "pending_size_mb").Where("user_id = ?", userID).Find(&volumes).Error; findError != nil {
+		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", findError)
+	}
+	for index := range volumes {
+		usage.AddVolume(&volumes[index])
+	}
+	return usage, nil
+}
 
 // loadQuota は、ユーザーの上限と使用量を読む。
 //
@@ -62,9 +97,9 @@ func loadQuota(database *gorm.DB, userID string, lock bool) (model.QuotaLimits, 
 		return model.QuotaLimits{}, model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "クォータの既定を取得できませんでした", findError)
 	}
 	// 使用量を数える。
-	var usage model.QuotaUsage
-	if countError := database.Raw(usageQuery, userID, userID, userID, userID, userID, userID).Scan(&usage).Error; countError != nil {
-		return model.QuotaLimits{}, model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", countError)
+	usage, countError := countUsage(database, userID)
+	if countError != nil {
+		return model.QuotaLimits{}, model.QuotaUsage{}, countError
 	}
 	return defaults.LimitsFor(override), usage, nil
 }
