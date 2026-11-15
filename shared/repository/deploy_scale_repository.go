@@ -24,7 +24,7 @@ type ScaleStart struct {
 //
 // スケーリングできるのは、通常の状態(active、scaled_zero、failed)の deploy だけ。行をロックして確かめる。
 // replicas が今と同じで、failed でもないときは、何も変えない(Changed が false)。
-// replicas を増やすときは、ユーザーのクォータ(CPU・メモリの合計)を、行をロックして確かめる。
+// replicas を増やすときは、ユーザーのクォータ(スペックのインスタンスの数)を、行をロックして確かめる。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -62,13 +62,9 @@ func (deployRepository *DeployRepository) BeginScale(requestContext context.Cont
 		if !changed {
 			return nil
 		}
-		// 増やすときだけ、増える分で、CPU・メモリの合計が、上限に収まるかを確かめる(減らすときは、確かめない)。
+		// 増やすときだけ、増える分で、スペックのインスタンスの数が、上限に収まるかを確かめる(減らすときは、確かめない)。
 		if replicas > start.PreviousReplicas {
-			var spec model.DeploySpec
-			if specError := transaction.Where(&model.DeploySpec{Name: deploy.Spec}).Take(&spec).Error; specError != nil {
-				return apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", specError)
-			}
-			if limitError := limits.CheckScaleUp(usage, spec, replicas-start.PreviousReplicas); limitError != nil {
+			if limitError := limits.CheckScaleUp(usage, deploy.Spec, replicas-start.PreviousReplicas); limitError != nil {
 				return limitError
 			}
 		}

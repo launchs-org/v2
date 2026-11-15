@@ -13,7 +13,7 @@ import (
 
 // countUsage は、ユーザーの使用量を数える。数え方は docs/auth.md §8.2。
 //
-// プロジェクトと deploy は deleting 以外、volume は全て数える。CPU・メモリ・volume の大きさの足し算は、モデルのメソッドに任せる。
+// プロジェクトと deploy は deleting 以外、volume は全て数える。スペックごとのインスタンスの数や、volume の大きさの足し算は、モデルのメソッドに任せる。
 // どの操作も、クォータの行をロックしてから呼ぶので、数えている間に、同じユーザーの作成・拡張は入り込まない。
 //
 // 引数:
@@ -31,22 +31,13 @@ func countUsage(database *gorm.DB, userID string) (model.QuotaUsage, error) {
 		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", countError)
 	}
 	usage.Projects = int(projectCount)
-	// スペックの一覧を読む(deploy の CPU・メモリを求めるため)。
-	var specs []model.DeploySpec
-	if findError := database.Find(&specs).Error; findError != nil {
-		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", findError)
-	}
-	specsByName := make(map[string]model.DeploySpec, len(specs))
-	for _, spec := range specs {
-		specsByName[spec.Name] = spec
-	}
-	// deploy を読んで、数と、CPU・メモリを足す(deleting 以外)。
+	// deploy を読んで、数と、スペックごとのインスタンスの数を足す(deleting 以外)。
 	var deploys []model.Deploy
 	if findError := database.Select("spec", "replicas").Where("user_id = ? AND status <> ?", userID, model.DeployStatusDeleting).Find(&deploys).Error; findError != nil {
 		return model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "使用量を数えられませんでした", findError)
 	}
 	for _, deploy := range deploys {
-		usage.AddDeploy(specsByName[deploy.Spec], deploy.Replicas)
+		usage.AddDeploy(deploy.Spec, deploy.Replicas)
 	}
 	// volume を読んで、数と、大きさを足す(全て)。
 	var volumes []model.Volume
@@ -96,12 +87,21 @@ func loadQuota(database *gorm.DB, userID string, lock bool) (model.QuotaLimits, 
 	if findError := database.Take(&defaults).Error; findError != nil {
 		return model.QuotaLimits{}, model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "クォータの既定を取得できませんでした", findError)
 	}
+	// スペックの一覧(スペックごとの既定の上限を持つ)と、ユーザーのスペックごとの上書きを読む。
+	var specs []model.DeploySpec
+	if findError := database.Find(&specs).Error; findError != nil {
+		return model.QuotaLimits{}, model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", findError)
+	}
+	var specOverrides []model.AccountSpecQuota
+	if findError := database.Where("user_id = ?", userID).Find(&specOverrides).Error; findError != nil {
+		return model.QuotaLimits{}, model.QuotaUsage{}, apperror.Wrap(apperror.KindInternal, "クォータを確認できませんでした", findError)
+	}
 	// 使用量を数える。
 	usage, countError := countUsage(database, userID)
 	if countError != nil {
 		return model.QuotaLimits{}, model.QuotaUsage{}, countError
 	}
-	return defaults.LimitsFor(override), usage, nil
+	return defaults.LimitsFor(override, specs, specOverrides), usage, nil
 }
 
 // QuotaRepository は、ユーザーの上限と使用量を読む。作成・拡張の判定は、各リソースの repository が、同じトランザクションの中で行う。

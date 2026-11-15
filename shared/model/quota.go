@@ -17,12 +17,6 @@ type QuotaDefaults struct {
 	// MaxDeploys は、deploy の数の上限。
 	MaxDeploys int `gorm:"column:max_deploys"`
 
-	// MaxCPUMillicores は、deploy の CPU の合計の上限(ミリコア)。
-	MaxCPUMillicores int `gorm:"column:max_cpu_millicores"`
-
-	// MaxMemoryMiB は、deploy のメモリの合計の上限(MiB)。
-	MaxMemoryMiB int `gorm:"column:max_memory_mib"`
-
 	// MaxVolumes は、volume の数の上限。
 	MaxVolumes int `gorm:"column:max_volumes"`
 
@@ -46,10 +40,28 @@ type AccountQuota struct {
 	// MaxProjects 以下は、QuotaDefaults と同じ意味の、上書きの値(nil なら既定)。
 	MaxProjects      *int `gorm:"column:max_projects"`
 	MaxDeploys       *int `gorm:"column:max_deploys"`
-	MaxCPUMillicores *int `gorm:"column:max_cpu_millicores"`
-	MaxMemoryMiB     *int `gorm:"column:max_memory_mib"`
 	MaxVolumes       *int `gorm:"column:max_volumes"`
 	MaxVolumeTotalMB *int `gorm:"column:max_volume_total_mb"`
+}
+
+// AccountSpecQuota は、account_spec_quotas テーブルの1行。ユーザーごとの、スペックのインスタンス数の上書き。
+type AccountSpecQuota struct {
+	// UserID は、持ち主のユーザー ID。
+	UserID string `gorm:"column:user_id;primaryKey"`
+
+	// Spec は、スペックの名前。
+	Spec string `gorm:"column:spec;primaryKey"`
+
+	// MaxInstances は、そのスペックのインスタンス(replicas)の数の上限。
+	MaxInstances int `gorm:"column:max_instances"`
+}
+
+// TableName は、Gorm にテーブル名を教える。
+//
+// 戻り値:
+//   - テーブル名("account_spec_quotas")。
+func (AccountSpecQuota) TableName() string {
+	return "account_spec_quotas"
 }
 
 // TableName は、Gorm にテーブル名を教える。
@@ -64,10 +76,11 @@ func (AccountQuota) TableName() string {
 type QuotaLimits struct {
 	MaxProjects      int
 	MaxDeploys       int
-	MaxCPUMillicores int
-	MaxMemoryMiB     int
 	MaxVolumes       int
 	MaxVolumeTotalMB int
+
+	// MaxInstancesBySpec は、スペックの名前ごとの、インスタンス(replicas)の数の上限。
+	MaxInstancesBySpec map[string]int
 }
 
 // QuotaUsage は、ユーザーの使用量。数え方は docs/auth.md §8.2。
@@ -78,11 +91,8 @@ type QuotaUsage struct {
 	// Deploys は、deploy の数(deleting 以外)。
 	Deploys int
 
-	// CPUMillicores は、replicas × スペックの CPU の合計(deleting 以外)。
-	CPUMillicores int
-
-	// MemoryMiB は、replicas × スペックのメモリの合計(deleting 以外)。
-	MemoryMiB int
+	// InstancesBySpec は、スペックの名前ごとの、インスタンス(replicas の合計。deleting 以外)の数。
+	InstancesBySpec map[string]int
 
 	// Volumes は、volume の数。
 	Volumes int
@@ -95,10 +105,12 @@ type QuotaUsage struct {
 //
 // 引数:
 //   - override: ユーザーごとの上書き(行が無ければ、ゼロ値でよい)。
+//   - specs: スペックの一覧(スペックごとの既定の上限を持つ)。
+//   - specOverrides: ユーザーごとの、スペックのインスタンス数の上書き。
 //
 // 戻り値:
 //   - そのユーザーに適用される上限。
-func (defaults QuotaDefaults) LimitsFor(override AccountQuota) QuotaLimits {
+func (defaults QuotaDefaults) LimitsFor(override AccountQuota, specs []DeploySpec, specOverrides []AccountSpecQuota) QuotaLimits {
 	// 上書きがあればそれを、無ければ既定を使う。
 	pick := func(overridden *int, fallback int) int {
 		if overridden != nil {
@@ -106,26 +118,35 @@ func (defaults QuotaDefaults) LimitsFor(override AccountQuota) QuotaLimits {
 		}
 		return fallback
 	}
+	// スペックごとに、既定の上限を入れてから、ユーザーの上書きで置き換える。
+	maxInstances := make(map[string]int, len(specs))
+	for _, spec := range specs {
+		maxInstances[spec.Name] = spec.DefaultMaxInstances
+	}
+	for _, specOverride := range specOverrides {
+		maxInstances[specOverride.Spec] = specOverride.MaxInstances
+	}
 	return QuotaLimits{
-		MaxProjects:      pick(override.MaxProjects, defaults.MaxProjects),
-		MaxDeploys:       pick(override.MaxDeploys, defaults.MaxDeploys),
-		MaxCPUMillicores: pick(override.MaxCPUMillicores, defaults.MaxCPUMillicores),
-		MaxMemoryMiB:     pick(override.MaxMemoryMiB, defaults.MaxMemoryMiB),
-		MaxVolumes:       pick(override.MaxVolumes, defaults.MaxVolumes),
-		MaxVolumeTotalMB: pick(override.MaxVolumeTotalMB, defaults.MaxVolumeTotalMB),
+		MaxProjects:        pick(override.MaxProjects, defaults.MaxProjects),
+		MaxDeploys:         pick(override.MaxDeploys, defaults.MaxDeploys),
+		MaxVolumes:         pick(override.MaxVolumes, defaults.MaxVolumes),
+		MaxVolumeTotalMB:   pick(override.MaxVolumeTotalMB, defaults.MaxVolumeTotalMB),
+		MaxInstancesBySpec: maxInstances,
 	}
 }
 
-// AddDeploy は、deploy 1つ分を、使用量に足す(deploy の数、CPU、メモリ)。
+// AddDeploy は、deploy 1つ分を、使用量に足す(deploy の数と、スペックごとのインスタンスの数)。
 //
 // 引数:
-//   - spec: deploy のスペック。
-//   - replicas: deploy のレプリカ数(0 なら、CPU とメモリは増えない)。
-func (usage *QuotaUsage) AddDeploy(spec DeploySpec, replicas int) {
-	// 数と、レプリカ数の分の CPU・メモリを足す。
+//   - specName: deploy のスペックの名前。
+//   - replicas: deploy のレプリカ数(0 なら、インスタンスは増えない)。
+func (usage *QuotaUsage) AddDeploy(specName string, replicas int) {
+	// 数を足し、スペックごとの数を、無ければ作って足す。
 	usage.Deploys++
-	usage.CPUMillicores += replicas * spec.CPUMillicores
-	usage.MemoryMiB += replicas * spec.MemoryMiB
+	if usage.InstancesBySpec == nil {
+		usage.InstancesBySpec = map[string]int{}
+	}
+	usage.InstancesBySpec[specName] += replicas
 }
 
 // AddVolume は、volume 1つ分を、使用量に足す(volume の数と、予約する大きさ)。
@@ -183,57 +204,53 @@ func (limits QuotaLimits) CheckProjectCreate(usage QuotaUsage) error {
 	return nil
 }
 
-// checkCompute は、CPU とメモリの合計が、増える分を足しても、上限に収まるかを確かめる。
+// checkInstances は、スペックのインスタンスの数が、増える分を足しても、上限に収まるかを確かめる。
 //
 // 引数:
 //   - usage: 使用量。
-//   - addedReplicas: 増えるレプリカ数。
-//   - spec: スペック。
+//   - specName: スペックの名前。
+//   - addedInstances: 増えるインスタンスの数。
 //
 // 戻り値:
-//   - 超えるなら conflict。
-func (limits QuotaLimits) checkCompute(usage QuotaUsage, spec DeploySpec, addedReplicas int) error {
-	// 増える分を求めて、CPU、メモリの順に確かめる。
-	addedCPU, addedMemory := addedReplicas*spec.CPUMillicores, addedReplicas*spec.MemoryMiB
-	if usage.CPUMillicores+addedCPU > limits.MaxCPUMillicores {
-		return exceededTotal("CPU ", "ミリコア", limits.MaxCPUMillicores, usage.CPUMillicores, addedCPU)
-	}
-	if usage.MemoryMiB+addedMemory > limits.MaxMemoryMiB {
-		return exceededTotal("メモリ", "MiB", limits.MaxMemoryMiB, usage.MemoryMiB, addedMemory)
+//   - 超えるなら conflict(上限が無いスペックは、0 として扱う)。
+func (limits QuotaLimits) checkInstances(usage QuotaUsage, specName string, addedInstances int) error {
+	// 使用量と増える分の合計が、そのスペックの上限を超えるなら、増やせない。
+	if usage.InstancesBySpec[specName]+addedInstances > limits.MaxInstancesBySpec[specName] {
+		return exceededTotal(specName+" のインスタンス", "個", limits.MaxInstancesBySpec[specName], usage.InstancesBySpec[specName], addedInstances)
 	}
 	return nil
 }
 
-// CheckDeployCreate は、deploy を1つ作れるか(数と、CPU・メモリの合計)を確かめる。
+// CheckDeployCreate は、deploy を1つ作れるか(deploy の数と、スペックのインスタンスの数)を確かめる。
 //
 // 引数:
 //   - usage: 使用量。
-//   - spec: 作る deploy のスペック。
+//   - specName: 作る deploy のスペックの名前。
 //   - replicas: 作る deploy のレプリカ数。
 //
 // 戻り値:
 //   - 超えるなら conflict。
-func (limits QuotaLimits) CheckDeployCreate(usage QuotaUsage, spec DeploySpec, replicas int) error {
+func (limits QuotaLimits) CheckDeployCreate(usage QuotaUsage, specName string, replicas int) error {
 	// 数が上限に達していたら、作れない。
 	if usage.Deploys >= limits.MaxDeploys {
 		return exceededCount("deploy の数", limits.MaxDeploys, usage.Deploys)
 	}
-	// CPU とメモリの合計を確かめる。
-	return limits.checkCompute(usage, spec, replicas)
+	// スペックのインスタンスの数を確かめる。
+	return limits.checkInstances(usage, specName, replicas)
 }
 
-// CheckScaleUp は、レプリカ数を増やせるか(CPU・メモリの合計)を確かめる。減らすときは、呼ばない。
+// CheckScaleUp は、レプリカ数を増やせるか(スペックのインスタンスの数)を確かめる。減らすときは、呼ばない。
 //
 // 引数:
 //   - usage: 使用量(いまのレプリカ数で数えたもの)。
-//   - spec: deploy のスペック。
+//   - specName: deploy のスペックの名前。
 //   - addedReplicas: 増えるレプリカ数(新しい数 - いまの数)。
 //
 // 戻り値:
 //   - 超えるなら conflict。
-func (limits QuotaLimits) CheckScaleUp(usage QuotaUsage, spec DeploySpec, addedReplicas int) error {
-	// 増える分で、合計を確かめる。
-	return limits.checkCompute(usage, spec, addedReplicas)
+func (limits QuotaLimits) CheckScaleUp(usage QuotaUsage, specName string, addedReplicas int) error {
+	// 増える分で、スペックのインスタンスの数を確かめる。
+	return limits.checkInstances(usage, specName, addedReplicas)
 }
 
 // CheckVolumeCreate は、volume を1つ作れるか(数と、大きさの合計)を確かめる。

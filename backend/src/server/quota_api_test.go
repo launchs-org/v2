@@ -25,8 +25,9 @@ func TestQuotaAPI(testingT *testing.T) {
 		testingT.Fatalf("既定の上限で、使用量 0 のはず: %d %v", status, body)
 	}
 	volumeTotal, _ := body["volumeTotalMB"].(map[string]any)
-	cpu, _ := body["cpuMillicores"].(map[string]any)
-	if volumeTotal["limit"] != float64(20480) || cpu["limit"] != float64(4000) {
+	instances, _ := body["instances"].(map[string]any)
+	large, _ := instances["large"].(map[string]any)
+	if volumeTotal["limit"] != float64(20480) || large["limit"] != float64(5) || large["used"] != float64(0) || len(instances) != 3 {
 		testingT.Fatalf("初期値のはず: %v", body)
 	}
 	// alice の上限を2にして、3つ目の作成が 409 になる。

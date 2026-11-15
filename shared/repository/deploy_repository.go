@@ -67,7 +67,7 @@ func (deployRepository *DeployRepository) FindSpec(requestContext context.Contex
 //   - requestContext: キャンセルや期限を伝える context。
 //   - deploy: 保存する deploy。ID は、呼び出し側で作っておく。
 //
-// 保存の前に、ユーザーのクォータ(deploy の数、CPU・メモリの合計)も、行をロックして確かめる。
+// 保存の前に、ユーザーのクォータ(deploy の数、スペックのインスタンスの数)も、行をロックして確かめる。
 //
 // 戻り値:
 //   - プロジェクトが無い、または他のユーザーのものなら not_found。
@@ -102,7 +102,7 @@ func (deployRepository *DeployRepository) Create(requestContext context.Context,
 			return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、deploy を作れません")
 		}
 
-		// スペックを読んで、deploy の数と、CPU・メモリの合計が、上限に収まるかを確かめる。
+		// スペックが存在することを確かめる(無い名前は、リクエストの値の不正)。
 		var spec model.DeploySpec
 		if specError := transaction.Where(&model.DeploySpec{Name: deploy.Spec}).Take(&spec).Error; specError != nil {
 			if errors.Is(specError, gorm.ErrRecordNotFound) {
@@ -110,7 +110,8 @@ func (deployRepository *DeployRepository) Create(requestContext context.Context,
 			}
 			return apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", specError)
 		}
-		if limitError := limits.CheckDeployCreate(usage, spec, deploy.Replicas); limitError != nil {
+		// deploy の数と、スペックのインスタンスの数が、上限に収まるかを確かめる。
+		if limitError := limits.CheckDeployCreate(usage, spec.Name, deploy.Replicas); limitError != nil {
 			return limitError
 		}
 
