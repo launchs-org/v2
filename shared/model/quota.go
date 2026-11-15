@@ -73,22 +73,22 @@ type QuotaLimits struct {
 // QuotaUsage は、ユーザーの使用量。数え方は docs/auth.md §8.2。
 type QuotaUsage struct {
 	// Projects は、プロジェクトの数(deleting 以外)。
-	Projects int `gorm:"column:projects"`
+	Projects int
 
 	// Deploys は、deploy の数(deleting 以外)。
-	Deploys int `gorm:"column:deploys"`
+	Deploys int
 
 	// CPUMillicores は、replicas × スペックの CPU の合計(deleting 以外)。
-	CPUMillicores int `gorm:"column:cpu_millicores"`
+	CPUMillicores int
 
 	// MemoryMiB は、replicas × スペックのメモリの合計(deleting 以外)。
-	MemoryMiB int `gorm:"column:memory_mib"`
+	MemoryMiB int
 
 	// Volumes は、volume の数。
-	Volumes int `gorm:"column:volumes"`
+	Volumes int
 
 	// VolumeTotalMB は、volume の大きさの合計(size と pending の大きい方。MB)。
-	VolumeTotalMB int `gorm:"column:volume_total_mb"`
+	VolumeTotalMB int
 }
 
 // LimitsFor は、既定に、ユーザーごとの上書きを重ねて、そのユーザーの上限にする。
@@ -114,6 +114,28 @@ func (defaults QuotaDefaults) LimitsFor(override AccountQuota) QuotaLimits {
 		MaxVolumes:       pick(override.MaxVolumes, defaults.MaxVolumes),
 		MaxVolumeTotalMB: pick(override.MaxVolumeTotalMB, defaults.MaxVolumeTotalMB),
 	}
+}
+
+// AddDeploy は、deploy 1つ分を、使用量に足す(deploy の数、CPU、メモリ)。
+//
+// 引数:
+//   - spec: deploy のスペック。
+//   - replicas: deploy のレプリカ数(0 なら、CPU とメモリは増えない)。
+func (usage *QuotaUsage) AddDeploy(spec DeploySpec, replicas int) {
+	// 数と、レプリカ数の分の CPU・メモリを足す。
+	usage.Deploys++
+	usage.CPUMillicores += replicas * spec.CPUMillicores
+	usage.MemoryMiB += replicas * spec.MemoryMiB
+}
+
+// AddVolume は、volume 1つ分を、使用量に足す(volume の数と、予約する大きさ)。
+//
+// 引数:
+//   - volume: volume(拡張の pending があれば、大きい方が数えられる)。
+func (usage *QuotaUsage) AddVolume(volume *Volume) {
+	// 数と、予約する大きさを足す。
+	usage.Volumes++
+	usage.VolumeTotalMB += volume.ReservedMB()
 }
 
 // exceededCount は、数の上限に達したときの conflict のエラーを作る。
