@@ -1,8 +1,10 @@
 package password
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"launchs/shared/apperror"
 )
@@ -110,4 +112,35 @@ func asAppError(checkedError error, target **apperror.Error) bool {
 	appError, isAppError := checkedError.(*apperror.Error)
 	*target = appError
 	return isAppError
+}
+
+// TestHasherConcurrencyLimit は、同時に計算できる数の上限に達したとき、待っても空かなければ ErrBusy になり、空けば、また計算できることを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestHasherConcurrencyLimit(testing *testing.T) {
+	// 同時に1つ、待ち時間は短い Hasher を作る(元の Hasher は、制限されない)。
+	unlimited := NewHasher(lowCostParameters)
+	limited := unlimited.WithConcurrencyLimit(1, 10*time.Millisecond)
+	if unlimited.slots != nil {
+		testing.Fatal("元の Hasher は、制限されないはず")
+	}
+	// 空きを1つ取って、塞ぐ。
+	release, acquireError := limited.acquire()
+	if acquireError != nil {
+		testing.Fatalf("最初は取れるはず: %v", acquireError)
+	}
+	// 塞がっている間は、作成も検証も ErrBusy になる。
+	if _, hashError := limited.Hash("correct horse battery"); !errors.Is(hashError, ErrBusy) {
+		testing.Errorf("ErrBusy のはず: %v", hashError)
+	}
+	hash, _ := unlimited.Hash("correct horse battery")
+	if _, _, verifyError := limited.Verify("correct horse battery", hash); !errors.Is(verifyError, ErrBusy) {
+		testing.Errorf("ErrBusy のはず: %v", verifyError)
+	}
+	// 空きを返すと、また計算できる。
+	release()
+	if matched, _, verifyError := limited.Verify("correct horse battery", hash); !matched || verifyError != nil {
+		testing.Errorf("空けば、検証できるはず: %v %v", matched, verifyError)
+	}
 }

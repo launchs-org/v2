@@ -44,6 +44,20 @@ type testEnvironment struct {
 // 戻り値:
 //   - 組み立てた環境。
 func newTestEnvironment(testing *testing.T, mutate func(*service.Settings)) *testEnvironment {
+	// 弱いパラメータの Hasher で、組み立てる。
+	return newTestEnvironmentWithHasher(testing, mutate, password.NewHasher(password.Parameters{MemoryKiB: 8, Iterations: 1, Parallelism: 1}))
+}
+
+// newTestEnvironmentWithHasher は、Hasher を指定して、認証のサーバーを組み立てる。
+//
+// 引数:
+//   - testing: テストの状態。
+//   - mutate: 設定を変えたいときの関数(無ければ nil)。
+//   - hasher: パスワードのハッシュ。
+//
+// 戻り値:
+//   - 組み立てた環境。
+func newTestEnvironmentWithHasher(testing *testing.T, mutate func(*service.Settings), hasher *password.Hasher) *testEnvironment {
 	// 使い捨てのデータベースと、一時ディレクトリの署名鍵を用意する。
 	database := testdatabase.NewWithMigrations(testing, "auth")
 	clock := time.Now()
@@ -61,7 +75,7 @@ func newTestEnvironment(testing *testing.T, mutate func(*service.Settings)) *tes
 	}
 	authService, serviceError := service.NewAuthService(repository.NewUserRepository(database), repository.NewRefreshTokenRepository(database),
 		repository.NewLoginFailureRepository(database), repository.NewRateLimitRepository(database), repository.NewLoginEventRepository(database), logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo),
-		password.NewHasher(password.Parameters{MemoryKiB: 8, Iterations: 1, Parallelism: 1}), tokens, settings)
+		hasher, tokens, settings)
 	if serviceError != nil {
 		testing.Fatal(serviceError)
 	}
@@ -604,5 +618,84 @@ func TestLoginHistorySkipsRateLimitedAndTruncates(testing *testing.T) {
 	environment.database.Raw("SELECT max(length(user_agent)) FROM login_events").Scan(&longest)
 	if count != 2 || longest != 256 {
 		testing.Errorf("レート制限に当たった1件は残らず、User-Agent は256バイトのはず: %d %d", count, longest)
+	}
+}
+
+// TestRequestHardening は、大きすぎるボディを 413 で断ること、トークンを含むレスポンスに no-store が付くこと(JWKS は除く)を確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestRequestHardening(testing *testing.T) {
+	// 環境を用意する。
+	environment := newTestEnvironment(testing, nil)
+	// 上限(16KiB)を超えるボディは、どのエンドポイントでも 413 になる。
+	hugeBody := `{"userName":"alice","password":"` + strings.Repeat("a", MaxRequestBodyBytes) + `"}`
+	for _, path := range []string{"/auth/login", "/auth/signup"} {
+		if tooLarge := call(testing, environment, http.MethodPost, path, hugeBody, "", "203.0.113.1"); tooLarge.status != http.StatusRequestEntityTooLarge {
+			testing.Errorf("%s は 413 のはず: %d", path, tooLarge.status)
+		}
+	}
+	// 上限以内の、普通のボディは通る。
+	signedUp := signup(testing, environment, "alice", goodPassword, "203.0.113.1")
+	if signedUp.status != 200 {
+		testing.Fatalf("200 のはず: %d", signedUp.status)
+	}
+	// トークンを返すレスポンスと、エラーのレスポンスに、no-store が付く。
+	if signedUp.header.Get("Cache-Control") != "no-store" {
+		testing.Errorf("signup は no-store のはず: %q", signedUp.header.Get("Cache-Control"))
+	}
+	if failed := login(testing, environment, "alice", "wrong password!!", "203.0.113.1"); failed.status != 401 || failed.header.Get("Cache-Control") != "no-store" {
+		testing.Errorf("失敗も no-store のはず: %d %q", failed.status, failed.header.Get("Cache-Control"))
+	}
+	// JWKS だけは、キャッシュを許す。
+	if jwks := call(testing, environment, http.MethodGet, "/auth/.well-known/jwks.json", "", "", "203.0.113.1"); jwks.header.Get("Cache-Control") != "public, max-age=300" {
+		testing.Errorf("JWKS はキャッシュを許すはず: %q", jwks.header.Get("Cache-Control"))
+	}
+}
+
+// TestHashConcurrencyLimit は、パスワードの計算が混み合ったとき、500 ではなく、Retry-After つきの 429 になることを確かめる。
+//
+// 同時に1つしか計算できない Hasher に、同時にログインを送り、少なくとも1つが 429 になることを見る。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestHashConcurrencyLimit(testing *testing.T) {
+	// 計算に時間がかかるパラメータで、同時に1つだけ、待ち時間は短くする。
+	hasher := password.NewHasher(password.Parameters{MemoryKiB: 32 * 1024, Iterations: 2, Parallelism: 1}).WithConcurrencyLimit(1, time.Millisecond)
+	environment := newTestEnvironmentWithHasher(testing, func(settings *service.Settings) { settings.LoginIPLimit = 1000 }, hasher)
+	// 先に、ユーザーを1人作る。
+	if signedUp := signup(testing, environment, "alice", goodPassword, "203.0.113.1"); signedUp.status != 200 {
+		testing.Fatalf("200 のはず: %d", signedUp.status)
+	}
+	// 同時に、8つのログインを送る。
+	const concurrentLogins = 8
+	responses := make(chan response, concurrentLogins)
+	for index := 0; index < concurrentLogins; index++ {
+		go func() {
+			responses <- login(testing, environment, "alice", goodPassword, "203.0.113.2")
+		}()
+	}
+	// 結果を集める: 成功か、429(Retry-After つき)のどちらかで、500 や 401 は無い。
+	tooManyCount := 0
+	for index := 0; index < concurrentLogins; index++ {
+		result := <-responses
+		switch result.status {
+		case 200:
+		case 429:
+			tooManyCount++
+			if result.header.Get("Retry-After") != "1" {
+				testing.Errorf("Retry-After は 1 のはず: %q", result.header.Get("Retry-After"))
+			}
+		default:
+			testing.Errorf("200 か 429 のはず: %d %v", result.status, result.body)
+		}
+	}
+	// 混み合っていたので、少なくとも1つは待たされる。
+	if tooManyCount == 0 {
+		testing.Error("少なくとも1つは 429 のはず")
+	}
+	// 待たされたものは、失敗として数えられていない(ロックされない)。落ち着いてから、普通にログインできる。
+	if after := login(testing, environment, "alice", goodPassword, "203.0.113.3"); after.status != 200 {
+		testing.Errorf("混雑の後は成功するはず: %d", after.status)
 	}
 }

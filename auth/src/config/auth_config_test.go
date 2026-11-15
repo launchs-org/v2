@@ -33,7 +33,7 @@ func TestLoadAuthConfig(testing *testing.T) {
 	minimal, minimalError := LoadAuthConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "AUTH_KEYS_DIR": "/keys"}))
 	if minimalError != nil || minimal.HTTPPort != 8080 || minimal.SignupMode != "open" || minimal.LoginMaxFailures != 5 || minimal.LoginLockDuration != 15*time.Minute ||
 		minimal.LoginIPLimit != 20 || minimal.LoginIPWindow != time.Minute || minimal.SignupIPLimit != 10 || minimal.SignupIPWindow != time.Hour ||
-		minimal.LoginHistoryRetention != 180*24*time.Hour || minimal.KeysAutoGenerate || minimal.ActiveKeyID != "" || len(minimal.TrustedProxyCIDRs) != 0 {
+		minimal.LoginHistoryRetention != 180*24*time.Hour || minimal.KeysAutoGenerate || minimal.ActiveKeyID != "" || len(minimal.TrustedProxyCIDRs) != 0 || minimal.HashMaxConcurrency != 4 {
 		testing.Fatalf("既定値のはず: %+v %v", minimal, minimalError)
 	}
 	// 値を指定すると、置き換わる。
@@ -47,12 +47,12 @@ func TestLoadAuthConfig(testing *testing.T) {
 	}
 	// 必須が無い、不正な値は、まとめてエラーにする。
 	_, invalidError := LoadAuthConfig(newTestReader(map[string]string{
-		"AUTH_SIGNUP_MODE": "closed", "AUTH_KEYS_AUTOGENERATE": "yes", "AUTH_LOGIN_MAX_FAILURES": "0", "AUTH_LOGIN_IP_WINDOW": "-1m", "HTTP_PORT": "70000", "LOG_LEVEL": "loud",
+		"AUTH_SIGNUP_MODE": "closed", "AUTH_KEYS_AUTOGENERATE": "yes", "AUTH_LOGIN_MAX_FAILURES": "0", "AUTH_LOGIN_IP_WINDOW": "-1m", "AUTH_HASH_MAX_CONCURRENCY": "0", "HTTP_PORT": "70000", "LOG_LEVEL": "loud",
 	}))
 	if invalidError == nil {
 		testing.Fatal("エラーのはず")
 	}
-	for _, expected := range []string{"DATABASE_URL", "AUTH_KEYS_DIR", "AUTH_SIGNUP_MODE", "AUTH_KEYS_AUTOGENERATE", "AUTH_LOGIN_MAX_FAILURES", "AUTH_LOGIN_IP_WINDOW", "HTTP_PORT", "LOG_LEVEL"} {
+	for _, expected := range []string{"DATABASE_URL", "AUTH_KEYS_DIR", "AUTH_SIGNUP_MODE", "AUTH_KEYS_AUTOGENERATE", "AUTH_LOGIN_MAX_FAILURES", "AUTH_LOGIN_IP_WINDOW", "AUTH_HASH_MAX_CONCURRENCY", "HTTP_PORT", "LOG_LEVEL"} {
 		if !strings.Contains(invalidError.Error(), expected) {
 			testing.Errorf("%s の問題を、報告するはず: %v", expected, invalidError)
 		}

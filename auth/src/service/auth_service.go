@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -94,6 +95,10 @@ func (authService *AuthService) Signup(requestContext context.Context, clientIP 
 	}
 	// 4. ハッシュを作って、保存する(招待は、同じトランザクションで使用済みにする)。
 	passwordHash, hashError := authService.hasher.Hash(plainPassword)
+	if errors.Is(hashError, password.ErrBusy) {
+		// 計算が混み合っているときは、少し待たせる(429)。
+		return "", &RateLimitedError{RetryAfter: busyRetryAfter}
+	}
 	if hashError != nil {
 		return "", apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
 	}
@@ -154,6 +159,10 @@ func (authService *AuthService) Login(requestContext context.Context, clientIP s
 		hashToVerify = user.PasswordHash
 	}
 	matched, needsRehash, verifyError := authService.hasher.Verify(plainPassword, hashToVerify)
+	if errors.Is(verifyError, password.ErrBusy) {
+		// 計算が混み合っているときは、少し待たせる(429)。失敗には数えない。
+		return "", &RateLimitedError{RetryAfter: busyRetryAfter}
+	}
 	if verifyError != nil {
 		return "", apperror.Wrap(apperror.KindInternal, "パスワードを確かめられませんでした", verifyError)
 	}

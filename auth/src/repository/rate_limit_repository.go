@@ -27,7 +27,9 @@ func NewRateLimitRepository(database *gorm.DB) *RateLimitRepository {
 
 // Hit は、IP の試行を1回記録し、時間枠の中の回数が上限を超えていないかを返す(スライディングウィンドウ)。
 //
-// 時刻は、データベースの時計で扱う。上限を超えた試行も、記録する(続けて試すほど、解除が遅くなる)。
+// 時刻は、データベースの時計で扱う。上限に達しているときは、許さず、記録もしない
+// (大量に送られても、行が増えず、数える処理も重くならない。時間枠が進めば、また許される)。
+// 同じ種類・IP の判定は、アドバイザリロックで順番に行うので、同時に来ても、上限を超えて許さない。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -45,9 +47,9 @@ func (rateLimitRepository *RateLimitRepository) Hit(requestContext context.Conte
 	allowed := true
 	retryAfter := time.Duration(0)
 	transactionError := rateLimitRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
-		// 試行を記録する。
-		if insertError := transaction.Exec("INSERT INTO rate_limit_events (kind, ip) VALUES (?, ?)", kind, ip).Error; insertError != nil {
-			return insertError
+		// 同じ種類・IP の判定を、順番にする(トランザクションの終わりで、ロックが外れる)。
+		if lockError := transaction.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", kind+"|"+ip).Error; lockError != nil {
+			return lockError
 		}
 		// 時間枠の中の回数を数える。
 		var count int64
@@ -56,17 +58,18 @@ func (rateLimitRepository *RateLimitRepository) Hit(requestContext context.Conte
 			kind, ip, window.Seconds()).Scan(&count).Error; countError != nil {
 			return countError
 		}
-		if count <= int64(limit) {
-			return nil
+		// 上限に達していなければ、試行を記録して、許す。
+		if count < int64(limit) {
+			return transaction.Exec("INSERT INTO rate_limit_events (kind, ip) VALUES (?, ?)", kind, ip).Error
 		}
-		// 上限を超えた。回数が上限に戻るのは、古い方から (count - limit) 番目の試行が、時間枠から外れるとき。
+		// 上限に達している(記録しない)。あと1回許されるのは、古い方から (count - limit + 1) 番目の試行が、時間枠から外れるとき。
 		allowed = false
 		var remainingSeconds float64
 		if waitError := transaction.Raw(`
 			SELECT EXTRACT(EPOCH FROM (occurred_at + make_interval(secs => ?) - now()))::float8
 			FROM rate_limit_events WHERE kind = ? AND ip = ? AND occurred_at > now() - make_interval(secs => ?)
 			ORDER BY occurred_at, id OFFSET ? LIMIT 1`,
-			window.Seconds(), kind, ip, window.Seconds(), count-int64(limit)-1).Scan(&remainingSeconds).Error; waitError != nil {
+			window.Seconds(), kind, ip, window.Seconds(), count-int64(limit)).Scan(&remainingSeconds).Error; waitError != nil {
 			return waitError
 		}
 		retryAfter = time.Duration(remainingSeconds * float64(time.Second))

@@ -24,6 +24,7 @@ const (
 	defaultSignupIPLimit         = 10
 	defaultSignupIPWindow        = time.Hour
 	defaultLoginHistoryRetention = 180 * 24 * time.Hour
+	defaultHashMaxConcurrency    = 4
 )
 
 // AuthConfig は、認証コンテナの設定。
@@ -68,6 +69,9 @@ type AuthConfig struct {
 	// SignupIPLimit と SignupIPWindow は、IP ごとのサインアップの上限と時間枠(環境変数 AUTH_SIGNUP_IP_LIMIT、AUTH_SIGNUP_IP_WINDOW)。
 	SignupIPLimit  int
 	SignupIPWindow time.Duration
+
+	// HashMaxConcurrency は、パスワードのハッシュを、同時に計算できる数(環境変数 AUTH_HASH_MAX_CONCURRENCY)。メモリを守るための上限。
+	HashMaxConcurrency int
 }
 
 // LoadAuthConfig は、環境変数から、認証コンテナの設定を読み込む。
@@ -96,6 +100,7 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 	loginIPWindow := reader.OptionalDuration("AUTH_LOGIN_IP_WINDOW", defaultLoginIPWindow)
 	signupIPLimit := reader.OptionalInt("AUTH_SIGNUP_IP_LIMIT", defaultSignupIPLimit)
 	signupIPWindow := reader.OptionalDuration("AUTH_SIGNUP_IP_WINDOW", defaultSignupIPWindow)
+	hashMaxConcurrency := reader.OptionalInt("AUTH_HASH_MAX_CONCURRENCY", defaultHashMaxConcurrency)
 	loginHistoryRetention := reader.OptionalDuration("AUTH_LOGIN_HISTORY_RETENTION", defaultLoginHistoryRetention)
 	loadError := reader.Err()
 
@@ -120,7 +125,7 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 	for name, valid := range map[string]bool{
 		"AUTH_LOGIN_MAX_FAILURES": loginMaxFailures > 0, "AUTH_LOGIN_LOCK_DURATION": loginLockDuration > 0,
 		"AUTH_LOGIN_IP_LIMIT": loginIPLimit > 0, "AUTH_LOGIN_IP_WINDOW": loginIPWindow > 0,
-		"AUTH_LOGIN_HISTORY_RETENTION": loginHistoryRetention > 0, "AUTH_SIGNUP_IP_LIMIT": signupIPLimit > 0, "AUTH_SIGNUP_IP_WINDOW": signupIPWindow > 0,
+		"AUTH_LOGIN_HISTORY_RETENTION": loginHistoryRetention > 0, "AUTH_SIGNUP_IP_LIMIT": signupIPLimit > 0, "AUTH_SIGNUP_IP_WINDOW": signupIPWindow > 0, "AUTH_HASH_MAX_CONCURRENCY": hashMaxConcurrency > 0,
 	} {
 		if !valid {
 			loadError = errors.Join(loadError, fmt.Errorf("環境変数 %s は、正の値でなければならない", name))
@@ -135,6 +140,7 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 		KeysAutoGenerate: autoGenerateText == "true", SignupMode: signupMode, TrustedProxyCIDRs: splitCommaSeparated(trustedProxyText),
 		LoginMaxFailures: loginMaxFailures, LoginLockDuration: loginLockDuration, LoginIPLimit: loginIPLimit, LoginIPWindow: loginIPWindow,
 		SignupIPLimit: signupIPLimit, SignupIPWindow: signupIPWindow, LoginHistoryRetention: loginHistoryRetention,
+		HashMaxConcurrency: hashMaxConcurrency,
 	}, nil
 }
 

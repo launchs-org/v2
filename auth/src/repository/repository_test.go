@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,6 +245,31 @@ func TestRateLimitRepository(testing *testing.T) {
 	allowed, retryAfter, _ := repository.Hit(ctx, "login", "203.0.113.1", 3, time.Minute)
 	if allowed || retryAfter <= 0 || retryAfter > time.Minute {
 		testing.Fatalf("許されず、待ち時間が、0より大きく1分以内のはず: %v %v", allowed, retryAfter)
+	}
+	// 許されなかった試行は、記録されない(大量に送られても、行が増えない)。
+	for attempt := 0; attempt < 20; attempt++ {
+		_, _, _ = repository.Hit(ctx, "login", "203.0.113.1", 3, time.Minute)
+	}
+	var recorded int64
+	database.Raw("SELECT count(*) FROM rate_limit_events WHERE kind = 'login' AND ip = '203.0.113.1'").Scan(&recorded)
+	if recorded != 3 {
+		testing.Errorf("記録は、許された3回だけのはず: %d", recorded)
+	}
+	// 同時に来ても、上限を超えて許さない(別の IP で、同時に20回送って、許されるのは3回だけ)。
+	var concurrentAllowed atomic.Int64
+	var group sync.WaitGroup
+	for attempt := 0; attempt < 20; attempt++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if allowed, _, _ := repository.Hit(ctx, "login", "203.0.113.9", 3, time.Minute); allowed {
+				concurrentAllowed.Add(1)
+			}
+		}()
+	}
+	group.Wait()
+	if concurrentAllowed.Load() != 3 {
+		testing.Errorf("同時でも、許されるのは3回だけのはず: %d", concurrentAllowed.Load())
 	}
 	// 別の IP、別の種類は、独立している。
 	if other, _, _ := repository.Hit(ctx, "login", "203.0.113.2", 3, time.Minute); !other {
