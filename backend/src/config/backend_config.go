@@ -56,8 +56,15 @@ type BackendConfig struct {
 	// DatabaseURL は、app データベースの接続先(環境変数 DATABASE_URL)。パスワードを含むので、ログに出さない。
 	DatabaseURL string
 
-	// DevUserID は、認証のコンテナができるまで、全てのリクエストのユーザーとして扱う ID(環境変数 DEV_USER_ID)。
-	// 省略すると空になり、全ての API が 401 になる。認証のコンテナを作るときに、この設定は無くす。
+	// AuthJWKSURL は、認証のコンテナ(auth)の JWKS のエンドポイント(環境変数 AUTH_JWKS_URL。例: http://auth:8080/auth/.well-known/jwks.json)。
+	// 指定すると、access token を、この公開鍵で検証する。
+	AuthJWKSURL string
+
+	// AuthRequireJWKS は、本番の指定(環境変数 AUTH_REQUIRE_JWKS=true)。true のときは、AUTH_JWKS_URL が必須で、DEV_USER_ID は指定できない。
+	AuthRequireJWKS bool
+
+	// DevUserID は、開発用の仮の認証で、全てのリクエストのユーザーとして扱う ID(環境変数 DEV_USER_ID)。
+	// AUTH_JWKS_URL を使わないときだけ指定できる(auth を起動せずに、backend だけを試すとき用)。
 	DevUserID string
 
 	// TemporalAddress は、Temporal サーバーの接続先(環境変数 TEMPORAL_ADDRESS)。
@@ -81,7 +88,9 @@ type BackendConfig struct {
 //
 // 読む環境変数:
 //   - DATABASE_URL: app データベースの接続先(必須)。
-//   - DEV_USER_ID: 開発用の仮の認証で使うユーザー ID。省略すると、全ての API が 401 になる。
+//   - AUTH_JWKS_URL: 認証のコンテナの JWKS の URL(本番)。DEV_USER_ID のどちらか一方が必須。
+//   - AUTH_REQUIRE_JWKS: true なら、AUTH_JWKS_URL が必須で、DEV_USER_ID を拒否する(本番用。既定は false)。
+//   - DEV_USER_ID: 開発用の仮の認証で使うユーザー ID(AUTH_JWKS_URL と同時には指定できない)。
 //   - TEMPORAL_ADDRESS: Temporal サーバーの接続先。省略すると temporal:7233。
 //   - TEMPORAL_NAMESPACE: Temporal の namespace。省略すると default。
 //   - HTTP_PORT: 待ち受けるポート番号(1〜65535)。省略すると 8080。
@@ -100,6 +109,9 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 	databaseURL := reader.RequiredString("DATABASE_URL")
 	// 開発用のユーザー ID を読む。省略は許すので、既定値は空にする。
 	devUserID := reader.OptionalString("DEV_USER_ID", "")
+	// 認証の設定を読む(JWKS の URL と、本番の指定)。
+	authJWKSURL := reader.OptionalString("AUTH_JWKS_URL", "")
+	authRequireJWKSText := reader.OptionalString("AUTH_REQUIRE_JWKS", "false")
 	// ポート番号を整数で読む。整数でないときは、reader が問題として覚えておく。
 	temporalAddress := reader.OptionalString("TEMPORAL_ADDRESS", defaultTemporalAddress)
 	temporalNamespace := reader.OptionalString("TEMPORAL_NAMESPACE", defaultTemporalNamespace)
@@ -140,12 +152,29 @@ func LoadBackendConfig(reader *sharedconfig.EnvironmentReader) (BackendConfig, e
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 INGRESS_BASE_DOMAIN は、小文字の英数字とハイフンを、ドットで区切った DNS 名でなければなりません: %q", ingressBaseDomain))
 	}
 
+	// 本番の指定は、true か false。
+	if authRequireJWKSText != "true" && authRequireJWKSText != "false" {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 AUTH_REQUIRE_JWKS は true か false でなければならない: %q", authRequireJWKSText))
+	}
+	authRequireJWKS := authRequireJWKSText == "true"
+	// 認証の方法は、ちょうど1つ(JWKS か、開発用の仮の認証)。どちらも無いと、誰でも通れるか、誰も通れないので、起動させない。
+	if authJWKSURL == "" && devUserID == "" {
+		loadError = errors.Join(loadError, errors.New("環境変数 AUTH_JWKS_URL(本番)か DEV_USER_ID(開発用)のどちらかが必要です"))
+	}
+	if authJWKSURL != "" && devUserID != "" {
+		loadError = errors.Join(loadError, errors.New("環境変数 AUTH_JWKS_URL と DEV_USER_ID は、同時に指定できません"))
+	}
+	// 本番の指定のときは、全員が同じユーザーになる、開発用の仮の認証を、使わせない。
+	if authRequireJWKS && (authJWKSURL == "" || devUserID != "") {
+		loadError = errors.Join(loadError, errors.New("環境変数 AUTH_REQUIRE_JWKS=true のときは、AUTH_JWKS_URL が必須で、DEV_USER_ID は指定できません"))
+	}
+
 	// 1つでも問題があれば、中途半端な設定を使わせないため、ゼロ値とエラーを返す。
 	if loadError != nil {
 		return BackendConfig{}, loadError
 	}
 	// 問題が無いので、読み込んだ値で設定を作って返す。
-	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace,
+	return BackendConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, DevUserID: devUserID, AuthJWKSURL: authJWKSURL, AuthRequireJWKS: authRequireJWKS, TemporalAddress: temporalAddress, TemporalNamespace: temporalNamespace,
 		VolumeMaxSizeMB: volumeMaxSizeMB, IngressBaseDomain: ingressBaseDomain, IngressReservedSubdomains: splitCommaSeparated(reservedSubdomainsText)}, nil
 }
 

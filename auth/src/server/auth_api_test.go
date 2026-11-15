@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"launchs/auth/src/service"
 	"launchs/auth/src/token"
 	"launchs/shared/database/testdatabase"
+	"launchs/shared/jwtverify"
 	"launchs/shared/logger"
 
 	"log/slog"
@@ -697,5 +699,30 @@ func TestHashConcurrencyLimit(testing *testing.T) {
 	// 待たされたものは、失敗として数えられていない(ロックされない)。落ち着いてから、普通にログインできる。
 	if after := login(testing, environment, "alice", goodPassword, "203.0.113.3"); after.status != 200 {
 		testing.Errorf("混雑の後は成功するはず: %d", after.status)
+	}
+}
+
+// TestBackendVerifierAcceptsRealTokens は、backend が使う検証(shared/jwtverify)が、auth の実際の JWKS と access token で動くこと
+// (auth と backend の取り決めが合っていること)と、refresh token を access token として通さないことを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestBackendVerifierAcceptsRealTokens(testing *testing.T) {
+	// auth のサーバーを実際に立てて、その JWKS を使う検証を作る(パスは、書き換えずに、/auth/ のまま)。
+	environment := newTestEnvironment(testing, nil)
+	authServer := httptest.NewServer(environment.server)
+	defer authServer.Close()
+	verifier := jwtverify.New(jwtverify.Options{URL: authServer.URL + "/auth/.well-known/jwks.json"})
+	// サインアップして、refresh token から access token を取る。
+	refreshToken := signup(testing, environment, "alice", goodPassword, "203.0.113.1").body["token"].(string)
+	accessToken := call(testing, environment, http.MethodPost, "/auth/refresh", "", refreshToken, "203.0.113.1").body["token"].(string)
+	// access token は、通る。ユーザーの ID と名前と役割が、取り出せる。
+	claims, verifyError := verifier.Verify(context.Background(), accessToken)
+	if verifyError != nil || !strings.HasPrefix(claims.Subject, "userid-") || claims.Name != "alice" || claims.Role != "user" {
+		testing.Fatalf("access token は通るはず: %+v %v", claims, verifyError)
+	}
+	// refresh token は、access token としては通らない。
+	if _, refreshAsAccessError := verifier.Verify(context.Background(), refreshToken); refreshAsAccessError == nil {
+		testing.Error("refresh token は、通らないはず")
 	}
 }
