@@ -357,6 +357,10 @@ func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.
 		if deployError := transaction.Where(&model.Deploy{ProjectID: projectID}).Delete(&model.Deploy{}).Error; deployError != nil {
 			return deployError
 		}
+		// 配下の ingress を削除する(IngressRoute は、namespace の削除で消えている)。
+		if ingressError := transaction.Where(&model.Ingress{ProjectID: projectID}).Delete(&model.Ingress{}).Error; ingressError != nil {
+			return ingressError
+		}
 		// プロジェクトの行を削除する。
 		return transaction.Delete(&project).Error
 	})

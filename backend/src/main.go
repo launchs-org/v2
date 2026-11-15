@@ -17,6 +17,7 @@ import (
 	"launchs/backend/src/service"
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/database"
+	"launchs/shared/ingresshost"
 	"launchs/shared/logger"
 )
 
@@ -73,12 +74,20 @@ func run() error {
 	}
 	defer temporalClient.Close()
 
+	// ingress に払い出すホスト名を作るもの(ベースドメインと、払い出さないサブドメインを設定から受け取る)。
+	hostGenerator, hostGeneratorError := ingresshost.NewGenerator(backendConfig.IngressBaseDomain, backendConfig.IngressReservedSubdomains)
+	if hostGeneratorError != nil {
+		return fmt.Errorf("ホスト名の払い出しを準備できませんでした: %w", hostGeneratorError)
+	}
+
 	echoServer := server.New(appLogger, server.Dependencies{
 		Database:               appDatabase,
 		DevUserID:              backendConfig.DevUserID,
 		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),
 		DeployWorkflowStarter:  service.NewTemporalDeployWorkflowStarter(temporalClient),
 		ServiceWorkflowStarter: service.NewTemporalServiceWorkflowStarter(temporalClient),
+		IngressWorkflowStarter: service.NewTemporalIngressWorkflowStarter(temporalClient),
+		IngressHostGenerator:   hostGenerator,
 	})
 
 	// SIGINT と SIGTERM を受けると終わる context を作る。これを使って、停止の合図で、サーバーを止める。

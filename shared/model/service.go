@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"launchs/shared/apperror"
@@ -203,4 +204,26 @@ func (service *Service) MarkDeleteFailed() bool {
 	// 失敗の状態にする。
 	service.Status = ServiceStatusFailed
 	return true
+}
+
+// HasTCPPort は、現在反映されているポートの中に、protocol が tcp の、指定の番号のポートがあるかを返す。
+//
+// 引数:
+//   - port: 探すポート番号。
+//
+// 戻り値:
+//   - あれば true。ポートの JSON が読めないときは false。
+func (service Service) HasTCPPort(port int) bool {
+	// ポートの一覧を読み込む。
+	ports := []ServicePort{}
+	if parseError := json.Unmarshal(service.Ports, &ports); parseError != nil {
+		return false
+	}
+	// tcp で、番号が同じものを探す。
+	for _, candidate := range ports {
+		if candidate.Port == port && candidate.Protocol == ServiceProtocolTCP {
+			return true
+		}
+	}
+	return false
 }

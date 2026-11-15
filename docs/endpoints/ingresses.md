@@ -24,7 +24,8 @@
 - Note: 対応プロトコルは HTTP のみ。TCP/UDP の公開は未対応(将来対応)
 - Note: ルーティングの反映は Traefik の IngressRoute(CRD)を更新して行う。Traefik までのリクエストの到達、ドメインの管理、TLS はこのシステムの管理外
 - Note: 削除中("deleting")のプロジェクトにはイングレスを作成できず、409 を返す
-- Note: 作成直後は rules が空配列の状態で反映済み(status: "active")。path ruleを設定するには [イングレス更新](#イングレス更新-rules-一括置き換えpendingとして保存) を使う
+- Note: host は「形容詞-色-動物」の3つの単語を、ベースドメイン(環境変数 INGRESS_BASE_DOMAIN)の前につなげたもの。払い出さない名前は、環境変数 INGRESS_RESERVED_SUBDOMAINS で決める([docs/ingress.md](../ingress.md))
+- Note: 作成直後は rules が空配列の状態で反映済み(status: "active")。IngressRoute は、rules が1つ以上あるときだけ k8s に存在する。path ruleを設定するには [イングレス更新](#イングレス更新-rules-一括置き換えpendingとして保存) を使う
 
 ### イングレス一覧
 - Get: /projects/:projectId/ingresses
@@ -124,7 +125,7 @@
 - Note: rules は個別rule単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)。path ruleの追加・削除・変更は全てこのエンドポイントで配列ごと送る
 - Note: この時点ではまだ反映されない。pending_rules として保存され、[イングレス適用](#イングレス-適用) を呼ぶまで rules(現在反映されている値)は変わらない
 - Note: serviceId には同一 project 内の任意の deploy に属する service を指定できる。path ごとに向き先の service を切り替えられる
-- Note: port には対象serviceの ports 配列に含まれるポート番号を指定する。ingressはHTTPのみ対応のため、指定するportは対象serviceのports配列で protocol が "tcp" のものに限る("udp"のポートを指定した場合はエラーになる)
+- Note: port には対象serviceの ports 配列に含まれるポート番号を指定する。ingressはHTTPのみ対応のため、指定するportは対象serviceのports配列で protocol が "tcp" のものに限る("udp"のポートを指定した場合は 400 になる)。service が削除中の場合も 400
 - Note: ingress の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はrulesに対する変更・apply・discardを排他制御する)。"deleting" の間も 409 を返す
 
 ### イングレス 適用
@@ -138,11 +139,11 @@
 {}
 ```
 - Note: pending_rules の内容を rules に反映するため、ルーティング設定の書き換えを開始する。呼び出し自体は即座に応答するが、この時点ではまだ rules は更新されていない。pending_rules が null の場合は 409 を返す。ルーティング設定の書き換えは Traefik の IngressRoute(CRD)を更新して行う。Traefik までのリクエストの到達、ドメインの管理、TLS はこのシステムの管理外
-- Note: 呼び出し直後、ingress の status は "applying" になる。この間 pending_rules はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_rules の値を使って先にルーティング設定への反映を試み、その結果(成功・失敗)が確定した時点で初めて rules を pending_rules の内容に更新し、pending_rules は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる(rules の内容自体は失敗時も新しい値で上書きされる)
+- Note: 呼び出し直後、ingress の status は "applying" になる。この間 pending_rules はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_rules の値を使って先にルーティング設定への反映を試み、その結果(成功・失敗)が確定した時点で初めて rules を pending_rules の内容に更新し、pending_rules は null に戻す。成功すれば status は "active" に、失敗すれば "failed" になる。失敗したときは、rules は動いている値のまま変わらず(IngressRoute も元の rules に戻す)、pending_rules は試した値として残る。直して再度 PUT するか、discard できる(status が "failed" でも、PUT・apply・discard・削除ができる)
 - Note: ingressの反映はdeployのコンテナ再起動を伴わないルーティング設定の書き換えのみのため、config/volumes/serviceのapplyより短時間で完了する想定だが、確認手順(status のポーリング)は同様
 - Note: 既に ingress の status が "applying" の場合は 409 を返す(多重apply不可)。"deleting" の場合も 409 を返す
-- Note: applying には 60秒 のタイムアウトを設ける。この時間内に反映完了が確認できない場合、強制的に status を "failed" に遷移させる
-- Note: pending_rules に含まれる serviceId/port の妥当性(同一project内のserviceであること、対象serviceのportsに存在するport番号であること、protocolが"tcp"であること)は、イングレス更新時点だけでなくapply実行時にも改めて検証する。更新から適用までの間にservice側のポート構成が変更される可能性があるため
+- Note: 反映は Workflow で行い、一時的な失敗はリトライする。リトライの期限までに成功しなければ、IngressRoute を元の rules に戻して、status を "failed" にする(applying のまま固まらない)
+- Note: pending_rules に含まれる serviceId/port の妥当性(同一project内のserviceであること、対象serviceのportsに存在するport番号であること、protocolが"tcp"であること)は、イングレス更新時点だけでなくapply実行時にも改めて検証する。更新から適用までの間にservice側のポート構成が変更される可能性があるため(apply 時に不正なら 409)。service の削除やポートの削減で、ingress の rules が自動で消えることはない(流す先を失った rules は、次の apply で 409 になる)
 
 ### イングレス 破棄
 - Post: /projects/:projectId/ingresses/:ingressId/discard

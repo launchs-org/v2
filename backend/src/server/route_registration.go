@@ -58,4 +58,15 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PATCH("/deploy/:deployId/service", serviceController.UpdatePorts)
 	apiGroup.POST("/deploy/:deployId/service/apply", serviceController.ApplyPorts)
 	apiGroup.POST("/deploy/:deployId/service/discard", serviceController.DiscardPorts)
+
+	// ingress(プロジェクトの外向きの入り口)。
+	ingressRepository := repository.NewIngressRepository(dependencies.Database)
+	ingressController := controller.NewIngressController(service.NewIngressService(ingressRepository, dependencies.IngressWorkflowStarter, dependencies.IngressHostGenerator))
+	apiGroup.POST("/projects/:projectId/ingresses", ingressController.Create)
+	apiGroup.GET("/projects/:projectId/ingresses", ingressController.List)
+	apiGroup.GET("/projects/:projectId/ingresses/:ingressId", ingressController.Get)
+	apiGroup.DELETE("/projects/:projectId/ingresses/:ingressId", ingressController.Delete)
+	apiGroup.PUT("/projects/:projectId/ingresses/:ingressId", ingressController.UpdateRules)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/apply", ingressController.ApplyRules)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/discard", ingressController.DiscardRules)
 }
