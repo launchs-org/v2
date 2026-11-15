@@ -361,6 +361,10 @@ func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.
 		if ingressError := transaction.Where(&model.Ingress{ProjectID: projectID}).Delete(&model.Ingress{}).Error; ingressError != nil {
 			return ingressError
 		}
+		// 配下の volume を削除する(PVC は、namespace の削除で消えている)。
+		if volumeError := transaction.Where(&model.Volume{ProjectID: projectID}).Delete(&model.Volume{}).Error; volumeError != nil {
+			return volumeError
+		}
 		// プロジェクトの行を削除する。
 		return transaction.Delete(&project).Error
 	})

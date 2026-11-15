@@ -7,6 +7,15 @@ import (
 	"launchs/shared/model"
 )
 
+// MountDefinition は、Pod にマウントするボリューム1つ。
+type MountDefinition struct {
+	// ClaimName は、マウントする PVC の名前(volume の ID)。
+	ClaimName string
+
+	// MountPath は、コンテナの中のマウント先の path。
+	MountPath string
+}
+
 // DeploymentDefinition は、k8s に作る Deployment の内容。
 //
 // DB の deploy と、スペックのマスターデータから組み立てる。k8s の型を、Activity に持ち込まないための入れ物。
@@ -34,6 +43,9 @@ type DeploymentDefinition struct {
 
 	// Command は、起動コマンド。nil ならイメージの既定。
 	Command *string
+
+	// Mounts は、Pod にマウントするボリューム(PVC)。無ければ空。
+	Mounts []MountDefinition
 
 	// Args は、起動引数。nil ならイメージの既定。
 	Args []string
@@ -82,6 +94,15 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 			return DeploymentDefinition{}, fmt.Errorf("起動引数を読み取れません: %w", unmarshalError)
 		}
 	}
+	// マウント(現在反映されているもの)を読む。壊れていたら、起動できないので、エラーにする。
+	parsedMounts, mountsError := model.ParseMounts(deploy.Mounts)
+	if mountsError != nil {
+		return DeploymentDefinition{}, fmt.Errorf("マウントを読み取れません: %w", mountsError)
+	}
+	mounts := make([]MountDefinition, 0, len(parsedMounts))
+	for _, mount := range parsedMounts {
+		mounts = append(mounts, MountDefinition{ClaimName: mount.VolumeID, MountPath: mount.MountPath})
+	}
 	// 組み立てて返す。
 	return DeploymentDefinition{
 		Namespace:     deploy.ProjectID,
@@ -93,5 +114,6 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 		Env:           environment,
 		Command:       deploy.Command,
 		Args:          arguments,
+		Mounts:        mounts,
 	}, nil
 }

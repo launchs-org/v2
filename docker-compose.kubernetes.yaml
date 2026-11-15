@@ -21,6 +21,9 @@ services:
       SERVICE_TYPE: ${SERVICE_TYPE:-ClusterIP}
       # クラスターのドメイン(service の DNS 名の最後の部分)。クラスターごとに違う(CoreDNS の Corefile の kubernetes の行で確かめる)。
       CLUSTER_DOMAIN: ${CLUSTER_DOMAIN:-cluster.local}
+      # volume の PVC の StorageClass(空ならクラスターの既定。拡張に対応したものが前提)と、アクセスモード(ReadWriteOnce か ReadWriteMany)。
+      VOLUME_STORAGE_CLASS: ${VOLUME_STORAGE_CLASS:-}
+      VOLUME_ACCESS_MODE: ${VOLUME_ACCESS_MODE:-ReadWriteOnce}
       # Traefik の IngressRoute の apiVersion と、受け付ける entryPoint の名前(カンマ区切り)。
       TRAEFIK_API_VERSION: ${TRAEFIK_API_VERSION:-traefik.io/v1alpha1}
       TRAEFIK_ENTRY_POINTS: ${TRAEFIK_ENTRY_POINTS:-web}

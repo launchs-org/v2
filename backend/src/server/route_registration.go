@@ -49,6 +49,10 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PUT("/deploy/:deployId/config", deployController.UpdateConfig)
 	apiGroup.POST("/deploy/:deployId/config/apply", deployController.ApplyConfig)
 	apiGroup.POST("/deploy/:deployId/config/discard", deployController.DiscardConfig)
+	apiGroup.GET("/deploy/:deployId/mounts", deployController.GetMounts)
+	apiGroup.PUT("/deploy/:deployId/mounts", deployController.UpdateMounts)
+	apiGroup.POST("/deploy/:deployId/mounts/apply", deployController.ApplyMounts)
+	apiGroup.POST("/deploy/:deployId/mounts/discard", deployController.DiscardMounts)
 
 	serviceRepository := repository.NewServiceRepository(dependencies.Database)
 	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
@@ -69,4 +73,23 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PUT("/projects/:projectId/ingresses/:ingressId", ingressController.UpdateRules)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/apply", ingressController.ApplyRules)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/discard", ingressController.DiscardRules)
+
+	// volume(プロジェクトの永続ストレージ)。
+	volumeMaxSizeMB := dependencies.VolumeMaxSizeMB
+	if volumeMaxSizeMB == 0 {
+		volumeMaxSizeMB = defaultVolumeMaxSizeMB
+	}
+	volumeRepository := repository.NewVolumeRepository(dependencies.Database)
+	volumeController := controller.NewVolumeController(service.NewVolumeService(volumeRepository, dependencies.VolumeWorkflowStarter, volumeMaxSizeMB))
+	apiGroup.POST("/projects/:projectId/volumes", volumeController.Create)
+	apiGroup.GET("/projects/:projectId/volumes", volumeController.List)
+	apiGroup.GET("/projects/:projectId/volumes/:volumeId", volumeController.Get)
+	apiGroup.PATCH("/projects/:projectId/volumes/:volumeId", volumeController.Rename)
+	apiGroup.DELETE("/projects/:projectId/volumes/:volumeId", volumeController.Delete)
+	apiGroup.PATCH("/projects/:projectId/volumes/:volumeId/size", volumeController.UpdateSize)
+	apiGroup.POST("/projects/:projectId/volumes/:volumeId/apply", volumeController.ApplySize)
+	apiGroup.POST("/projects/:projectId/volumes/:volumeId/discard", volumeController.DiscardSize)
 }
+
+// defaultVolumeMaxSizeMB は、volume の大きさの上限の既定値(MB)。
+const defaultVolumeMaxSizeMB = 5120

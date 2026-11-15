@@ -73,6 +73,12 @@ type Deploy struct {
 	// PendingArgs は、まだ適用していない起動引数。
 	PendingArgs datatypes.JSON `gorm:"column:pending_args"`
 
+	// Mounts は、現在コンテナに反映されているボリュームのマウント(MountSpec の JSON の配列)。nil はマウント無し。
+	Mounts datatypes.JSON `gorm:"column:mounts"`
+
+	// PendingMounts は、まだ適用していないマウントの構成。変更が無ければ nil。空の配列は、全て外す変更。
+	PendingMounts datatypes.JSON `gorm:"column:pending_mounts"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 

@@ -19,6 +19,9 @@ type DeployUseCase interface {
 	UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error
 	DiscardConfig(requestContext context.Context, userID string, deployID string) error
 	ApplyConfig(requestContext context.Context, userID string, deployID string) error
+	UpdateMounts(requestContext context.Context, userID string, deployID string, mounts []model.MountSpec) error
+	DiscardMounts(requestContext context.Context, userID string, deployID string) error
+	ApplyMounts(requestContext context.Context, userID string, deployID string) error
 	Scale(requestContext context.Context, userID string, deployID string, replicas int) error
 	Delete(requestContext context.Context, userID string, deployID string) error
 }
