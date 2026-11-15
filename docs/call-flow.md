@@ -351,6 +351,28 @@ PUT /deploy/:deployId/mounts  →  POST .../mounts/apply  →  POST .../mounts/d
 
 ### ファイルの分け方
 
+## 5.9 ログ: `GET /deploy/:deployId/logs`、deploy の詳細の `logPods`
+
+ログの**書き込み**は、logcollector(別コンテナ)だけ。backend は、DB を**読むだけ**(設計は [logs.md](logs.md))。
+
+```
+[書き込み] logcollector(リーダー1つ。advisory lock)
+  Manager   2 秒ごとに deploy_pods(watcher が書く)と比べて、Pod ごとに Follower を始める・止める
+  Follower  pods/log を follow で購読 → 整える(NUL、長い行、速さの上限)→ 500 行または 1 秒ごとに、
+            deploy_logs に追記 + deploy_log_streams の読み取り位置を、同じトランザクションで更新
+  Pruner    1 分ごとに、7 日より古い行、Pod ごとの 50MiB を超えた古い行、終了して 7 日たったストリームを削除
+
+[読み取り] curl ──▶ backend
+  ① 認証ミドルウェア → ユーザー ID
+  ② DeployController.GetLogs   podId(`pod-` + UID)と since を検査する(400)
+  ③ DeployLogService.GetLogs   deploy が、ユーザーのものか(404)
+                               → DeployLogQueryRepository.ReadLogs: Pod が、その deploy のストリームか(404)、id > since の行を最大 1000 行
+                               → 本文の合計が 1MiB を超えるところで切る(少なくとも1行)→ nextSince を決める
+  ④ レスポンス: 各行を「JST の時刻 + 空白 + 本文 + 改行」にしてつなげる
+
+GET /deploy/:deployId の logPods: DeployController.Get が、DeployLogService.ListLogPods(行が残っているストリームを、新しい Pod の順に最大 50 件)を呼ぶ。
+```
+
 大きくなりすぎないよう、deploy に関するファイルは、**層ごとに、操作(役割)ごとのファイル**に分けてある。同じ型のメソッドが、複数のファイルにまたがる(Go では、同じパッケージなら、問題ない)。
 
 | 層 | 作成・取得(核) | 操作ごと |

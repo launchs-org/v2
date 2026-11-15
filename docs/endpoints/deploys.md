@@ -46,6 +46,10 @@
   "pods": [
     {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "status": "running"}
   ],
+  "logPods": [
+    {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "running": true, "startedAt": "2026-09-16T09:00:00+09:00", "endedAt": null},
+    {"podId": "pod-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy", "running": false, "startedAt": "2026-09-16T08:00:00+09:00", "endedAt": "2026-09-16T08:55:00+09:00"}
+  ],
   "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
   "createdAt": "2026-09-16T09:00:00+09:00",
   "config": {
@@ -115,6 +119,7 @@
 - Note: service の status(pending / active / failed / deleting)は Service 自体の払い出し状態で、deploy の status とは別。config/volumes/service いずれかの apply 中に変化するのは deploy の status だけで、service の status は変わらない
 - Note: service はまだ作成されていない(サービス未作成の)deployでは null になる(1 deploy = 1 service で、作成は任意)
 - Note: pods は現在稼働している Pod の一覧(replicas が希望レプリカ数という数値であるのに対し、pods は実際の Pod 1つ1つの識別子と状態を返す)。[デプロイ ログ取得](#デプロイ-ログ取得) で特定の Pod のログを取得する際に、ここで取得した podId を指定する。status は "pending" | "running" | "terminating" のいずれか。status が "pending" の場合 deploy の status が "applying"(起動中)であることが多い
+- Note: logPods は、**ログが1行以上保存されている Pod**の一覧で、**既に終了・再作成された Pod も含む**(pods には、稼働中の Pod だけが出る)。新しい Pod(startedAt)が先で、最大 50 件(それより古い Pod も、podId を知っていれば、ログは取れる)。running は、ログの収集が続いている(Pod が稼働中の)か、endedAt は収集が終わった時刻(稼働中は null)。ロールアウトで消えた Pod や、スケールダウンした Pod のログを見るときの podId は、ここから取る。ログが無い Pod(起動前に落ちた、出力が無かった、保持期間で全て削除された)は載らない。logPods の podId は、必ず、ログ取得が 200 で返る
 
 ### デプロイ スケーリング
 - Post: /deploy/:deployId/scale
@@ -167,15 +172,17 @@
 ```
 - Response (200)
 ```json
-{"logs": "2026-09-16T09:00:01+09:00 [INFO] server started on :8080\n...", "nextSince": 256}
+{"logs": "2026-09-16T09:00:01.123+09:00 [INFO] server started on :8080\n2026-09-16T09:00:02.456+09:00 [INFO] ready\n", "nextSince": 256}
 ```
-- Note: ストリーミングではなくポーリング前提。[ビルドログ取得](builds.md#ビルドログ取得)と同じ方式で、since を省略すると先頭からの全ログ、直前のレスポンスの nextSince を since に渡すと差分のみ返る
-- Note: podId は必須。[デプロイ詳細取得](#デプロイ詳細取得) の pods 配列から取得した podId を指定し、その Pod 1つのログのみを返す(replicas が複数ある場合、全replica分をまとめて返す機能は無い。複数replicaのログを見たい場合はpodIdを変えて複数回呼び出す)
+- Note: ストリーミングではなくポーリング前提。`since` は、ログの行の通し番号(`nextSince` の値。不透明な整数として扱う)。`since` を省略すると**先頭から、最大 1000 行(または 1MiB。先に達した方)**を返し、レスポンスの `nextSince` を `since` に渡すと、続きを返す。`logs` が空になったら、いまの末尾まで読んだことになる(`nextSince` は変わらない)
+- Note: `logs` は、各行を「JST の時刻(ミリ秒まで。k8s のログの時刻) + 空白 + 本文 + 改行」にして、つなげた文字列。1行は、16KiB を超えると、切り詰められ、末尾に `…(truncated)` が付く。標準出力と標準エラーは、区別されない
+- Note: podId は必須(無い、または `pod-` で始まらない場合は 400)。[デプロイ詳細取得](#デプロイ詳細取得) の pods 配列(稼働中の Pod)か、logPods(ログのある Pod。終了した Pod も含む)から取得した podId を指定し、その Pod 1つのログのみを返す(replicas が複数ある場合、全replica分をまとめて返す機能は無い。複数replicaのログを見たい場合はpodIdを変えて複数回呼び出す)
 - Note: ログは収集コンテナが Pod のログを購読して DB に保存する。保持期間は7日で、Pod ごとに上限(50MB)があり、超えたら古い行から削除される
 - Note: 保持期間内なら、既に終了・再作成された Pod の podId でもログを取得できる。podId が、その deploy に属したことがない、またはログが保持期間を過ぎて削除済みの場合は 404 を返す。pods 配列は現在稼働している Pod だけを返す(終了した Pod は含まない)
 - Note: ログは DB に書き込まれた分を返すので、Pod の出力から少し遅れる(収集コンテナの切り替え中は遅れが大きくなりうる)(仮)
 - Note: 削除した deploy のログは、deploy の削除と一緒に削除される
-- Note: since に現在のログ末尾を超える値を指定した場合はエラーにせず、logs は空文字列、nextSince は現在のログ末尾の位置を返す
+- Note: since に現在のログ末尾を超える値を指定した場合はエラーにせず、logs は空文字列、nextSince は現在のログ末尾の位置を返す。since が整数でない、または負の場合は 400
+- Note: ストリームはあるが、保存したログが全て削除されている(上限を超えた、保持期間が過ぎた)Pod は、200 で、logs は空文字列、nextSince は 0
 
 ### デプロイ 起動設定取得 (環境変数・起動コマンド・引数)
 - Get: /deploy/:deployId/config

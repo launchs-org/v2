@@ -181,4 +181,14 @@
 - **止める合図(リーダーでなくなったとき、停止)**では、まだ書いていない行を、切り離した context で書いてから終わる(最大 10 秒待つ)。
 - **テスト**: k8s の取得は `LogSource` の後ろに置き、偽物(`scriptedSource`)と、使い捨ての DB で確かめた。重複の除き方、再接続、`previous`、引き継ぎ、保存期間と上限の削除、書き込みの速さの上限、止める合図での書き切り、同時の数の上限。
 - **まだ確かめていないこと**(PR 4。実機): k8s の `sinceTime` が、同じ秒の行を含むか。kubelet のログのローテーション。リーダーの切り替え。本番の権限(`pods/log` の ClusterRole)。**いまのコードは、`sinceTime` が「その秒の行から返す」(同じ秒を含む)ことを前提にしている**。含まない場合は、同じ秒の、まだ保存していない行を取りこぼす。
-- **未実装**: API(`GET /deploy/:deployId/logs`、`logPods`)は、PR 3。
+- **未実装**: なし(API は PR 3 で実装。§13)。
+
+## 13. 実装メモ(PR 3: API)
+
+- `GET /deploy/:deployId/logs` と、`GET /deploy/:deployId` の `logPods` を、backend に足した。仕様は `docs/endpoints/deploys.md`(Issue 002・009 も更新)。
+- コードは、`backend/src/service/deploy_log_service.go`(持ち主の確認、`nextSince` の計算、大きさの上限)、`backend/src/controller/deploy_log_controller.go` と `deploy_log_response.go`(`podId` と `since` の検査、レスポンスの組み立て)、`shared/repository/deploy_log_query_repository.go`(読み取り専用。書き手は logcollector のまま)。`shared/jst.FormatMillis`(行の時刻)。
+- **`nextSince` の計算**: 行を返したときは、最後の行の `id`。返さないときは `min(since, 末尾の id)`(末尾の id は、その Pod の最大。行が1行も無ければ 0)。これで、「`since` が末尾を超えたら、末尾を返す」と「読み終えた後は、同じ値を返し続ける」が、同じ式になる。
+- **1回の上限**: 1000 行で読み、そこから、本文の合計が 1MiB を超えるところで切る(少なくとも1行は返す)。
+- **`podId` の形**: 無い、または `pod-` で始まらない、UID が空は 400。形が正しくて、その deploy のストリームに無いものは 404(他の deploy の Pod を含む)。
+- `logPods` は、`deploy_log_streams` から、行が残っているものを、`started_at` の新しい順に、最大 50 件。deploy の詳細を返すたびに、1回の追加の問い合わせ(`EXISTS` つき)が走る。
+- **実機での確認は、まだ**(PR 4)。
