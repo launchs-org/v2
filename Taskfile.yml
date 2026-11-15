@@ -14,7 +14,7 @@ tasks:
       - docker compose up -d --build
 
   up:k8s:
-    desc: 開発環境を起動し、ワーカーと watcher を開発用の k8s につなぐ(~/.kube/config を使う。namespace を実際に削除する)
+    desc: 開発環境を起動し、ワーカー、watcher、logcollector を開発用の k8s につなぐ(~/.kube/config を使う。namespace を実際に削除する)
     cmds:
       - docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build
 
