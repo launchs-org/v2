@@ -24,6 +24,7 @@ type ScaleStart struct {
 //
 // スケーリングできるのは、通常の状態(active、scaled_zero、failed)の deploy だけ。行をロックして確かめる。
 // replicas が今と同じで、failed でもないときは、何も変えない(Changed が false)。
+// replicas の範囲(0〜MaxReplicas)は、モデルが確かめる。スケールは、クォータの対象ではない。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -33,7 +34,7 @@ type ScaleStart struct {
 //
 // 戻り値:
 //   - 変える前の値(元に戻すために使う)。
-//   - deploy が無い、または他のユーザーのものなら not_found。反映中・起動中・削除の途中なら conflict。
+//   - deploy が無い、または他のユーザーのものなら not_found。反映中・起動中・削除の途中なら conflict。範囲外の replicas は invalid_request。
 //   - それ以外のデータベースのエラーは internal_error。
 func (deployRepository *DeployRepository) BeginScale(requestContext context.Context, userID string, deployID string, replicas int) (ScaleStart, error) {
 	// 変える前の値を、トランザクションの外へ持ち出す入れ物。

@@ -9,8 +9,8 @@ import (
 
 // ScaleDeployRequest は、スケーリングのリクエストのボディ。
 type ScaleDeployRequest struct {
-	// Replicas は、新しいレプリカ数。0〜10(0 は停止相当)。ポインタなのは、0 と未指定を区別するため。
-	Replicas *int `json:"replicas" validate:"required,min=0,max=10"`
+	// Replicas は、新しいレプリカ数。0〜5(0 は停止相当。上限は model.MaxReplicas で、モデルが確かめる)。ポインタなのは、0 と未指定を区別するため。
+	Replicas *int `json:"replicas" validate:"required"`
 }
 
 // ScaleDeployResponse は、スケーリングのレスポンスのボディ。
