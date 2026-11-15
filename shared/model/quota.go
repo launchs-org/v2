@@ -255,3 +255,79 @@ func (limits QuotaLimits) CheckVolumeGrow(usage QuotaUsage, addedMB int) error {
 	}
 	return nil
 }
+
+// MaxQuotaValue は、管理者が上書きできる上限の値の最大(桁の間違いを防ぐための、大きな上限)。
+const MaxQuotaValue = 1_000_000
+
+// QuotaOverrides は、管理者が設定する、ユーザーごとの上限の上書き一式。nil(またはキーが無い)の項目は、既定を使う。
+//
+// 設定は、一式の置き換え: 指定しなかった項目は、以前の上書きが消えて、既定に戻る。
+type QuotaOverrides struct {
+	// MaxProjects 以下は、QuotaDefaults と同じ意味の、上書きの値(nil なら既定)。
+	MaxProjects      *int
+	MaxDeploys       *int
+	MaxVolumes       *int
+	MaxVolumeTotalMB *int
+
+	// MaxDeploysBySpec は、スペックの名前ごとの、deploy の数の上書き(キーが無いスペックは、スペックの既定)。
+	MaxDeploysBySpec map[string]int
+}
+
+// Validate は、上書きの値が正しいか(0〜MaxQuotaValue、存在するスペックの名前)を確かめる。
+//
+// 引数:
+//   - knownSpecs: 存在するスペックの名前。
+//
+// 戻り値:
+//   - 範囲外の値、存在しないスペックがあれば invalid_request(どの項目かを、メッセージに入れる)。
+func (overrides QuotaOverrides) Validate(knownSpecs []string) error {
+	// 項目ごとの値を、名前と一緒に確かめる。
+	for name, value := range map[string]*int{"projects": overrides.MaxProjects, "deploys": overrides.MaxDeploys, "volumes": overrides.MaxVolumes, "volumeTotalMB": overrides.MaxVolumeTotalMB} {
+		if value != nil && (*value < 0 || *value > MaxQuotaValue) {
+			return apperror.New(apperror.KindInvalidRequest, fmt.Sprintf("%s は 0〜%d でなければなりません", name, MaxQuotaValue))
+		}
+	}
+	// スペックごとの値と、スペックの名前を確かめる。
+	known := make(map[string]bool, len(knownSpecs))
+	for _, specName := range knownSpecs {
+		known[specName] = true
+	}
+	for specName, value := range overrides.MaxDeploysBySpec {
+		if !known[specName] {
+			return apperror.New(apperror.KindInvalidRequest, fmt.Sprintf("deploysBySpec の %q は、存在しないスペックです", specName))
+		}
+		if value < 0 || value > MaxQuotaValue {
+			return apperror.New(apperror.KindInvalidRequest, fmt.Sprintf("deploysBySpec の %q は 0〜%d でなければなりません", specName, MaxQuotaValue))
+		}
+	}
+	return nil
+}
+
+// AccountQuota は、上書きのうち、account_quotas の1行にあたる部分を返す。
+//
+// 引数:
+//   - userID: 持ち主のユーザー ID。
+//
+// 戻り値:
+//   - account_quotas の行(スペックごとの上書きは、含まない)。
+func (overrides QuotaOverrides) AccountQuota(userID string) AccountQuota {
+	// 項目をそのまま写す。
+	return AccountQuota{UserID: userID, MaxProjects: overrides.MaxProjects, MaxDeploys: overrides.MaxDeploys, MaxVolumes: overrides.MaxVolumes, MaxVolumeTotalMB: overrides.MaxVolumeTotalMB}
+}
+
+// QuotaOverridesOf は、保存されている行から、上書き一式を作る。
+//
+// 引数:
+//   - row: account_quotas の行(無ければ、ゼロ値)。
+//   - specRows: account_spec_quotas の行。
+//
+// 戻り値:
+//   - 上書き一式。
+func QuotaOverridesOf(row AccountQuota, specRows []AccountSpecQuota) QuotaOverrides {
+	// 行の項目を写し、スペックごとの行を、名前をキーにした表にする。
+	overrides := QuotaOverrides{MaxProjects: row.MaxProjects, MaxDeploys: row.MaxDeploys, MaxVolumes: row.MaxVolumes, MaxVolumeTotalMB: row.MaxVolumeTotalMB, MaxDeploysBySpec: map[string]int{}}
+	for _, specRow := range specRows {
+		overrides.MaxDeploysBySpec[specRow.Spec] = specRow.MaxDeploys
+	}
+	return overrides
+}
