@@ -87,7 +87,7 @@
 - **既存のデータ**: `projects.user_id` などは、文字列で、外部キーも無い。開発用のデータ(`user-dev`)は、そのまま残る(本物のユーザーのものにはならない)。移行は、要らない。
 - nginx(開発用)と Traefik(本番)に、`/auth/` を auth コンテナへ向けるルールを足す。
 
-## 8. クォータ
+## 8. クォータ(実装済み。§13)
 
 ### 8.1 置き場所と、見る場所
 
@@ -160,3 +160,13 @@
 - **失敗は、理由を区別せず、全て 401**(`WWW-Authenticate: Bearer` つき)。
 - **設定**(`docs/auth.md` §7 のとおり): `AUTH_JWKS_URL` か `DEV_USER_ID` の、ちょうど一方が必須(両方、どちらも無いときは、起動しない)。`AUTH_REQUIRE_JWKS=true`(本番)のときは、`AUTH_JWKS_URL` が必須で、`DEV_USER_ID` は指定できない。`DEV_USER_ID` で起動したときは、警告をログに出す。
 - 開発用の compose は、`AUTH_JWKS_URL=http://auth:8080/auth/.well-known/jwks.json` を指定する(`DEV_USER_ID` は、もう指定しない)。`user-dev` のデータは、DB に残るが、誰のものでもない。
+
+## 13. 実装メモ(PR 3: クォータ)
+
+- **テーブル**: `quota_defaults`(1行。初期値は §8.2 の案のとおり)と `account_quotas`(ユーザーごとの上書き。NULL は既定)。マイグレーションは `migrations/app/000011_create_quotas.up.sql`。**volume 1つの大きさ**は、これまでどおり環境変数 `VOLUME_MAX_SIZE_MB`(テーブルには入れない)。
+- **判定はモデルのメソッド**(`shared/model/quota.go` の `QuotaLimits.Check...`)。repository は、「クォータの行をロックして、使用量を数える → モデルのメソッドで判定 → 保存」だけを行う(`shared/repository/quota_repository.go` の `loadQuota`)。
+- **ロックの順番は、どの操作でも、ユーザーのクォータの行が先**(プロジェクトや deploy や volume の行より前)。デッドロックを避けるため。
+- **確かめる操作**: プロジェクトの作成、deploy の作成(数と CPU・メモリ)、スケールの増加(replicas を増やすときだけ)、volume の作成(数と大きさの合計)、volume の拡張の保存(予約が増えるときだけ。同じ値の保存し直しや、破棄は、確かめない)。状態の確認や、入力の確認(400)は、クォータ(409)より先に行う。
+- **`GET /api/v1/quota`**: 自分の上限と使用量(ロックしない)。仕様は `docs/endpoints/quota.md`。
+- **管理の API(上限の変更)は、まだ無い**(PR 4)。いまは、`account_quotas` を SQL で更新する。
+- 認証のコンテナには、クォータの値は無い(アプリの DB にある)。ユーザーの BAN などと、クォータの関係は、PR 4 で決める。

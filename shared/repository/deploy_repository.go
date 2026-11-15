@@ -67,9 +67,11 @@ func (deployRepository *DeployRepository) FindSpec(requestContext context.Contex
 //   - requestContext: キャンセルや期限を伝える context。
 //   - deploy: 保存する deploy。ID は、呼び出し側で作っておく。
 //
+// 保存の前に、ユーザーのクォータ(deploy の数、CPU・メモリの合計)も、行をロックして確かめる。
+//
 // 戻り値:
 //   - プロジェクトが無い、または他のユーザーのものなら not_found。
-//   - プロジェクトが active でないなら conflict。
+//   - プロジェクトが active でない、またはクォータを超えるなら conflict。
 //   - それ以外のデータベースのエラーは internal_error。
 func (deployRepository *DeployRepository) Create(requestContext context.Context, deploy *model.Deploy) error {
 	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
@@ -78,6 +80,11 @@ func (deployRepository *DeployRepository) Create(requestContext context.Context,
 	}
 	// プロジェクトの確認と deploy の保存を、1つのトランザクションで行う。
 	transactionError := deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// ユーザーのクォータを最初にロックして、使用量を数える(ロックの順番は、どの操作でも、クォータが先)。
+		limits, usage, quotaError := loadQuota(transaction, deploy.UserID, true)
+		if quotaError != nil {
+			return quotaError
+		}
 		// 持ち主のプロジェクトを、他から状態を変えられないよう、共有ロックで読む。
 		var project model.Project
 		findError := transaction.Clauses(clause.Locking{Strength: "SHARE"}).
@@ -93,6 +100,18 @@ func (deployRepository *DeployRepository) Create(requestContext context.Context,
 		// 削除中などの、通常でないプロジェクトの配下には作れない。
 		if project.Status != model.ProjectStatusActive {
 			return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、deploy を作れません")
+		}
+
+		// スペックを読んで、deploy の数と、CPU・メモリの合計が、上限に収まるかを確かめる。
+		var spec model.DeploySpec
+		if specError := transaction.Where(&model.DeploySpec{Name: deploy.Spec}).Take(&spec).Error; specError != nil {
+			if errors.Is(specError, gorm.ErrRecordNotFound) {
+				return apperror.Wrap(apperror.KindInvalidRequest, "指定できないスペックです", specError)
+			}
+			return apperror.Wrap(apperror.KindInternal, "スペックを取得できませんでした", specError)
+		}
+		if limitError := limits.CheckDeployCreate(usage, spec, deploy.Replicas); limitError != nil {
+			return limitError
 		}
 
 		// deploy を保存する。

@@ -86,6 +86,9 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	}
 	volumeRepository := repository.NewVolumeRepository(dependencies.Database)
 	volumeController := controller.NewVolumeController(service.NewVolumeService(volumeRepository, dependencies.VolumeWorkflowStarter, volumeMaxSizeMB))
+	// 自分の上限(クォータ)と使用量。
+	quotaController := controller.NewQuotaController(service.NewQuotaService(repository.NewQuotaRepository(dependencies.Database), volumeMaxSizeMB))
+	apiGroup.GET("/quota", quotaController.Get)
 	apiGroup.POST("/projects/:projectId/volumes", volumeController.Create)
 	apiGroup.GET("/projects/:projectId/volumes", volumeController.List)
 	apiGroup.GET("/projects/:projectId/volumes/:volumeId", volumeController.Get)

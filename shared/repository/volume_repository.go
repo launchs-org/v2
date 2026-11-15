@@ -41,7 +41,7 @@ func NewVolumeRepository(database *gorm.DB) *VolumeRepository {
 //
 // 戻り値:
 //   - プロジェクトが無い、または他のユーザーのものなら not_found。
-//     active でない、または同じ名前の volume があるなら conflict。
+//     active でない、同じ名前の volume がある、またはクォータを超えるなら conflict。
 //   - それ以外のデータベースのエラーは internal_error。
 func (volumeRepository *VolumeRepository) Create(requestContext context.Context, volume *model.Volume) error {
 	// 条件の値が空だと、Gorm が条件を無視して他の行が対象になるので、先に拒否する。
@@ -50,6 +50,11 @@ func (volumeRepository *VolumeRepository) Create(requestContext context.Context,
 	}
 	// プロジェクトの確認と volume の保存を、1つのトランザクションで行う。
 	return volumeRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// ユーザーのクォータを最初にロックして、使用量を数える(ロックの順番は、どの操作でも、クォータが先)。
+		limits, usage, quotaError := loadQuota(transaction, volume.UserID, true)
+		if quotaError != nil {
+			return quotaError
+		}
 		// 持ち主のプロジェクトを、他から状態を変えられないよう、ロックして読む。
 		var project model.Project
 		findError := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -65,6 +70,10 @@ func (volumeRepository *VolumeRepository) Create(requestContext context.Context,
 		// 稼働中でないプロジェクトには、作れない。
 		if project.Status != model.ProjectStatusActive {
 			return apperror.New(apperror.KindConflict, "プロジェクトは "+project.Status+" のため、volume を作れません")
+		}
+		// volume の数と、大きさの合計が、上限に収まるかを確かめる。
+		if limitError := limits.CheckVolumeCreate(usage, volume.SizeMB); limitError != nil {
+			return limitError
 		}
 		// 作成直後は active。
 		volume.Status = model.VolumeStatusActive
@@ -379,11 +388,36 @@ func (volumeRepository *VolumeRepository) Rename(requestContext context.Context,
 //   - maxSizeMB: 大きさの上限(MB)。
 //
 // 戻り値:
-//   - volume が無ければ not_found。反映中・削除中なら conflict。縮小・上限超過なら invalid_request。
+//   - volume が無ければ not_found。反映中・削除中、またはクォータ(大きさの合計)を超えるなら conflict。縮小・1つの上限超過なら invalid_request。
 func (volumeRepository *VolumeRepository) SavePendingSize(requestContext context.Context, userID string, projectID string, volumeID string, sizeMB int, maxSizeMB int) error {
-	// モデルに、保存を任せる。
-	return volumeRepository.updateVolume(requestContext, userID, projectID, volumeID, "大きさを保存できませんでした", func(volume *model.Volume) error {
-		return volume.SetPendingSize(sizeMB, maxSizeMB)
+	// クォータの確認と更新を、1つのトランザクションで行う。
+	return volumeRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// ユーザーのクォータを最初にロックして、使用量を数える(ロックの順番は、どの操作でも、クォータが先)。
+		limits, usage, quotaError := loadQuota(transaction, userID, true)
+		if quotaError != nil {
+			return quotaError
+		}
+		// volume を、ロックして読む。
+		volume, lockError := lockVolume(transaction, userID, projectID, volumeID)
+		if lockError != nil {
+			return lockError
+		}
+		// モデルに、保存を任せる(状態、縮小、1つの上限の確認は、モデルが持つ)。
+		reservedBefore := volume.ReservedMB()
+		if operationError := volume.SetPendingSize(sizeMB, maxSizeMB); operationError != nil {
+			return operationError
+		}
+		// 予約が増えるときだけ、増える分で、大きさの合計が、上限に収まるかを確かめる(使用量には、いまの予約が入っている)。
+		if added := volume.ReservedMB() - reservedBefore; added > 0 {
+			if limitError := limits.CheckVolumeGrow(usage, added); limitError != nil {
+				return limitError
+			}
+		}
+		// 変えた volume を保存する(NULL も書くので、全ての列を書く)。
+		if saveError := transaction.Save(&volume).Error; saveError != nil {
+			return apperror.Wrap(apperror.KindInternal, "大きさを保存できませんでした", saveError)
+		}
+		return nil
 	})
 }
 
