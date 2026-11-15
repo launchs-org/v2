@@ -36,6 +36,14 @@ const hashSlotWait = 2 * time.Second
 
 // main は、run を呼んで、失敗したときは、原因を表示して、異常終了する。
 func main() {
+	// `admin` で始まる引数のときは、サーバーではなく、管理者を作るコマンドとして動く。
+	if len(os.Args) > 1 && os.Args[1] == "admin" {
+		if commandError := runAdminCommand(os.Args[2:]); commandError != nil {
+			fmt.Fprintln(os.Stderr, commandError)
+			os.Exit(1)
+		}
+		return
+	}
 	// 失敗したら、標準エラーに出して、終了コード 1 で終わる。
 	if runError := run(); runError != nil {
 		fmt.Fprintln(os.Stderr, runError)
@@ -90,7 +98,10 @@ func run() error {
 	if serviceError != nil {
 		return serviceError
 	}
-	echoServer := server.New(appLogger, authService, keyStore, resolver)
+	invitationRepository := repository.NewInvitationRepository(appDatabase)
+	adminService := service.NewAdminService(userRepository, invitationRepository, loginFailureRepository, appLogger,
+		password.NewHasher(password.DefaultParameters()), token.NewService(keyStore, time.Now))
+	echoServer := server.New(appLogger, authService, adminService, keyStore, resolver)
 
 	// 停止の合図で終わる context を作る。
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
