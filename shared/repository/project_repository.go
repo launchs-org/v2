@@ -35,16 +35,35 @@ func NewProjectRepository(database *gorm.DB) *ProjectRepository {
 
 // Create は、プロジェクトを1件保存する。
 //
+// 保存の前に、ユーザーのクォータ(プロジェクトの数)を、行をロックして確かめる。
+//
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
 //   - project: 保存するプロジェクト。ID は、呼び出し側で作っておく。
 //
 // 戻り値:
+//   - 上限に達しているときの、conflict のエラー。
 //   - 同じユーザーの中で名前が重複したときの、conflict のエラー。
 //   - それ以外のデータベースのエラーは、internal_error。
 func (projectRepository *ProjectRepository) Create(requestContext context.Context, project *model.Project) error {
-	// context を渡して、プロジェクトを INSERT する。
-	createError := projectRepository.database.WithContext(requestContext).Create(project).Error
+	// 上限の確認と保存を、1つのトランザクションで行う。
+	createError := projectRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// ユーザーのクォータをロックして、上限に収まるかを確かめる。
+		limits, usage, quotaError := loadQuota(transaction, project.UserID, true)
+		if quotaError != nil {
+			return quotaError
+		}
+		if limitError := limits.CheckProjectCreate(usage); limitError != nil {
+			return limitError
+		}
+		// context を渡して、プロジェクトを INSERT する。
+		return transaction.Create(project).Error
+	})
+	// 上限を超えたときなど、利用者に伝えるエラーは、そのまま返す。
+	var knownError *apperror.Error
+	if errors.As(createError, &knownError) {
+		return createError
+	}
 	// 一意制約の違反は、名前の重複なので、利用者に伝えられる conflict にする。
 	if errors.Is(createError, gorm.ErrDuplicatedKey) {
 		return apperror.Wrap(apperror.KindConflict, "同じ名前のプロジェクトがすでにあります", createError)

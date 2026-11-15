@@ -220,6 +220,20 @@ func (volume *Volume) Rename(name string) error {
 	return nil
 }
 
+// ReservedMB は、クォータで、この volume が使っているとして数える大きさ(MB)。
+//
+// 拡張の pending も、適用の前から予約として数えるので、現在の大きさと pending の大きい方になる。
+//
+// 戻り値:
+//   - 数える大きさ(MB)。
+func (volume *Volume) ReservedMB() int {
+	// pending があり、現在より大きければ、pending を数える。
+	if volume.PendingSizeMB != nil && *volume.PendingSizeMB > volume.SizeMB {
+		return *volume.PendingSizeMB
+	}
+	return volume.SizeMB
+}
+
 // SetPendingSize は、拡張する大きさを、まだ適用しない値として保存する。
 //
 // 現在と同じ大きさなら、変更が無いものとして、pending を空にする(以前の pending も消える)。
