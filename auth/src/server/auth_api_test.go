@@ -35,6 +35,7 @@ type testEnvironment struct {
 	clock    *time.Time
 	keyStore *keys.KeyStore
 	tokens   *token.Service
+	admin    *service.AdminService
 }
 
 // newTestEnvironment は、使い捨てのデータベースと、弱いハッシュのパラメータで、認証のサーバーを組み立てる。
@@ -83,7 +84,10 @@ func newTestEnvironmentWithHasher(testing *testing.T, mutate func(*service.Setti
 	}
 	resolver, _ := clientip.NewResolver([]string{"127.0.0.0/8"})
 	environment := &testEnvironment{database: database, settings: settings, clock: &clock, keyStore: keyStore, tokens: tokens}
-	environment.server = New(logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), authService, keyStore, resolver)
+	adminService := service.NewAdminService(repository.NewUserRepository(database), repository.NewInvitationRepository(database), repository.NewLoginFailureRepository(database),
+		logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), hasher, tokens)
+	environment.admin = adminService
+	environment.server = New(logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), authService, adminService, keyStore, resolver)
 	return environment
 }
 
@@ -468,7 +472,7 @@ func TestJWKSAndBackendVerification(testing *testing.T) {
 // TestInviteOnlySignup は、招待制のとき、招待コードが要り、使えるのは1回だけで、使えない招待では、ユーザーが作られないことを確かめる。
 func TestInviteOnlySignup(testing *testing.T) {
 	environment := newTestEnvironment(testing, func(settings *service.Settings) { settings.SignupMode = service.SignupModeInvite })
-	environment.database.Exec("INSERT INTO invitations (code_hash, expires_at) VALUES (?, now() + interval '1 day')", service.HashInvitationCode("secret-code"))
+	environment.database.Exec("INSERT INTO invitations (id, code_hash, expires_at) VALUES ('invitation-test', ?, now() + interval '1 day')", service.HashInvitationCode("secret-code"))
 	// 招待コード無し、違うコードは 400。
 	if noCode := signup(testing, environment, "alice", goodPassword, "203.0.113.1"); noCode.status != 400 {
 		testing.Errorf("招待コード無しは 400 のはず: %d", noCode.status)

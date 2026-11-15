@@ -19,6 +19,10 @@ const (
 	// KindUnauthorized は、認証が無い、トークンが無効・期限切れ、ログインに失敗したとき(HTTP 401)。
 	KindUnauthorized Kind = "unauthorized"
 
+	// KindForbidden は、認証はできているが、その操作をする権限が無いとき(HTTP 403。管理者用の操作など)。
+	// リソースの存在を隠す必要があるものには使わない(他のユーザーのリソースは 404)。
+	KindForbidden Kind = "forbidden"
+
 	// KindNotFound は、リソースが存在しない、または他のユーザーのリソースのとき(HTTP 404)。
 	KindNotFound Kind = "not_found"
 
@@ -48,6 +52,8 @@ func (kind Kind) StatusCode() int {
 		return http.StatusBadRequest
 	case KindUnauthorized:
 		return http.StatusUnauthorized
+	case KindForbidden:
+		return http.StatusForbidden
 	case KindNotFound:
 		return http.StatusNotFound
 	case KindConflict:

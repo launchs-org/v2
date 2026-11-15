@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -70,6 +71,13 @@ type AuthConfig struct {
 	SignupIPLimit  int
 	SignupIPWindow time.Duration
 
+	// BootstrapAdminName は、起動時に、管理者が1人もいなければ作る、最初の管理者のユーザー名(環境変数 AUTH_BOOTSTRAP_ADMIN_NAME)。空なら、作らない。
+	BootstrapAdminName string
+
+	// BootstrapAdminPassword は、最初の管理者のパスワード(環境変数 AUTH_BOOTSTRAP_ADMIN_PASSWORD、または AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE のファイルの中身)。
+	// ログには出さない。
+	BootstrapAdminPassword string
+
 	// HashMaxConcurrency は、パスワードのハッシュを、同時に計算できる数(環境変数 AUTH_HASH_MAX_CONCURRENCY)。メモリを守るための上限。
 	HashMaxConcurrency int
 }
@@ -100,6 +108,9 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 	loginIPWindow := reader.OptionalDuration("AUTH_LOGIN_IP_WINDOW", defaultLoginIPWindow)
 	signupIPLimit := reader.OptionalInt("AUTH_SIGNUP_IP_LIMIT", defaultSignupIPLimit)
 	signupIPWindow := reader.OptionalDuration("AUTH_SIGNUP_IP_WINDOW", defaultSignupIPWindow)
+	bootstrapAdminName := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_NAME", "")
+	bootstrapAdminPassword := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_PASSWORD", "")
+	bootstrapAdminPasswordFile := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE", "")
 	hashMaxConcurrency := reader.OptionalInt("AUTH_HASH_MAX_CONCURRENCY", defaultHashMaxConcurrency)
 	loginHistoryRetention := reader.OptionalDuration("AUTH_LOGIN_HISTORY_RETENTION", defaultLoginHistoryRetention)
 	loadError := reader.Err()
@@ -131,6 +142,20 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 			loadError = errors.Join(loadError, fmt.Errorf("環境変数 %s は、正の値でなければならない", name))
 		}
 	}
+	// 最初の管理者の設定: 名前とパスワードは、セットで指定する。パスワードは、環境変数か、ファイル(Secret のマウント)のどちらか一方。
+	if bootstrapAdminPassword != "" && bootstrapAdminPasswordFile != "" {
+		loadError = errors.Join(loadError, errors.New("環境変数 AUTH_BOOTSTRAP_ADMIN_PASSWORD と AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE は、同時に指定できない"))
+	} else if bootstrapAdminPasswordFile != "" {
+		// ファイルから読む(末尾の改行は除く)。
+		fileContent, readError := os.ReadFile(bootstrapAdminPasswordFile)
+		if readError != nil {
+			loadError = errors.Join(loadError, fmt.Errorf("環境変数 AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE のファイルを読めない: %w", readError))
+		}
+		bootstrapAdminPassword = strings.TrimRight(string(fileContent), "\r\n")
+	}
+	if (bootstrapAdminName == "") != (bootstrapAdminPassword == "") && loadError == nil {
+		loadError = errors.Join(loadError, errors.New("AUTH_BOOTSTRAP_ADMIN_NAME と、パスワード(AUTH_BOOTSTRAP_ADMIN_PASSWORD か _FILE)は、両方指定するか、両方省略しなければならない"))
+	}
 	// 問題があれば、ゼロ値とエラーを返す。
 	if loadError != nil {
 		return AuthConfig{}, loadError
@@ -140,7 +165,7 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 		KeysAutoGenerate: autoGenerateText == "true", SignupMode: signupMode, TrustedProxyCIDRs: splitCommaSeparated(trustedProxyText),
 		LoginMaxFailures: loginMaxFailures, LoginLockDuration: loginLockDuration, LoginIPLimit: loginIPLimit, LoginIPWindow: loginIPWindow,
 		SignupIPLimit: signupIPLimit, SignupIPWindow: signupIPWindow, LoginHistoryRetention: loginHistoryRetention,
-		HashMaxConcurrency: hashMaxConcurrency,
+		HashMaxConcurrency: hashMaxConcurrency, BootstrapAdminName: bootstrapAdminName, BootstrapAdminPassword: bootstrapAdminPassword,
 	}, nil
 }
 

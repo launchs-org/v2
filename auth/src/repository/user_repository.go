@@ -48,7 +48,7 @@ func (userRepository *UserRepository) Create(requestContext context.Context, use
 		// 招待があるときは、使用済みにする(使えないなら、0行になる)。
 		if invitationCodeHash != "" {
 			consumed := transaction.Model(&model.Invitation{}).
-				Where("code_hash = ? AND used_at IS NULL AND expires_at > now()", invitationCodeHash).
+				Where("code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()", invitationCodeHash).
 				Updates(map[string]any{"used_by": user.ID, "used_at": gorm.Expr("now()")})
 			if consumed.Error != nil {
 				return apperror.Wrap(apperror.KindInternal, "招待を確認できませんでした", consumed.Error)

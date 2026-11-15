@@ -40,12 +40,13 @@ func noStoreMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 // 引数:
 //   - appLogger: アクセスログ、エラーの記録、Echo 自身のログに使うロガー。
 //   - authUseCase: 認証のユースケース。
+//   - adminUseCase: アカウント管理のユースケース。
 //   - keyStore: 署名鍵(JWKS の配信に使う)。
 //   - resolver: クライアントの IP を決めるもの。
 //
 // 戻り値:
 //   - 組み立てた Echo のサーバー。起動は呼び出し側が行う。
-func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver) *echo.Echo {
+func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCase controller.AdminUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver) *echo.Echo {
 	// エラーハンドラーと、ロガーを設定して、サーバーを作る。
 	echoServer := echo.NewWithConfig(echo.Config{
 		Logger:           appLogger,
@@ -70,5 +71,17 @@ func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, keyStore *k
 	authGroup.POST("/logout", authController.Logout)
 	authGroup.GET("/login-history", authController.LoginHistory)
 	authGroup.GET("/.well-known/jwks.json", authController.JSONWebKeys)
+
+	// アカウント管理(管理者だけ。各ハンドラーが、最初に、DB の最新の状態で、管理者であることを確かめる)。
+	adminController := controller.NewAdminController(adminUseCase)
+	adminGroup := authGroup.Group("/admin")
+	adminGroup.GET("/users", adminController.ListUsers)
+	adminGroup.GET("/users/:userId", adminController.GetUser)
+	adminGroup.POST("/users/:userId/ban", adminController.BanUser())
+	adminGroup.POST("/users/:userId/unban", adminController.UnbanUser())
+	adminGroup.POST("/users/:userId/unlock", adminController.UnlockUser())
+	adminGroup.POST("/invitations", adminController.CreateInvitation)
+	adminGroup.GET("/invitations", adminController.ListInvitations)
+	adminGroup.DELETE("/invitations/:invitationId", adminController.RevokeInvitation)
 	return echoServer
 }

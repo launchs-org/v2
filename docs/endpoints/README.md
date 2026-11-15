@@ -8,6 +8,7 @@
 
 ## グループ一覧
 - [認証関連](auth.md) (/auth/)
+- [アカウント管理(管理者)](auth_admin.md) (/auth/admin/)
 - [プロジェクト関連](projects.md) (/projects)
 - [ビルド関連](builds.md) (/upload, /build)
 - [デプロイ・起動設定関連](deploys.md) (/deploy)
