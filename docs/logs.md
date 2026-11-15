@@ -2,7 +2,7 @@
 
 目的: deploy のコンテナの出力(標準出力・標準エラー)を、Pod が消えたあとも、保持期間の間、`GET /deploy/:deployId/logs` で見られるようにする。仕様は [docs/endpoints/deploys.md](endpoints/deploys.md) の「デプロイ ログ取得」、元の決定は [pre-implementation-checklist.md](pre-implementation-checklist.md) の I-3。
 
-この文書は、**コードを書く前の設計**。「要確認」の点は、§10 にまとめた。
+この文書は、**コードを書く前の設計**。レビューで決まったことと、残りの確認は、§10 にまとめた。
 
 ## 1. 決まっていること(既存の決定)
 
@@ -24,7 +24,7 @@
 - `logcollector/` は、他のコンテナと同じ形(`logcollector/dockerfile`、`logcollector/src/`)。Go モジュールは `launchs`。
 - **ログを DB に書くのは、logcollector だけ**(watcher と同じ「書き手は1つ」の決まり)。backend は、読むだけ。
 - **同時に1つだけ**動く。複数起動しても、PostgreSQL の advisory lock(`shared/leader`)で、リーダーになった1つだけが収集する。リーダーが止まる(プロセスの終了、DB の接続の切断)と、ロックが外れ、待っていた別の logcollector が引き継ぐ。
-  - **Raft は使わない**(§10-1)。watcher と同じ理由(3台以上のクラスターと永続化が要り、重い。DB は、すでに必須)。
+  - **Raft は使わない**(§10 で決定)。watcher と同じ理由(3台以上のクラスターと永続化が要り、重い。DB は、すでに必須)。
 - k8s への権限は、**`pods/log` の `get` だけ**(全 namespace)。Pod の一覧は、k8s ではなく、DB の `deploy_pods` から知る(§4)。
 
 ## 3. データ(app DB。`migrations/app/` に足す)
@@ -48,7 +48,7 @@
   - 起動したとき(引き継いだときも同じ)は、まず、全件を同じ比較で整える。止まっていた間に増えた・消えた Pod が、反映される。
 - 対象は、watcher が観測している Pod と同じ(`launchs-org/deploy-id` のラベルがある Pod)。それ以外の namespace(システムの Pod)のログは、集めない。
 - **コンテナは `app` だけ**(`shared/k8s.AppContainerName`)。init コンテナや、サイドカーは、集めない(現状、作っていない)。
-- watcher が止まっていると、新しい Pod を知るのが遅れる(watcher が戻れば、追いつく)。k8s の `pods` の watch を、logcollector にも持たせれば避けられるが、権限と処理が増えるので、しない(§10-2)。
+- watcher が止まっていると、新しい Pod を知るのが遅れる(watcher が戻れば、追いつく)。k8s の `pods` の watch を、logcollector にも持たせれば避けられるが、権限と処理が増えるので、しない(§10 で決定)。
 
 ## 5. 収集の流れ(Pod 1つにつき、1つの goroutine)
 
@@ -86,7 +86,7 @@
 | 不正な UTF-8 | `U+FFFD` に置き換える |
 | 空行 | そのまま保存する |
 | 標準出力と標準エラー | 区別しない(k8s のログ API が、混ぜて返すため) |
-| 書き込みの速さ | Pod ごとに 1MiB/秒まで(`LOG_INGEST_BYTES_PER_SEC`)。超えた分は捨て、1 秒に1行、`[logcollector] N 行を捨てました` を残す(仮。§10-4) |
+| 書き込みの速さ | Pod ごとに 1MiB/秒まで(`LOG_INGEST_BYTES_PER_SEC`)。超えた分は捨て、1 秒に1行、`[logcollector] N 行を捨てました` を残す(§10 の A) |
 
 ## 7. 保存期間と上限(リーダーの logcollector が削除する)
 
@@ -103,10 +103,26 @@
 - 持ち主の確認: deploy が、リクエストしたユーザーのものであること(他人・存在しない deploy は 404)。
 - `podId`(`pod-` + Pod の UID)の `pod_uid` が、**その deploy のストリームにあること**。無ければ 404(その deploy に属したことが無い、または保持期間を過ぎて削除済み)。ストリームはあるが、行が全て削除されているときは、200 で空。
 - 返すのは、`id > since` の行を、`id` の順に、**最大 1000 行、または 1MiB(どちらか先)**。`nextSince` は、返した最後の行の `id`。返す行が無ければ、`since` のまま(`since` を省略して、行が無ければ 0)。
-  - **変更案**: いまの仕様の「`since` を省略すると、先頭からの全ログ」は、**最大 1000 行ずつ**にする(全ログは、大きくなりうるため)。続きは、`nextSince` を `since` に渡す。返る行が空になったら、いまの末尾まで。(§10-3)
+  - **仕様の変更(決定)**: いまの仕様の「`since` を省略すると、先頭からの全ログ」は、**最大 1000 行ずつ**にする(全ログは、大きくなりうるため)。続きは、`nextSince` を `since` に渡す。返る行が空になったら、いまの末尾まで。
   - `since` が、末尾を超えるとき: 仕様のとおり、エラーにせず、`logs` は空文字、`nextSince` は、いまの末尾の `id`(その Pod の最大の `id`)。
-- `logs` は、各行を `<JST の時刻> <本文>\n` にして、つなげた文字列(時刻は、k8s のログの時刻)。(§10-6)
+- `logs` は、各行を `<JST の時刻> <本文>\n` にして、つなげた文字列(時刻は、k8s のログの時刻)。(§10 の C)
 - 削除した deploy のログは、deploy と一緒に消える(CASCADE)。
+
+### ログのある Pod の一覧(deploy の詳細に足す)
+
+`GET /deploy/:deployId`(デプロイ詳細取得)のレスポンスに、**`logPods`**(ログのある Pod の一覧)を足す。終了した Pod の `podId` を、利用者が知るため(`pods` は、これまでどおり、稼働中の Pod だけ)。
+
+```json
+"logPods": [
+  {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "running": true,  "startedAt": "2026-11-15T20:00:00+09:00", "endedAt": null},
+  {"podId": "pod-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy", "running": false, "startedAt": "2026-11-15T19:00:00+09:00", "endedAt": "2026-11-15T19:55:00+09:00"}
+]
+```
+
+- 対象: その deploy の `deploy_log_streams` のうち、**ログの行が1行以上残っているもの**(一覧にある `podId` は、必ず、ログが返る)。稼働中の Pod も含む(`pods` と重なる)。
+- 並び: 新しい Pod(`startedAt`)が先。**最大 50 件**(それより古いものは、返さない。`podId` を知っていれば、ログは取れる)。
+- `startedAt` は、Pod の作成時刻(`deploy_pods.pod_created_at`。収集の開始時にストリームへ写す)。`endedAt` は、収集が終わった時刻(`finished_at`)。稼働中は `null`。
+- ログが無い Pod(起動前に落ちた、出力が無かった、保存期間で全て消えた)は、載せない。
 
 ## 9. 設定、権限、開発での試し方
 
@@ -126,23 +142,26 @@
 - **開発**: compose に `logcollector` を足す。既定は `KUBERNETES_ACCESS=none`(何も収集せず、待つだけ)。`task up:k8s`(`docker-compose.kubernetes.yaml`)で、worker・watcher と一緒に k8s につなぐ。`--scale logcollector=2` で、リーダーが1つだけになることを試せる(watcher と同じ)。
 - **テスト**: k8s のログの取得は、interface(`LogSource`)の後ろに置き、テストでは偽物を使う(`client-go` の fake は、固定の文字列しか返さない)。重複の除き方、再接続、`previous`、引き継ぎ、保存期間は、偽物と、使い捨ての DB で確かめる。実際の `sinceTime` の挙動と、kubelet のログのローテーションは、実機(Talos)で確かめる。
 
-## 10. レビューしてほしい点
+## 10. レビューの結果と、残りの確認
 
-1. **リーダー選出を、Raft ではなく、advisory lock にしてよいか。** I-3 では「Raft は採用」と決めたが、その後の watcher で、同じ問題に、advisory lock を採用した(Raft は3台以上と永続化が要る。DB は必須)。logcollector も、リーダー1つで足りるので、同じにするのが、勧める案。引き継ぎは、DB の接続が切れた時点(TCP の切断の検知による)で起きる。
-2. **追う Pod を、DB の `deploy_pods`(watcher が書く)から知る形でよいか。** k8s の `pods` の watch を、logcollector にも持たせる案もある(watcher が止まっても、新しい Pod に気づける。権限と処理が増える)。勧めるのは、DB から知る形(権限が `pods/log` だけで済む。watcher が止まる障害は、別に気づける)。
-3. **`since` を、行の `id` にして、`since` 省略時は「最大 1000 行ずつ」に変えてよいか。** いまの仕様(先頭からの全ログ)は、50MB の Pod で、1回のレスポンスが大きくなり過ぎる。
-4. **書き込みの速さの上限(Pod ごとに 1MiB/秒、超えた分は捨てる)を入れるか。** 入れないと、大量に出力する Pod が、DB の書き込みを占有する(削除が追いつかず、50MB の上限も、大きく超える)。捨てた分は、ログに行が残るので、気づける。
-5. **Pod ごとの 50MB は、目安(最大で 1 分、超える)でよいか。** 厳密にするなら、書き込みのたびに削除することになり、重くなる。
-6. **`logs` の各行に、時刻(JST)を付けてよいか。** 仕様の例は、時刻つき。付けると、利用者が、時刻で追える。付けないと、アプリが出す文字列だけになる。
-7. **終了した Pod の `podId` を、利用者が知る手段が無い。** 仕様では、`pods` は稼働中の Pod だけを返す(終了した Pod の `podId` でも、ログは取れる)。ロールアウトで消えた Pod や、スケールダウンした Pod のログを見るには、`podId` が要る。deploy の詳細に、最近終了した Pod の一覧(`podId`、終了時刻、最後の終了の理由。`deploy_log_streams` から)を足す案がある。**この PR の範囲には入れず、必要になったら足す**のを、勧める。
-8. **`app` コンテナだけでよいか**(init コンテナ、サイドカーは、集めない)。
-9. **保存期間を、行の時刻で数える**(終了後 7 日のストリームごと削除)でよいか。ログを書いた時刻(DB に入った時刻)で数える案もあるが、収集が遅れたときに、古い行が、すぐ消えてしまう。
+### 決まったこと
+1. **リーダー選出は、Raft ではなく advisory lock**(I-3 の「Raft は採用」を、この点で変更する。watcher と同じ理由)。
+2. **追う Pod は、DB の `deploy_pods`(watcher が書く)から知る。**
+3. **`since` は行の `id`。省略時は「最大 1000 行ずつ」**(`deploys.md` の仕様を、この形に変える。§8)。
+4. **終了した Pod の `podId` は、deploy の詳細に `logPods`(ログのある Pod の一覧。終了した Pod も含む)を足して、返す**(§8)。
+
+### 残りの確認(勧める案のまま進める。変えたいものがあれば、言ってください)
+- **A. 書き込みの速さの上限**(Pod ごとに 1MiB/秒、超えた分は捨てて、1 秒に1行、捨てた数を残す)を入れる。入れないと、大量に出力する Pod が、DB の書き込みを占有する。
+- **B. Pod ごとの 50MB は、目安**(最大で 1 分、超えることがある)。厳密にするなら、書き込みのたびに削除することになり、重くなる。
+- **C. `logs` の各行に、時刻(JST)を付ける**(仕様の例のとおり)。
+- **D. `app` コンテナだけ集める**(init コンテナ、サイドカーは、集めない)。
+- **E. 保存期間は、行の時刻で数える**(終了して 7 日たったストリームは、行ごと削除)。DB に入った時刻で数えると、収集が遅れたときに、古い行がすぐ消える。
 
 ## 11. 実装の段階(PR の分け方の案)
 
 1. **この設計の文書**。
 2. **logcollector の土台**: テーブル(`deploy_log_streams`、`deploy_logs`)、リーダー選出、追う Pod の決め直し、収集(`LogSource` の interface と、k8s の実装)、重複の除き方、書き込み、保存期間の削除。偽物の `LogSource` と、使い捨ての DB でテスト。compose。
-3. **API**: `GET /deploy/:deployId/logs`(backend)、仕様書(`deploys.md`、Issue 009)の更新、`call-flow.md`。
+3. **API**: `GET /deploy/:deployId/logs`(backend)と、`GET /deploy/:deployId` の `logPods`、仕様書(`deploys.md`、Issue 002・009)の更新、`call-flow.md`。
 4. **実機での確認**(Talos): `sinceTime` の挙動(同じ秒の行の重複と、取りこぼし)、コンテナの再起動(`previous`)、リーダーの切り替え(2つ起動して、片方を止める)、ログのローテーション、書き込みの速さの上限。本番の権限(`pods/log` の ClusterRole)。
 
 2 と 3 を、1つにまとめることもできる(大きくなるので、分ける案)。
