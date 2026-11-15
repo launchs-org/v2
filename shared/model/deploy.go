@@ -32,6 +32,9 @@ const (
 	DeployStatusDeleteFailed = "delete_failed"
 )
 
+// MaxReplicas は、1つの deploy のレプリカ数(スケール)の最大。スペックやクォータとは関係なく、全体で同じ。
+const MaxReplicas = 5
+
 // Deploy は、deploys テーブルの1行。k8s の Deployment 1つに対応する。
 type Deploy struct {
 	// ID は、deploy の ID("deploy-" + UUID v4)。k8s の Deployment の名前にも使う。
@@ -108,8 +111,8 @@ type DeploySpec struct {
 	// MemoryMiB は、メモリの大きさ(MiB)。
 	MemoryMiB int `gorm:"column:memory_mib"`
 
-	// DefaultMaxInstances は、1アカウントが動かせる、このスペックのインスタンス(replicas)の数の既定(クォータ)。
-	DefaultMaxInstances int `gorm:"column:default_max_instances"`
+	// DefaultMaxDeploys は、1アカウントが作れる、このスペックの deploy の数の既定(クォータ)。
+	DefaultMaxDeploys int `gorm:"column:default_max_deploys"`
 }
 
 // TableName は、Gorm にテーブル名を教える。

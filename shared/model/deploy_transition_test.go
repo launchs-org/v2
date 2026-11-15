@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
+
+	"launchs/shared/apperror"
 )
 
 // TestDeployCommitConfig は、起動設定の結果の確定が、仕様どおりであることを確かめる。
@@ -143,5 +145,33 @@ func TestDeployCrashLoopingPod(testing *testing.T) {
 	}
 	if _, stop := (Deploy{Status: DeployStatusActive, Replicas: 0, Pods: []DeployPod{crashing}}).CrashLoopingPod(now, threshold); stop {
 		testing.Error("replicas 0 は止めないはず")
+	}
+}
+
+// TestDeployBeginScaleRange は、replicas が 0〜MaxReplicas の範囲外なら、状態に関わらず invalid_request になり(何も変えない)、
+// 範囲の端(0 と MaxReplicas)は通ることを確かめる。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+func TestDeployBeginScaleRange(testingT *testing.T) {
+	// 稼働中の deploy を用意する。
+	deploy := Deploy{Status: DeployStatusActive, Replicas: 1}
+	// 範囲外は、invalid_request で、何も変わらない。
+	for _, outOfRange := range []int{-1, MaxReplicas + 1, 1000} {
+		if changed, scaleError := deploy.BeginScale(outOfRange); changed || apperror.KindOf(scaleError) != apperror.KindInvalidRequest || deploy.Replicas != 1 || deploy.Status != DeployStatusActive {
+			testingT.Fatalf("%d は invalid_request で、変わらないはず: %v %v", outOfRange, changed, scaleError)
+		}
+	}
+	// 範囲外は、状態の確認(409)より先に返る。
+	applying := Deploy{Status: DeployStatusApplying, Replicas: 1}
+	if _, scaleError := applying.BeginScale(MaxReplicas + 1); apperror.KindOf(scaleError) != apperror.KindInvalidRequest {
+		testingT.Fatalf("反映中でも、範囲外は invalid_request のはず: %v", scaleError)
+	}
+	// 範囲の端は、通る。
+	for _, edge := range []int{0, MaxReplicas} {
+		active := Deploy{Status: DeployStatusActive, Replicas: 1}
+		if changed, scaleError := active.BeginScale(edge); !changed || scaleError != nil || active.Replicas != edge {
+			testingT.Fatalf("%d は通るはず: %v %v", edge, changed, scaleError)
+		}
 	}
 }

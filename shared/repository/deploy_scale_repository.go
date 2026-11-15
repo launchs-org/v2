@@ -24,7 +24,7 @@ type ScaleStart struct {
 //
 // スケーリングできるのは、通常の状態(active、scaled_zero、failed)の deploy だけ。行をロックして確かめる。
 // replicas が今と同じで、failed でもないときは、何も変えない(Changed が false)。
-// replicas を増やすときは、ユーザーのクォータ(スペックのインスタンスの数)を、行をロックして確かめる。
+// replicas の範囲(0〜MaxReplicas)は、モデルが確かめる。スケールは、クォータの対象ではない。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -34,18 +34,13 @@ type ScaleStart struct {
 //
 // 戻り値:
 //   - 変える前の値(元に戻すために使う)。
-//   - deploy が無い、または他のユーザーのものなら not_found。反映中・起動中・削除の途中、またはクォータを超えるなら conflict。
+//   - deploy が無い、または他のユーザーのものなら not_found。反映中・起動中・削除の途中なら conflict。範囲外の replicas は invalid_request。
 //   - それ以外のデータベースのエラーは internal_error。
 func (deployRepository *DeployRepository) BeginScale(requestContext context.Context, userID string, deployID string, replicas int) (ScaleStart, error) {
 	// 変える前の値を、トランザクションの外へ持ち出す入れ物。
 	var start ScaleStart
 	// 取得と更新を、1つのトランザクションで行う。
 	transactionError := deployRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
-		// ユーザーのクォータを最初にロックして、使用量を数える(ロックの順番は、どの操作でも、クォータが先)。
-		limits, usage, quotaError := loadQuota(transaction, userID, true)
-		if quotaError != nil {
-			return quotaError
-		}
 		// 行をロックして読む(持ち主の条件つき)。
 		deploy, lockError := lockDeploy(transaction, userID, deployID)
 		if lockError != nil {
@@ -61,12 +56,6 @@ func (deployRepository *DeployRepository) BeginScale(requestContext context.Cont
 		// 何も変わらなかったときは、保存しない。
 		if !changed {
 			return nil
-		}
-		// 増やすときだけ、増える分で、スペックのインスタンスの数が、上限に収まるかを確かめる(減らすときは、確かめない)。
-		if replicas > start.PreviousReplicas {
-			if limitError := limits.CheckScaleUp(usage, deploy.Spec, replicas-start.PreviousReplicas); limitError != nil {
-				return limitError
-			}
 		}
 		// 変えた deploy を保存する(0 も書くので、全ての列を書く)。
 		if saveError := transaction.Save(&deploy).Error; saveError != nil {
