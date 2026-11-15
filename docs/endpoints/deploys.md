@@ -27,7 +27,7 @@
 ```
 - Note: sourceType(asset/git)には関知せず、常に imageRef のみを受け取ってデプロイする。詳細は未設計(別途)
 - Note: deploy も projectId に属する。指定した projectId 配下の履歴として記録される
-- Note: spec は "small" | "medium" | "large" のいずれかで必須。省略した場合は 400(仮)。スペックはアカウント管理グループで定義するマスターデータ(CPU・メモリ)に対応する。アカウントのクォータを超える場合はエラーになる(ステータスコードはアカウント管理グループで定義する)。作成後のスペック変更は未対応(将来対応)
+- Note: spec は "small" | "medium" | "large" のいずれかで必須。省略した場合は 400(仮)。スペックはアカウント管理グループで定義するマスターデータ(CPU・メモリ)に対応する。アカウントのクォータ(deploy の合計の数、スペックごとの数)を超える場合は 409。詳細は [クォータ](quota.md)。作成後のスペック変更は未対応(将来対応)
 - Note: deleting 中のプロジェクトに deploy を作成しようとした場合は 409 を返す
 
 ### デプロイ詳細取得
@@ -132,7 +132,7 @@
 ```
 - Note: replicas を 0 にすると status は "scaled_zero" になる。1以上にすると "active" に戻る("停止"/"再開"という別APIは用意しない)
 - Note: deploy の status が "applying" または "deleting" の間は 409 を返す(他の apply 操作と同様に排他制御する)
-- Note: replicas は 0〜10(上限 10 は仮)。範囲外や未指定は 400
+- Note: replicas は 0〜5(全体で同じ上限。スペックやクォータとは関係ない。[クォータ](quota.md)も参照)。範囲外や未指定は 400
 - Note: 呼び出すと replicas を新しい値にして、status は "applying" になり、反映(Pod の増減)の完了は status のポーリングで確認する。完了すると "active"(0 のときは "scaled_zero")になり、300秒で完了しなければ "failed" になる。replicas は「希望する数」なので、失敗しても元には戻さない。"failed" の deploy は、同じ数でもスケーリングし直せる
 - Note: 今と同じ replicas(failed 以外)なら、何も変えずに 200 を返す。起動中("pending")の間と "delete_failed" の間は 409 を返す
 - Note: 未適用の起動設定(pending_*)は、スケーリングでは反映されない

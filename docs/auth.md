@@ -87,7 +87,7 @@
 - **既存のデータ**: `projects.user_id` などは、文字列で、外部キーも無い。開発用のデータ(`user-dev`)は、そのまま残る(本物のユーザーのものにはならない)。移行は、要らない。
 - nginx(開発用)と Traefik(本番)に、`/auth/` を auth コンテナへ向けるルールを足す。
 
-## 8. クォータ
+## 8. クォータ(実装済み。§13)
 
 ### 8.1 置き場所と、見る場所
 
@@ -103,14 +103,13 @@
 |---|---|---|---|
 | プロジェクトの数 | 10 | プロジェクトの作成 | `deleting` 以外 |
 | deploy の数 | 20 | deploy の作成 | `deleting` 以外 |
-| CPU の合計(ミリコア) | 4000 | deploy の作成、スケールの増加 | 全 deploy の `replicas × スペックの CPU` の合計(`scaled_zero` は 0) |
-| メモリの合計(MiB) | 8192 | 同上 | `replicas × スペックのメモリ` の合計 |
+| スペックごとの deploy の数 | small 20 / medium 10 / large 5 | deploy の作成 | スペックごとの、`deleting` 以外の deploy の数 |
 | volume の数 | 10 | volume の作成 | 全て |
 | volume の合計(MB) | 20480 | volume の作成、拡張の保存 | `size_mb` と、`pending_size_mb` の大きい方の合計(適用前でも、予約として数える) |
 | 1 volume の大きさ(MB) | 5120(確定) | volume の作成、拡張の保存 | — |
 
 - ingress は、仕様書どおり、プロジェクトごとの上限なし(クォータの項目にしない)。service は、deploy に1つなので、deploy の数で足りる。
-- 「CPU・メモリの合計」は、**スケールの増加のとき、今の replicas で数えた合計に、増える分を足して**確かめる。減らすときと、`scaled_zero` に戻すときは、確かめない。
+- **スケール(replicas)は、クォータの対象ではない。** 1つの deploy の replicas は、全体で 0〜5(定数 `model.MaxReplicas`。超えたら 400)。CPU・メモリの合計も、replicas の合計も、数えない(スペックの大きさを変えても上限が変わらず、利用者にも分かりやすいため)。減らすときと、`scaled_zero` に戻すときは、確かめない。
 - 既存のデータが、あとから下げた上限を超えていても、消さない(新しく作れないだけ)。
 
 ### 8.3 管理
@@ -160,3 +159,13 @@
 - **失敗は、理由を区別せず、全て 401**(`WWW-Authenticate: Bearer` つき)。
 - **設定**(`docs/auth.md` §7 のとおり): `AUTH_JWKS_URL` か `DEV_USER_ID` の、ちょうど一方が必須(両方、どちらも無いときは、起動しない)。`AUTH_REQUIRE_JWKS=true`(本番)のときは、`AUTH_JWKS_URL` が必須で、`DEV_USER_ID` は指定できない。`DEV_USER_ID` で起動したときは、警告をログに出す。
 - 開発用の compose は、`AUTH_JWKS_URL=http://auth:8080/auth/.well-known/jwks.json` を指定する(`DEV_USER_ID` は、もう指定しない)。`user-dev` のデータは、DB に残るが、誰のものでもない。
+
+## 13. 実装メモ(PR 3: クォータ)
+
+- **テーブル**: `quota_defaults`(1行)と `account_quotas`(ユーザーごとの上書き。NULL は既定)。**スペックごとの deploy の数**は、既定が `deploy_specs.default_max_deploys`、ユーザーごとの上書きが `account_spec_quotas`(行が無ければ既定)。CPU・メモリの合計では数えない(§8.2)。マイグレーションは `migrations/app/000011_create_quotas.up.sql`。**volume 1つの大きさ**は、これまでどおり環境変数 `VOLUME_MAX_SIZE_MB`(テーブルには入れない)。
+- **判定はモデルのメソッド**(`shared/model/quota.go` の `QuotaLimits.Check...`)。repository は、「クォータの行をロックして、使用量を数える → モデルのメソッドで判定 → 保存」だけを行う(`shared/repository/quota_repository.go` の `loadQuota`)。
+- **ロックの順番は、どの操作でも、ユーザーのクォータの行が先**(プロジェクトや deploy や volume の行より前)。デッドロックを避けるため。
+- **確かめる操作**: プロジェクトの作成、deploy の作成(合計の数と、スペックごとの数)、volume の作成(数と大きさの合計)、volume の拡張の保存(予約が増えるときだけ。同じ値の保存し直しや、破棄は、確かめない)。状態の確認や、入力の確認(400)は、クォータ(409)より先に行う。
+- **`GET /api/v1/quota`**: 自分の上限と使用量(ロックしない)。仕様は `docs/endpoints/quota.md`。
+- **管理の API(上限の変更)は、まだ無い**(PR 4)。いまは、`account_quotas` を SQL で更新する。
+- 認証のコンテナには、クォータの値は無い(アプリの DB にある)。ユーザーの BAN などと、クォータの関係は、PR 4 で決める。

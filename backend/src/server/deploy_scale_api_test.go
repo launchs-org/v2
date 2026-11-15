@@ -33,7 +33,8 @@ func TestDeployAPIScale(testingT *testing.T) {
 	for _, invalidCase := range []struct{ name, body string }{
 		{"replicas が未指定なら 400", `{}`},
 		{"replicas が負なら 400", `{"replicas":-1}`},
-		{"replicas が上限(10)を超えると 400", `{"replicas":11}`},
+		{"replicas が上限(5)を超えると 400", `{"replicas":6}`},
+		{"replicas が大きくても 400", `{"replicas":1000}`},
 		{"replicas が文字列なら 400", `{"replicas":"2"}`},
 		{"JSON でないボディは 400", `not json`},
 	} {

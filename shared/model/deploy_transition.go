@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	"launchs/shared/apperror"
@@ -98,8 +99,13 @@ func (deploy *Deploy) CommitConfig(succeeded bool) bool {
 //
 // 戻り値:
 //   - 変えたら true。何も変えなかったら false。
+//   - replicas が 0〜MaxReplicas の範囲外なら invalid_request(状態の確認より先に行う)。
 //   - 設定を操作できない状態、または起動中なら conflict。
 func (deploy *Deploy) BeginScale(replicas int) (bool, error) {
+	// 範囲外の値は、状態に関わらず、入力の不正として断る(replicas の上限は、スペックやクォータとは関係なく、全体で決まっている)。
+	if replicas < 0 || replicas > MaxReplicas {
+		return false, apperror.New(apperror.KindInvalidRequest, fmt.Sprintf("replicas は 0〜%d でなければなりません", MaxReplicas))
+	}
 	// 反映中や削除の途中は、操作できない。
 	if !deploy.CanEditSettings() {
 		return false, apperror.New(apperror.KindConflict, "deploy は "+deploy.Status+" のため、起動設定を操作できません")
