@@ -13,6 +13,24 @@ import (
 	"launchs/shared/pagination"
 )
 
+// HasAdmin は、管理者(状態を問わない)が1人でもいるかを返す。
+//
+// 停止中の管理者も数える。最初の管理者を作る処理が、再起動のたびに、同じ名前を作ろうとして、失敗し続けないため。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//
+// 戻り値:
+//   - 1人でもいれば true。データベースのエラーは internal_error。
+func (userRepository *UserRepository) HasAdmin(requestContext context.Context) (bool, error) {
+	// 管理者の数を数える。
+	var count int64
+	if countError := userRepository.database.WithContext(requestContext).Model(&model.User{}).Where("role = ?", model.RoleAdmin).Limit(1).Count(&count).Error; countError != nil {
+		return false, apperror.Wrap(apperror.KindInternal, "管理者を確認できませんでした", countError)
+	}
+	return count > 0, nil
+}
+
 // List は、ユーザーを、新しい順に取得する(管理者用)。
 //
 // 引数:

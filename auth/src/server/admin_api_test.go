@@ -373,3 +373,85 @@ func TestAdminCommands(testing *testing.T) {
 		testing.Error("停止中のユーザーは拒否されるはず")
 	}
 }
+
+// TestBootstrapAdmin は、起動時の最初の管理者の作成が、管理者がいないときだけ作ること(何度呼んでも1人)、
+// 作った管理者で管理 API を使えること、停止中の管理者でも「いる」と数えること、同じ名前の一般ユーザーがいると
+// 作らずにエラーにすること、弱いパスワードを拒否すること、複数の auth が同時に起動しても1人だけ作られることを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestBootstrapAdmin(testing *testing.T) {
+	// 管理者がいない状態から始める。最初の呼び出しは作り、2回目は何もしない。
+	environment := newTestEnvironment(testing, nil)
+	ctx := context.Background()
+	if created, bootstrapError := environment.admin.BootstrapAdmin(ctx, "first-admin", goodPassword); bootstrapError != nil || !created {
+		testing.Fatalf("作れるはず: %v %v", created, bootstrapError)
+	}
+	if created, bootstrapError := environment.admin.BootstrapAdmin(ctx, "first-admin", goodPassword); bootstrapError != nil || created {
+		testing.Fatalf("2回目は、何もしないはず: %v %v", created, bootstrapError)
+	}
+	// 名前やパスワードが違っても、管理者がいれば何もしない(別の管理者は作られない)。
+	if created, bootstrapError := environment.admin.BootstrapAdmin(ctx, "another", goodPassword); bootstrapError != nil || created {
+		testing.Fatalf("管理者がいれば、何もしないはず: %v %v", created, bootstrapError)
+	}
+	var adminCount int64
+	environment.database.Table("users").Where("role = 'admin'").Count(&adminCount)
+	if adminCount != 1 {
+		testing.Fatalf("管理者は1人のはず: %d", adminCount)
+	}
+	// 作った管理者で、ログインして、管理 API を使える。
+	_, accessToken := accessTokenFor(testing, environment, "first-admin", false, "203.0.113.60")
+	if listed := call(testing, environment, http.MethodGet, "/auth/admin/users", "", accessToken, "203.0.113.60"); listed.status != http.StatusOK {
+		testing.Fatalf("管理 API を使えるはず: %d", listed.status)
+	}
+	// 管理者が停止されても、「いる」と数える(再起動のたびに、作ろうとして失敗しない)。
+	environment.database.Exec("UPDATE users SET status = 'banned' WHERE role = 'admin'")
+	if created, bootstrapError := environment.admin.BootstrapAdmin(ctx, "first-admin", goodPassword); bootstrapError != nil || created {
+		testing.Fatalf("停止中でも、何もしないはず: %v %v", created, bootstrapError)
+	}
+
+	// 別の環境: 同じ名前の一般ユーザーがいて、管理者がいないときは、作らずにエラー。
+	other := newTestEnvironment(testing, nil)
+	_, _ = accessTokenFor(testing, other, "alice", true, "203.0.113.61")
+	if created, bootstrapError := other.admin.BootstrapAdmin(ctx, "Alice", goodPassword); bootstrapError == nil || created || !strings.Contains(bootstrapError.Error(), "promote") {
+		testing.Fatalf("同じ名前の一般ユーザーがいるときは、エラーのはず: %v %v", created, bootstrapError)
+	}
+	// 弱いパスワードは、エラー(管理者は作られない)。
+	if created, bootstrapError := other.admin.BootstrapAdmin(ctx, "bob-admin", "password1234"); bootstrapError == nil || created {
+		testing.Fatalf("弱いパスワードは、エラーのはず: %v %v", created, bootstrapError)
+	}
+	var otherAdmins int64
+	other.database.Table("users").Where("role = 'admin'").Count(&otherAdmins)
+	if otherAdmins != 0 {
+		testing.Fatalf("管理者は作られないはず: %d", otherAdmins)
+	}
+
+	// 別の環境: 複数の auth が、同時に起動した場合。エラーにならず、管理者は1人だけ。
+	concurrent := newTestEnvironment(testing, nil)
+	type outcome struct {
+		created bool
+		err     error
+	}
+	outcomes := make(chan outcome, 6)
+	for attempt := 0; attempt < 6; attempt++ {
+		go func() {
+			created, bootstrapError := concurrent.admin.BootstrapAdmin(ctx, "racing-admin", goodPassword)
+			outcomes <- outcome{created: created, err: bootstrapError}
+		}()
+	}
+	createdCount := 0
+	for attempt := 0; attempt < 6; attempt++ {
+		result := <-outcomes
+		if result.err != nil {
+			testing.Errorf("同時でも、エラーにならないはず: %v", result.err)
+		}
+		if result.created {
+			createdCount++
+		}
+	}
+	var racingAdmins int64
+	concurrent.database.Table("users").Where("role = 'admin'").Count(&racingAdmins)
+	if createdCount != 1 || racingAdmins != 1 {
+		testing.Fatalf("作られるのは、ちょうど1人のはず: created=%d admins=%d", createdCount, racingAdmins)
+	}
+}

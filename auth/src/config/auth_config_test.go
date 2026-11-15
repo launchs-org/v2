@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -55,6 +57,58 @@ func TestLoadAuthConfig(testing *testing.T) {
 	for _, expected := range []string{"DATABASE_URL", "AUTH_KEYS_DIR", "AUTH_SIGNUP_MODE", "AUTH_KEYS_AUTOGENERATE", "AUTH_LOGIN_MAX_FAILURES", "AUTH_LOGIN_IP_WINDOW", "AUTH_HASH_MAX_CONCURRENCY", "HTTP_PORT", "LOG_LEVEL"} {
 		if !strings.Contains(invalidError.Error(), expected) {
 			testing.Errorf("%s の問題を、報告するはず: %v", expected, invalidError)
+		}
+	}
+}
+
+// TestLoadAuthConfigBootstrapAdmin は、最初の管理者の設定が、指定なし・名前とパスワード・パスワードのファイル(末尾の改行を除く)で読めること、
+// 名前だけ、パスワードだけ、パスワードの二重の指定、読めないファイルを、エラーにすることを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestLoadAuthConfigBootstrapAdmin(testing *testing.T) {
+	// 必須の環境変数と、パスワードのファイルを用意する。
+	base := map[string]string{"DATABASE_URL": "postgres://db", "AUTH_KEYS_DIR": "/keys"}
+	with := func(extra map[string]string) map[string]string {
+		merged := map[string]string{}
+		for name, value := range base {
+			merged[name] = value
+		}
+		for name, value := range extra {
+			merged[name] = value
+		}
+		return merged
+	}
+	passwordFile := filepath.Join(testing.TempDir(), "admin-password")
+	if writeError := os.WriteFile(passwordFile, []byte("from file password\n"), 0o600); writeError != nil {
+		testing.Fatal(writeError)
+	}
+	// 指定なしなら、作らない設定。
+	if none, noneError := LoadAuthConfig(newTestReader(base)); noneError != nil || none.BootstrapAdminName != "" || none.BootstrapAdminPassword != "" {
+		testing.Fatalf("指定なしは、空のはず: %+v %v", none, noneError)
+	}
+	// 環境変数で、名前とパスワード。
+	if fromEnv, envError := LoadAuthConfig(newTestReader(with(map[string]string{"AUTH_BOOTSTRAP_ADMIN_NAME": "root", "AUTH_BOOTSTRAP_ADMIN_PASSWORD": "env password"}))); envError != nil || fromEnv.BootstrapAdminName != "root" || fromEnv.BootstrapAdminPassword != "env password" {
+		testing.Fatalf("環境変数から読めるはず: %+v %v", fromEnv, envError)
+	}
+	// ファイルから(末尾の改行は除く)。
+	if fromFile, fileError := LoadAuthConfig(newTestReader(with(map[string]string{"AUTH_BOOTSTRAP_ADMIN_NAME": "root", "AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE": passwordFile}))); fileError != nil || fromFile.BootstrapAdminPassword != "from file password" {
+		testing.Fatalf("ファイルから読めるはず: %+v %v", fromFile, fileError)
+	}
+	// 不正な組み合わせは、エラー。
+	invalidCases := map[string]struct {
+		extra map[string]string
+		piece string
+	}{
+		"名前だけ":        {map[string]string{"AUTH_BOOTSTRAP_ADMIN_NAME": "root"}, "両方指定するか"},
+		"パスワードだけ":     {map[string]string{"AUTH_BOOTSTRAP_ADMIN_PASSWORD": "pw"}, "両方指定するか"},
+		"ファイルだけ":      {map[string]string{"AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE": passwordFile}, "両方指定するか"},
+		"パスワードの二重の指定": {map[string]string{"AUTH_BOOTSTRAP_ADMIN_NAME": "root", "AUTH_BOOTSTRAP_ADMIN_PASSWORD": "pw", "AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE": passwordFile}, "同時に指定できない"},
+		"読めないファイル":    {map[string]string{"AUTH_BOOTSTRAP_ADMIN_NAME": "root", "AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE": "/nonexistent/file"}, "ファイルを読めない"},
+	}
+	for name, invalidCase := range invalidCases {
+		if _, invalidError := LoadAuthConfig(newTestReader(with(invalidCase.extra))); invalidError == nil || !strings.Contains(invalidError.Error(), invalidCase.piece) {
+			testing.Errorf("%s: %q を含むエラーのはず: %v", name, invalidCase.piece, invalidError)
 		}
 	}
 }

@@ -10,7 +10,7 @@
   - トークンが無い・使えない(refresh token を含む): 401。
   - 管理者でない、または停止中: **403** `forbidden`。
 - 操作は、auth のログに、誰が(`actor`)、何を(`action`)、何に対して(`target`)行ったかを残す。
-- 最初の管理者は、API では作れない。コマンドで作る: `task admin:create -- <userName>`(パスワードは、環境変数 `AUTH_ADMIN_PASSWORD` か、標準入力の1行で渡す。通常のサインアップと同じ強さの検査を行う)。すでにあるユーザーを管理者にする: `task admin:promote -- <userName>`。
+- 最初の管理者は、API では作れない。**起動時に作る**(環境変数 `AUTH_BOOTSTRAP_ADMIN_NAME` と、パスワード `AUTH_BOOTSTRAP_ADMIN_PASSWORD` または `AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE`。管理者が1人もいないときだけ。Kubernetes ではこちら)か、コマンドで作る: `task admin:create -- <userName>`(パスワードは、環境変数 `AUTH_ADMIN_PASSWORD` か、標準入力の1行で渡す。通常のサインアップと同じ強さの検査を行う)。すでにあるユーザーを管理者にする: `task admin:promote -- <userName>`。
 
 ### ユーザーの一覧
 - Get: /auth/admin/users?limit=20&cursor=...
