@@ -30,6 +30,20 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # フロントエンド(React + Vite)。開発用は、Vite の開発サーバー(HMR つき)。ブラウザは nginx(https://localhost:18443)につなぐ。
+  # node_modules は、ホストのファイルと混ざらないよう、名前つきのボリュームに置く。
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/dockerfile
+      target: Develop
+    environment:
+      # HMR の WebSocket の接続先のポート(ブラウザが nginx につなぐ、ホスト側のポート)。
+      VITE_HMR_CLIENT_PORT: ${HTTPS_HOST_PORT:-18443}
+    volumes:
+      - .:/app
+      - frontend-node-modules:/app/frontend/node_modules
+
   # 認証のコンテナ。ユーザーの登録・ログイン・トークンの発行と、公開鍵(JWKS)の配信(docs/auth.md)。
   auth:
     build:
@@ -232,6 +246,8 @@ services:
         condition: service_started
       auth:
         condition: service_started
+      frontend:
+        condition: service_started
     ports:
       # 手元から呼ぶためのポート。他のものと重なることがあるので、既定は 18443 にして、
       # HTTPS_HOST_PORT で変えられるようにしてある。
@@ -241,6 +257,7 @@ services:
       - nginx-certificates:/etc/nginx/certs:ro
 
 volumes:
+  frontend-node-modules:
   auth-keys:
   go-module-cache:
   postgres-data:

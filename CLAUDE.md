@@ -7,7 +7,7 @@
 launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエンド/フロントエンドを作成するプロジェクト。詳細は [readme.md](readme.md) を参照。
 
 - バックエンド: Golang + Echo + Gorm(PostgreSQL)
-- フロントエンド: 未定
+- フロントエンド: React + Vite + TypeScript(SPA。`frontend/`。[docs/frontend.md](docs/frontend.md))
 - インフラ: 開発環境 Podman(Docker)、本番環境 Kubernetes(オンプレ)
 
 ## ディレクトリ構成
@@ -16,6 +16,7 @@ launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエ
 backend/        バックエンド(Golang/Echo)。dockerfile と src/(コード)を持つ
 watcher/        k8s の Pod と Deployment を観測し、実際の状態を DB に反映するコンテナ(docs/watcher.md)
 auth/           認証(ユーザー登録・ログイン・トークンの発行・JWKS。docs/auth.md)
+frontend/       フロントエンド(React + Vite + TypeScript)。docs/frontend.md
 logcollector/   deploy のコンテナの出力ログを Pod ごとに購読して DB に保存するコンテナ(docs/logs.md)
 registry/       同じ形のコンテナ用フォルダ(これから作る)
 shared/         バックエンド・ワーカー・watcher で共有するコード
@@ -55,6 +56,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - **状態による操作の可否と、状態を変える操作は、`shared/model` のメソッドに置く**(repository は、ロックして読む → メソッドを呼ぶ → 保存する、だけを行う。[docs/coding-conventions.md](docs/coding-conventions.md))。
 - **認証は、別のコンテナ(`auth/`)**。URL は `/auth/...`(パスを書き換えずに渡す)。access token は EdDSA で、backend が JWKS の公開鍵で検証する(`shared/jwtverify`。環境変数 `AUTH_JWKS_URL`。本番は `AUTH_REQUIRE_JWKS=true` で、開発用の `DEV_USER_ID` を拒否する)。アカウント管理(管理者・BAN・招待)は `/auth/admin/...`(管理者かどうかは、毎回 DB で確かめる。最初の管理者は `task admin:create -- <userName>`。[docs/endpoints/auth_admin.md](docs/endpoints/auth_admin.md))。クォータ(アカウントごとの上限)は、アプリの DB の `quota_defaults` / `account_quotas`。作成・拡張のトランザクションの中で、ユーザーの行をロックして判定し、超えたら 409([docs/auth.md](docs/auth.md) §8・§13、[docs/endpoints/quota.md](docs/endpoints/quota.md))。
 - **コンテナの出力ログは、別コンテナ `logcollector/` が Pod のログを購読して DB に保存する**(書き手は logcollector だけ。リーダー選出は advisory lock。設計と実装メモは [docs/logs.md](docs/logs.md)。収集と API(`GET /deploy/:deployId/logs`、deploy の詳細の `logPods`)まで実装済み。Talos の実機で確認済みだが、大量出力時の取り込みの停止(原因は未特定)などの注意点が、§14 にある)。
+- **フロントエンドは、`frontend/`(React + Vite + TypeScript の SPA)**。同じホストの `/` に置き、`/api/` と `/auth/` を、backend と auth へ振り分ける(CORS は要らない)。access token はメモリ、refresh token は localStorage(本番の静的配信に、厳しい CSP を付ける)。ビルドとテストは、コンテナの中で(`task frontend:test`、`task frontend:build`)。コードの書き方は、Go の規約を、TypeScript に合わせて使う(全ての関数にコメント、一文字の変数名は禁止)。詳細は [docs/frontend.md](docs/frontend.md)。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様
