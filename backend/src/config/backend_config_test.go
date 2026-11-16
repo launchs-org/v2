@@ -36,7 +36,7 @@ func newTestReader(environment map[string]string) *sharedconfig.EnvironmentReade
 func withIngressDefaults(expected BackendConfig) BackendConfig {
 	// ベースドメインと、払い出さないサブドメインに、既定値を入れる。
 	expected.VolumeMaxSizeMB = 5120
-	expected.IngressBaseDomain = "launchs.org"
+	expected.IngressBaseDomain = "shconn.org"
 	expected.IngressReservedSubdomains = splitCommaSeparated(defaultIngressReservedSubdomains)
 	return expected
 }
