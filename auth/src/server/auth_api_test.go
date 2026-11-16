@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"launchs/auth/src/clientip"
+	"launchs/auth/src/controller"
 	"launchs/auth/src/keys"
 	"launchs/auth/src/password"
 	"launchs/auth/src/repository"
@@ -26,6 +27,21 @@ import (
 
 	"log/slog"
 )
+
+// testSiteKey は、人間であることの確認が有効なテスト環境の、サイトキー(無効なら空)。
+//
+// 引数:
+//   - settings: 認証のユースケースの設定。
+//
+// 戻り値:
+//   - 確認が有効なら "test-site-key"、無効なら空。
+func testSiteKey(settings service.Settings) string {
+	// 確認の検証が設定されていれば、有効。
+	if settings.Captcha != nil {
+		return "test-site-key"
+	}
+	return ""
+}
 
 // testEnvironment は、API のテストに必要なものの一式。
 type testEnvironment struct {
@@ -87,7 +103,7 @@ func newTestEnvironmentWithHasher(testing *testing.T, mutate func(*service.Setti
 	adminService := service.NewAdminService(repository.NewUserRepository(database), repository.NewInvitationRepository(database), repository.NewLoginFailureRepository(database),
 		logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), hasher, tokens)
 	environment.admin = adminService
-	environment.server = New(logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), authService, adminService, keyStore, resolver)
+	environment.server = New(logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), authService, adminService, keyStore, resolver, controller.PublicConfig{TurnstileSiteKey: testSiteKey(settings)})
 	return environment
 }
 

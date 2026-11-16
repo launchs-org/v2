@@ -112,3 +112,44 @@ func TestLoadAuthConfigBootstrapAdmin(testing *testing.T) {
 		}
 	}
 }
+
+// TestLoadAuthConfigTurnstile は、Turnstile の設定が、指定なし(無効)・サイトキーとシークレットキーの両方(有効)・ホスト名と URL の指定で読めること、
+// 片方だけ、不正な URL を、エラーにすることを確かめる。
+//
+// 引数:
+//   - testing: テストの状態。
+func TestLoadAuthConfigTurnstile(testing *testing.T) {
+	// 必須の環境変数に、指定を足す。
+	with := func(extra map[string]string) map[string]string {
+		merged := map[string]string{"DATABASE_URL": "postgres://db", "AUTH_KEYS_DIR": "/keys"}
+		for name, value := range extra {
+			merged[name] = value
+		}
+		return merged
+	}
+	// 指定なしは、無効。
+	if none, noneError := LoadAuthConfig(newTestReader(with(nil))); noneError != nil || none.TurnstileSiteKey != "" || none.TurnstileSecretKey != "" || none.TurnstileVerifyURL != "" || len(none.TurnstileHostnames) != 0 {
+		testing.Fatalf("指定なしは、無効のはず: %+v %v", none, noneError)
+	}
+	// 両方を指定すると、有効。ホスト名は、カンマ区切りで、空白と空の要素を除く。
+	enabled, enabledError := LoadAuthConfig(newTestReader(with(map[string]string{
+		"AUTH_TURNSTILE_SITE_KEY": "site-1", "AUTH_TURNSTILE_SECRET_KEY": "secret-1", "AUTH_TURNSTILE_VERIFY_URL": "http://localhost:9999/verify", "AUTH_TURNSTILE_HOSTNAMES": " app.example, ,localhost ",
+	})))
+	if enabledError != nil || enabled.TurnstileSiteKey != "site-1" || enabled.TurnstileSecretKey != "secret-1" || enabled.TurnstileVerifyURL != "http://localhost:9999/verify" || !reflect.DeepEqual(enabled.TurnstileHostnames, []string{"app.example", "localhost"}) {
+		testing.Fatalf("読めるはず: %+v %v", enabled, enabledError)
+	}
+	// 不正な指定は、エラー。
+	invalidCases := map[string]struct {
+		extra map[string]string
+		piece string
+	}{
+		"サイトキーだけ":        {map[string]string{"AUTH_TURNSTILE_SITE_KEY": "site-1"}, "両方指定するか"},
+		"シークレットだけ":       {map[string]string{"AUTH_TURNSTILE_SECRET_KEY": "secret-1"}, "両方指定するか"},
+		"URL が http でない": {map[string]string{"AUTH_TURNSTILE_SITE_KEY": "s", "AUTH_TURNSTILE_SECRET_KEY": "k", "AUTH_TURNSTILE_VERIFY_URL": "ftp://x"}, "AUTH_TURNSTILE_VERIFY_URL"},
+	}
+	for name, invalidCase := range invalidCases {
+		if _, invalidError := LoadAuthConfig(newTestReader(with(invalidCase.extra))); invalidError == nil || !strings.Contains(invalidError.Error(), invalidCase.piece) {
+			testing.Errorf("%s: %q を含むエラーのはず: %v", name, invalidCase.piece, invalidError)
+		}
+	}
+}

@@ -12,6 +12,8 @@ export interface ServerState {
   /** ページごとの、nextCursor(指定しなければ、1ページだけ)。 */
   pageSize?: number;
   quota?: { projectsUsed: number; projectsLimit: number };
+  /** 指定すると、人間であることの確認(Turnstile)が有効になる(GET /auth/config が、サイトキーを返す)。 */
+  turnstileSiteKey?: string;
 }
 
 /**
@@ -27,6 +29,9 @@ export function appServer(state: ServerState, overrides: Record<string, Handler>
     const override = overrides[key];
     if (override !== undefined) {
       return override(request);
+    }
+    if (key === "GET /auth/config") {
+      return jsonResponse(200, { turnstile: state.turnstileSiteKey === undefined ? { enabled: false } : { enabled: true, siteKey: state.turnstileSiteKey } });
     }
     if (key === "POST /auth/login" || key === "POST /auth/signup") {
       return jsonResponse(200, { token: "refresh-1" });
@@ -55,6 +60,10 @@ export function appServer(state: ServerState, overrides: Record<string, Handler>
       const name = (request.body as { name: string }).name;
       state.projects.unshift({ projectId: `project-${name}`, name, status: "active" });
       return jsonResponse(200, { projectId: `project-${name}` });
+    }
+    // deploy の一覧は、既定では空(deploy の画面のテストは、上書きする)。
+    if (/^GET \/api\/v1\/projects\/[^/]+\/deploys$/.test(key)) {
+      return jsonResponse(200, { deploys: [], nextCursor: null });
     }
     const single = /^(GET|PATCH|DELETE) \/api\/v1\/projects\/([^/]+)$/.exec(key);
     if (single !== null) {
