@@ -1,10 +1,11 @@
 /// <reference types="vitest/config" />
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // Vite の設定。開発サーバーは、nginx の後ろで動く(ブラウザは nginx の HTTPS につなぐ)ので、HMR の接続先を、ブラウザのいるポートに合わせる。
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     // nginx 経由のホスト名(localhost)を許可する。
     allowedHosts: true,

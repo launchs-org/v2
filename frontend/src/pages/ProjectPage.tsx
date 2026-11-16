@@ -1,5 +1,6 @@
 // プロジェクト1つの画面(名前の変更、削除)。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/api_error";
@@ -7,7 +8,15 @@ import { deleteProject, getProject, renameProject } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ErrorMessage } from "../components/ErrorMessage";
-import { projectStatusLabel, validateProjectName } from "../lib/project_name";
+import { Alert } from "../components/ui/alert";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Skeleton } from "../components/ui/skeleton";
+import { Spinner } from "../components/ui/spinner";
+import { projectStatusLabel, projectStatusTone, validateProjectName } from "../lib/project_name";
 
 /** 削除中の間、状態を確かめ直す間隔(ミリ秒)。 */
 const POLL_INTERVAL_MS = 3000;
@@ -69,14 +78,21 @@ export function ProjectPage() {
   // 見つからない(他のユーザーのもの、削除が終わったもの)なら、一覧へ戻る道を出す。
   if (project.error instanceof ApiError && project.error.status === 404) {
     return (
-      <>
-        <p>プロジェクトが見つかりません(削除されたか、存在しません)。</p>
-        <button type="button" className="button" onClick={() => { void queryClient.invalidateQueries({ queryKey: ["projects"] }); navigate("/projects"); }}>プロジェクトの一覧へ</button>
-      </>
+      <Card>
+        <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
+          <p className="font-medium">プロジェクトが見つかりません(削除されたか、存在しません)。</p>
+          <Button onClick={() => { void queryClient.invalidateQueries({ queryKey: ["projects"] }); navigate("/projects"); }}>プロジェクトの一覧へ</Button>
+        </CardContent>
+      </Card>
     );
   }
   if (project.isPending) {
-    return <p className="muted" role="status">読み込み中…</p>;
+    return (
+      <div role="status" aria-label="読み込み中" className="flex flex-col gap-4">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-32 w-full rounded-xl" />
+      </div>
+    );
   }
   if (project.isError) {
     return <ErrorMessage error={project.error} />;
@@ -85,36 +101,58 @@ export function ProjectPage() {
   // 削除中・削除失敗の間は、変更できない(サーバーも 409 を返す)。削除は、削除中でなければ、呼べる(失敗の後の、やり直しを含む)。
   const editable = data.status === "active";
   return (
-    <>
-      <p><Link to="/projects">← プロジェクトの一覧</Link></p>
-      <h1>{data.name} <span className={`badge badge--${data.status}`}>{projectStatusLabel(data.status)}</span></h1>
-      <p className="muted">ID: <code>{data.projectId}</code></p>
-      {data.status === "deleting" && <p role="status">削除しています。終わると、一覧に戻ります…</p>}
-      {data.status === "delete_failed" && <p className="error" role="alert">削除に失敗して、止まっています。もう一度、削除を試せます。</p>}
+    <div className="flex flex-col gap-6">
+      <Button asChild variant="ghost" size="sm" className="-ml-3 w-fit text-muted-foreground">
+        <Link to="/projects"><ArrowLeft aria-hidden="true" />プロジェクトの一覧</Link>
+      </Button>
+      <div className="flex flex-col gap-2">
+        <h1 className="flex flex-wrap items-center gap-3 text-3xl font-normal tracking-tight">
+          <span className="break-all">{data.name}</span>
+          <Badge variant={projectStatusTone(data.status)} className="text-sm">{projectStatusLabel(data.status)}</Badge>
+        </h1>
+        <p className="text-sm text-muted-foreground">ID: <code className="break-all font-mono text-xs">{data.projectId}</code></p>
+      </div>
+      {data.status === "deleting" && <Alert variant="info">削除しています。終わると、一覧に戻ります…</Alert>}
+      {data.status === "delete_failed" && <Alert>削除に失敗して、止まっています。もう一度、削除を試せます。</Alert>}
 
-      <section className="card">
-        <h2>名前の変更</h2>
-        <form className="form form--inline" onSubmit={handleRename}>
-          <label className="grow">
-            新しい名前
-            <input value={newName ?? data.name} onChange={(event) => setNewName(event.target.value)} maxLength={64} disabled={!editable} aria-invalid={validation !== null} />
-          </label>
-          <button type="submit" className="button" disabled={!editable || rename.isPending || newName === null || newName.trim() === data.name}>変更</button>
-          {validation !== null && <p className="error" role="alert">{validation}</p>}
-          <ErrorMessage error={rename.error} />
-        </form>
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>名前の変更</CardTitle>
+          <CardDescription>英数字とハイフンだけ、64文字まで。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleRename}>
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="renameProject">新しい名前</Label>
+              <Input id="renameProject" value={newName ?? data.name} onChange={(event) => setNewName(event.target.value)} maxLength={64} disabled={!editable} aria-invalid={validation !== null} />
+            </div>
+            <Button type="submit" variant="tonal" disabled={!editable || rename.isPending || newName === null || newName.trim() === data.name} className="sm:mb-px">
+              {rename.isPending && <Spinner />}
+              変更
+            </Button>
+          </form>
+          {validation !== null && <p role="alert" className="mt-2 text-sm text-destructive">{validation}</p>}
+          <ErrorMessage error={rename.error} className="mt-3" />
+        </CardContent>
+      </Card>
 
-      <section className="card">
-        <h2>削除</h2>
-        <p className="muted">プロジェクトの deploy、ingress、volume(データごと)も、全て削除されます。元に戻せません。</p>
-        <ErrorMessage error={remove.error} />
-        <button type="button" className="button button--danger" onClick={() => setConfirmingDelete(true)} disabled={data.status === "deleting" || remove.isPending}>プロジェクトを削除</button>
-      </section>
+      <Card className="border-destructive/30">
+        <CardHeader>
+          <CardTitle className="text-destructive">削除</CardTitle>
+          <CardDescription>プロジェクトの deploy、ingress、volume(データごと)も、全て削除されます。元に戻せません。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <ErrorMessage error={remove.error} />
+          <Button variant="destructive-outline" className="w-fit" onClick={() => setConfirmingDelete(true)} disabled={data.status === "deleting" || remove.isPending}>
+            <Trash2 aria-hidden="true" />
+            プロジェクトを削除
+          </Button>
+        </CardContent>
+      </Card>
 
       <ConfirmDialog open={confirmingDelete} title="プロジェクトを削除しますか?" confirmLabel="削除する" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmingDelete(false)}>
-        <p><strong>{data.name}</strong> と、配下の全てのものを削除します。元に戻せません。</p>
+        <p><strong className="text-foreground">{data.name}</strong> と、配下の全てのものを削除します。元に戻せません。</p>
       </ConfirmDialog>
-    </>
+    </div>
   );
 }

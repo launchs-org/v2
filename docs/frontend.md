@@ -4,7 +4,13 @@ React + Vite + TypeScript の SPA。バックエンドの API(`/api/v1/...`)と�
 
 ## 決まっていること
 
-- **技術**: React 19、TypeScript(strict)、Vite、React Router、TanStack Query(サーバーの状態)。画面の部品のライブラリは、入れていない(CSS は 1 ファイル。OS の設定に従って、ライト・ダークが切り替わる)。
+- **技術**: React 19、TypeScript(strict)、Vite、React Router、TanStack Query(サーバーの状態)。
+- **デザイン**: **Tailwind CSS v4 + shadcn/ui** で、Google のサービスに近づけた見た目(白地に灰色の枠のカード、Google ブルー、淡い色のタグ、丸いボタン、Material 風のアイコン = lucide)。ライトとダークは、OS の設定に従う。
+  - **shadcn/ui の部品は、`src/components/ui/` に、ソースとして置く**(button、input、label、card、badge、alert、skeleton、spinner)。見た目を変えるときは、そのファイルを直す。
+  - **色は、`src/styles.css` の変数**(`--primary`、`--card`、`--border` など。shadcn/ui と同じ名前)で決まる。ライトとダークの値が、1 か所にある。部品は、色を直接書かず、この名前を使う(`bg-primary`、`text-muted-foreground`)ので、配色を変えるときは、変数だけを直す。
+  - **外のフォントは読み込まない**(CSP)。Google Sans が入っていれば使い、無ければ、Roboto や OS の標準のフォント。
+  - **確認のダイアログは、標準の `<dialog>`**(`ConfirmDialog`)。shadcn/ui の標準(Radix の Dialog)は、画面のスクロールを止めるために、`<style>` を差し込むことがあり、厳しい CSP(`style-src 'self'`)に違反するおそれがあるため、使っていない。Esc で閉じる、フォーカスが閉じ込められる、背面は操作できない、は、標準の機能で満たしている。
+  - 部品を足すときは、shadcn/ui の部品のうち、インラインのスタイルや、`<style>` を足さないものを選ぶ(足すなら、本番のイメージで、CSP の違反が 0 件のままか、確かめる)。
 - **配り方**: 開発は、Vite の開発サーバー(HMR つき)を、nginx(`https://localhost:18443`)の後ろに置く。本番は、`frontend/dockerfile` の `Production` が作る、静的ファイルの nginx。同じホストの `/` に置き、**`/api/` と `/auth/` を backend と auth へ、それ以外を frontend へ**、Traefik で振り分ける(パスは書き換えない)。
 - **ビルド・テストは、コンテナの中で**(ホストに Node は要らない): `task frontend:test`(型の検査とテスト)、`task frontend:build`(本番のイメージ)。
 
@@ -16,8 +22,8 @@ frontend/
     api/                HttpClient(トークンの付与、401 での更新と1回だけの再試行)、ApiError、型、API の呼び出し
     auth/               AuthSession(ログイン・ログアウト・更新。React に依存しない)、TokenStore、AuthProvider、RequireAuth
     pages/              ログイン・サインアップ(AuthForm)、プロジェクトの一覧と1つの画面
-    components/         Layout(ヘッダ)、ConfirmDialog、ErrorMessage
-    lib/                プロジェクト名の検査など、純粋な関数
+    components/         Layout(上のバー)、Brand(ロゴ)、ConfirmDialog、ErrorMessage。ui/ は shadcn/ui の部品
+    lib/                プロジェクト名の検査、状態の言葉と色など、純粋な関数。utils.ts は、クラス名を組み合わせる cn
     test/               偽のサーバー(fetch の代わり)、描画の補助
 ```
 
@@ -40,7 +46,7 @@ refresh token が localStorage にあるので、ページ内でスクリプト�
 | パス | 内容 |
 |---|---|
 | `/login`、`/signup` | ログイン、アカウント作成(招待制のための、招待コードの欄つき)。サーバーのメッセージと、429 のときは待つ秒数を出す |
-| `/projects` | 一覧(「もっと見る」で cursor の続き)、作成(名前を、送る前に検査)。ヘッダに、ユーザー名と、プロジェクトの使用量(`GET /api/v1/quota`)。削除中のものがあれば、3 秒ごとに状態を取り直す |
+| `/projects` | 一覧(行の全体を押せる。「もっと見る」で cursor の続き。読み込み中は、仮の帯)、作成(名前を、送る前に検査)。上のバーに、ユーザーのアイコンと、プロジェクトの使用量(`GET /api/v1/quota`。上限に達すると、赤)。削除中のものがあれば、3 秒ごとに状態を取り直す |
 | `/projects/:projectId` | 名前の変更、削除(確認のダイアログ。削除中は、進み具合を見せ、終わると、一覧へ戻る案内)。`delete_failed` のときは、もう一度、削除できる |
 
 ## まだ無いもの(次の PR 以降)
@@ -50,6 +56,6 @@ refresh token が localStorage にあるので、ページ内でスクリプト�
 
 ## 確認した範囲
 
-- **単体・画面のテスト 59 件**(偽のサーバーで、トークンの更新の競合、エラーの表示、検査、cursor、確認のダイアログなど)。
-- **実ブラウザ(Chromium)で、本物の backend・auth・worker につないで、14 の手順**: 未ログインのガード、ログインの失敗、サインアップ(弱いパスワードの拒否と成功)、プロジェクトの作成・重複(409)・名前の変更・削除(namespace まで)、リロードでの復帰、**access token を壊しての、自動更新**、ログアウト、ログインし直し、モバイル幅(390px)で横にはみ出さないこと、ダークモード。
+- **単体・画面のテスト 61 件**(偽のサーバーで、トークンの更新の競合、エラーの表示、検査、cursor、確認のダイアログなど)。
+- **実ブラウザ(Chromium)で、本物の backend・auth・worker につないで、14 の手順**: 未ログインのガード、ログインの失敗、サインアップ(弱いパスワードの拒否と成功)、プロジェクトの作成・重複(409)・名前の変更・削除(namespace まで)、リロードでの復帰、**access token を壊しての、自動更新**、ログアウト、ログインし直し、モバイル幅(390px)で横にはみ出さないこと、ダークモード、確認のダイアログ。
 - 実ブラウザの確認の手順は、リポジトリには入れていない(Playwright の Docker イメージが要る)。必要なら、`frontend/e2e/` として足す。

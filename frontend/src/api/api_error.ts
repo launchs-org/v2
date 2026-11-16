@@ -80,10 +80,25 @@ export function describeError(error: unknown): string {
       return "サーバーに接続できません。ネットワークを確認して、もう一度試してください。";
     }
     if (error.status === 429) {
-      return error.retryAfterSeconds === null ? "リクエストが多すぎます。しばらくしてから、もう一度試してください。" : `リクエストが多すぎます。${error.retryAfterSeconds} 秒後に、もう一度試してください。`;
+      return error.retryAfterSeconds === null ? "リクエストが多すぎます。しばらくしてから、もう一度試してください。" : `リクエストが多すぎます。${formatWait(error.retryAfterSeconds)}後に、もう一度試してください。`;
     }
     return error.message;
   }
   // それ以外(想定外のエラー)は、詳細を見せない。
   return "予期しないエラーが起きました。";
+}
+
+/**
+ * 待つ秒数を、読みやすい言葉にする(60 秒未満は秒、それ以上は、切り上げた分)。
+ *
+ * @param seconds 待つ秒数。
+ * @returns 例: 「30 秒」「5 分」「36 分」。
+ */
+export function formatWait(seconds: number): string {
+  // 1分未満は、秒のまま。
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+  // 1分以上は、切り上げた分にする(「あと 1 秒」を、「0 分」にしないため)。
+  return `${Math.ceil(seconds / 60)} 分`;
 }

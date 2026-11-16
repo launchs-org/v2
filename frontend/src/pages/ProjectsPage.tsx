@@ -1,11 +1,19 @@
 // プロジェクトの一覧と、作成。
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Folder, FolderPlus, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { createProject, listProjects } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
 import { ErrorMessage } from "../components/ErrorMessage";
-import { projectStatusLabel, validateProjectName } from "../lib/project_name";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Skeleton } from "../components/ui/skeleton";
+import { Spinner } from "../components/ui/spinner";
+import { projectStatusLabel, projectStatusTone, validateProjectName } from "../lib/project_name";
 
 /** 削除中のプロジェクトがあるとき、状態を確かめ直す間隔(ミリ秒)。 */
 const POLL_INTERVAL_MS = 3000;
@@ -53,36 +61,76 @@ export function ProjectsPage() {
 
   const items = projects.data?.pages.flatMap((page) => page.projects) ?? [];
   return (
-    <>
-      <h1>プロジェクト</h1>
-      <form className="card form form--inline" onSubmit={handleCreate}>
-        <label className="grow">
-          新しいプロジェクトの名前
-          <input value={name} onChange={(event) => setName(event.target.value)} maxLength={64} placeholder="my-app" aria-invalid={validation !== null} />
-        </label>
-        <button type="submit" className="button" disabled={create.isPending}>{create.isPending ? "作成中…" : "作成"}</button>
-        {validation !== null && <p className="error" role="alert">{validation}</p>}
-        <ErrorMessage error={create.error} />
-      </form>
+    <div className="flex flex-col gap-6">
+      <h1 className="text-3xl font-normal tracking-tight">プロジェクト</h1>
 
-      {projects.isPending && <p className="muted" role="status">読み込み中…</p>}
-      <ErrorMessage error={projects.error} />
-      {projects.isSuccess && items.length === 0 && <p className="muted">プロジェクトはまだありません。上のフォームから作れます。</p>}
-      {items.length > 0 && (
-        <ul className="list">
-          {items.map((project) => (
-            <li key={project.projectId} className="list__item">
-              <Link to={`/projects/${project.projectId}`}>{project.name}</Link>
-              <span className={`badge badge--${project.status}`}>{projectStatusLabel(project.status)}</span>
-            </li>
+      <Card>
+        <CardContent className="p-5">
+          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleCreate}>
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="newProjectName">新しいプロジェクトの名前</Label>
+              <Input id="newProjectName" value={name} onChange={(event) => setName(event.target.value)} maxLength={64} placeholder="my-app" aria-invalid={validation !== null} aria-describedby="newProjectHelp" />
+            </div>
+            <Button type="submit" disabled={create.isPending} className="sm:mb-px">
+              {create.isPending ? <Spinner /> : <Plus aria-hidden="true" />}
+              {create.isPending ? "作成中…" : "作成"}
+            </Button>
+          </form>
+          <p id="newProjectHelp" className="mt-2 text-xs text-muted-foreground">英数字とハイフンだけ、64文字まで。</p>
+          {validation !== null && <p role="alert" className="mt-2 text-sm text-destructive">{validation}</p>}
+          <ErrorMessage error={create.error} className="mt-3" />
+        </CardContent>
+      </Card>
+
+      {projects.isPending && (
+        <Card role="status" aria-label="読み込み中" className="divide-y overflow-hidden">
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="flex items-center gap-4 p-4">
+              <Skeleton className="size-10 rounded-full" />
+              <Skeleton className="h-4 w-40" />
+            </div>
           ))}
-        </ul>
+        </Card>
+      )}
+      <ErrorMessage error={projects.error} />
+      {projects.isSuccess && items.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+            <span className="grid size-14 place-items-center rounded-full bg-secondary text-secondary-foreground">
+              <FolderPlus aria-hidden="true" className="size-7" />
+            </span>
+            <p className="font-medium">プロジェクトはまだありません</p>
+            <p className="text-sm text-muted-foreground">上のフォームから、最初のプロジェクトを作れます。</p>
+          </CardContent>
+        </Card>
+      )}
+      {items.length > 0 && (
+        <Card className="overflow-hidden">
+          <ul className="divide-y">
+            {items.map((project) => (
+              <li key={project.projectId} className="group relative flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-accent has-[a:focus-visible]:bg-accent">
+                <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
+                  <Folder className="size-5" />
+                </span>
+                {/* リンクは、名前だけ(読み上げの名前が、状態と混ざらないように)。after で、行の全体を押せる範囲にする。 */}
+                <Link to={`/projects/${project.projectId}`} className="min-w-0 flex-1 truncate font-medium outline-none after:absolute after:inset-0">
+                  {project.name}
+                </Link>
+                <Badge variant={projectStatusTone(project.status)}>{projectStatusLabel(project.status)}</Badge>
+                <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
       {projects.hasNextPage && (
-        <button type="button" className="button button--ghost" onClick={() => void projects.fetchNextPage()} disabled={projects.isFetchingNextPage}>
-          {projects.isFetchingNextPage ? "読み込み中…" : "もっと見る"}
-        </button>
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => void projects.fetchNextPage()} disabled={projects.isFetchingNextPage}>
+            {projects.isFetchingNextPage && <Spinner />}
+            {projects.isFetchingNextPage ? "読み込み中…" : "もっと見る"}
+          </Button>
+        </div>
       )}
-    </>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 // ログインしていないと見られない画面を守る。
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { Spinner } from "../components/ui/spinner";
 import { useSessionState } from "./AuthProvider";
 
 /**
@@ -13,7 +14,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
   // 確かめている最中は、何も出さない(ログイン画面が一瞬出るのを防ぐ)。
   if (state.status === "loading") {
-    return <p className="muted" role="status">読み込み中…</p>;
+    return <div className="grid min-h-screen place-items-center text-muted-foreground" role="status"><Spinner className="size-6" /><span className="sr-only">読み込み中…</span></div>;
   }
   if (state.status === "anonymous") {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;

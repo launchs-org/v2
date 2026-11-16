@@ -44,3 +44,26 @@ export function projectStatusLabel(status: string): string {
       return status;
   }
 }
+
+/** バッジの色の種類(components/ui/badge.tsx の variant)。 */
+export type StatusTone = "success" | "warning" | "destructive" | "default";
+
+/**
+ * 状態を、バッジの色の種類にする。
+ *
+ * @param status プロジェクトの状態。
+ * @returns 色の種類(稼働中は緑、削除中は黄、削除に失敗は赤、知らない値は標準)。
+ */
+export function projectStatusTone(status: string): StatusTone {
+  // 仕様の3つの状態を、色に対応させる。
+  switch (status) {
+    case "active":
+      return "success";
+    case "deleting":
+      return "warning";
+    case "delete_failed":
+      return "destructive";
+    default:
+      return "default";
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PROJECT_NAME_LENGTH, projectStatusLabel, validateProjectName } from "./project_name";
+import { MAX_PROJECT_NAME_LENGTH, projectStatusLabel, projectStatusTone, validateProjectName } from "./project_name";
 
 describe("validateProjectName", () => {
   it.each(["a", "my-app", "App-1", "a".repeat(MAX_PROJECT_NAME_LENGTH), "-", "123"])("%s は、通る", (name) => {
@@ -24,5 +24,14 @@ describe("projectStatusLabel", () => {
     expect(projectStatusLabel("deleting")).toBe("削除中");
     expect(projectStatusLabel("delete_failed")).toBe("削除に失敗");
     expect(projectStatusLabel("something")).toBe("something");
+  });
+});
+
+describe("projectStatusTone", () => {
+  it("稼働中は緑、削除中は黄、削除に失敗は赤、知らない値は標準", () => {
+    expect(projectStatusTone("active")).toBe("success");
+    expect(projectStatusTone("deleting")).toBe("warning");
+    expect(projectStatusTone("delete_failed")).toBe("destructive");
+    expect(projectStatusTone("something")).toBe("default");
   });
 });
