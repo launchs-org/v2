@@ -64,9 +64,8 @@ describe("volume の画面", () => {
   it("プロジェクトの画面で、volume を作ると、その画面へ進む", async () => {
     const user = userEvent.setup();
     const { overrides } = volumeOverrides();
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a" });
-    expect(await screen.findByText("volume はまだありません")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("volume の名前"), "db-data");
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a/volumes/new" });
+    await user.type(await screen.findByLabelText("volume の名前"), "db-data");
     await user.clear(screen.getByLabelText("大きさ(MB)"));
     await user.type(screen.getByLabelText("大きさ(MB)"), "2048");
     await user.click(screen.getByRole("button", { name: "volume を作る" }));
@@ -77,7 +76,7 @@ describe("volume の画面", () => {
   it("名前と大きさが不正なら、送らずに、理由を出す(上限の超過も)", async () => {
     const user = userEvent.setup();
     const { overrides } = volumeOverrides();
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a" });
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a/volumes/new" });
     await user.type(await screen.findByLabelText("volume の名前"), "bad name");
     await user.click(screen.getByRole("button", { name: "volume を作る" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("英数字とハイフン");
@@ -145,10 +144,9 @@ describe("ingress の画面", () => {
   it("プロジェクトの画面で、ingress を作ると、その画面へ進む", async () => {
     const user = userEvent.setup();
     const { overrides } = ingressOverrides();
-    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a" });
-    expect(await screen.findByText("ingress はまだありません")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "ingress を作る" }));
-    expect(await screen.findByRole("heading", { level: 1, name: /swift-red-fox/ })).toBeInTheDocument();
+    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a/ingresses/new" });
+    await user.click(await screen.findByRole("button", { name: "ingress を作る" }));
+    expect(await screen.findByRole("heading", { name: /swift-red-fox/ })).toBeInTheDocument();
   });
 
   it("ルールを足して保存すると pending になり、適用すると反映中になる。向き先は tcp だけ", async () => {

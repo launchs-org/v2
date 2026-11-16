@@ -102,7 +102,7 @@ export function LogViewer({ deployId, pods }: { deployId: string; pods: DeployLo
         </select>
       </div>
       {error !== null && <Alert>{error}</Alert>}
-      <pre ref={outputRef} aria-label="ログ" tabIndex={0} className="h-96 overflow-auto rounded-lg border bg-zinc-950 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-zinc-100">
+      <pre ref={outputRef} aria-label="ログの出力" tabIndex={0} className="h-96 overflow-auto rounded-lg border bg-zinc-950 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-zinc-100">
         {text.length > 0 ? text : "(まだログがありません)"}
       </pre>
     </div>

@@ -53,21 +53,20 @@ describe("deploy の画面", () => {
   it("プロジェクトの画面で、deploy を作ると、その deploy の画面へ進む", async () => {
     const user = userEvent.setup();
     const { overrides } = deployOverrides();
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a" });
-    expect(await screen.findByText("deploy はまだありません")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("イメージ"), "registry.example/app:1.0");
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a/deploys/new" });
+    await user.type(await screen.findByLabelText("イメージ"), "registry.example/app:1.0");
     await user.selectOptions(screen.getByLabelText("スペック"), "medium");
     await user.click(screen.getByRole("button", { name: "deploy を作る" }));
-    expect(await screen.findByRole("heading", { level: 1, name: /deploy/ })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "概要" })).toBeInTheDocument();
     expect(requests.find((request) => request.path === "/api/v1/deploy" && request.method === "POST")?.body).toEqual({ projectId: "project-a", imageRef: "registry.example/app:1.0", spec: "medium" });
-    // パンくずに、元のプロジェクトの名前が出る。
-    expect(screen.getByRole("link", { name: "app-a" })).toBeInTheDocument();
+    // プロジェクトの画面の中で、パネルが開く(URL が、そのプロジェクトの deploy になる)。
+    expect(window.location.pathname).toBe("/projects/project-a/deploys/deploy-1");
   });
 
   it("イメージが空なら、送らずに、理由を出す", async () => {
     const user = userEvent.setup();
     const { overrides } = deployOverrides();
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a" });
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/projects/project-a/deploys/new" });
     await user.click(await screen.findByRole("button", { name: "deploy を作る" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("イメージを入力してください");
     expect(requests.some((request) => request.method === "POST" && request.path === "/api/v1/deploy")).toBe(false);
@@ -76,7 +75,7 @@ describe("deploy の画面", () => {
   it("上限を超えたなど、作成の失敗(409)は、サーバーのメッセージを出す", async () => {
     const user = userEvent.setup();
     const { overrides } = deployOverrides();
-    renderApp(appServer({ projects: PROJECTS }, { ...overrides, "POST /api/v1/deploy": () => errorResponse(409, "conflict", "deploy の数が上限です") }), { loggedIn: true, path: "/projects/project-a" });
+    renderApp(appServer({ projects: PROJECTS }, { ...overrides, "POST /api/v1/deploy": () => errorResponse(409, "conflict", "deploy の数が上限です") }), { loggedIn: true, path: "/projects/project-a/deploys/new" });
     await user.type(await screen.findByLabelText("イメージ"), "app:1");
     await user.click(screen.getByRole("button", { name: "deploy を作る" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("deploy の数が上限です");
@@ -84,10 +83,12 @@ describe("deploy の画面", () => {
 
   it("詳細: 状態、Pod、ログが出る", async () => {
     const { overrides } = deployOverrides({ logs: ["2026-09-16T09:00:01.000+09:00 started\n"] });
-    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1?tab=logs" });
+    // ログのタブで、ログが出る。概要のタブに替えると、状態と Pod が出る。
+    await waitFor(() => expect(screen.getByLabelText("ログの出力")).toHaveTextContent("started"));
+    await userEvent.setup().click(screen.getByRole("tab", { name: "概要" }));
     expect((await screen.findAllByText("稼働中")).length).toBeGreaterThan(0);
     expect(screen.getByText("pod-aaa", { selector: "code" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByLabelText("ログ")).toHaveTextContent("started"));
   });
 
   it("スケール: 台数を選んで変更すると、サーバーに頼み、反映中になる", async () => {
@@ -134,7 +135,7 @@ describe("deploy の画面", () => {
         },
         "POST /api/v1/deploy/deploy-1/config/apply": () => jsonResponse(200, {}),
       }),
-      { loggedIn: true, path: "/deploys/deploy-1" },
+      { loggedIn: true, path: "/deploys/deploy-1?tab=config" },
     );
     await user.click(await screen.findByRole("button", { name: "環境変数を足す" }));
     await user.type(screen.getByLabelText("環境変数のキー 1"), "PORT");
@@ -152,7 +153,7 @@ describe("deploy の画面", () => {
   it("起動設定: 環境変数のキーが重複していたら、送らずに、理由を出す", async () => {
     const user = userEvent.setup();
     const { overrides } = deployOverrides();
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1?tab=config" });
     const add = await screen.findByRole("button", { name: "環境変数を足す" });
     await user.click(add);
     await user.click(add);
@@ -165,7 +166,7 @@ describe("deploy の画面", () => {
 
   it("反映中は、設定の編集も、保存もできない", async () => {
     const { overrides } = deployOverrides({ status: "applying" });
-    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1?tab=config" });
     expect(await screen.findByLabelText("起動コマンド")).toBeDisabled();
     for (const button of screen.getAllByRole("button", { name: "保存(適用前の変更にする)" })) {
       expect(button).toBeDisabled();
@@ -183,7 +184,7 @@ describe("deploy の画面", () => {
           return jsonResponse(200, state.service);
         },
       }),
-      { loggedIn: true, path: "/deploys/deploy-1" },
+      { loggedIn: true, path: "/deploys/deploy-1?tab=network" },
     );
     await user.click(await screen.findByRole("button", { name: "サービスを作る" }));
     await waitFor(() => expect(requests.find((request) => request.method === "POST" && request.path.endsWith("/service"))?.body).toEqual({ ports: [{ name: "web", port: 8080, protocol: "tcp" }] }));
@@ -194,7 +195,7 @@ describe("deploy の画面", () => {
     const user = userEvent.setup();
     const { overrides, state } = deployOverrides();
     state.service = { serviceId: "service-1", ports: [{ name: "web", port: 8080, protocol: "tcp" }], pending_ports: [{ name: "web", port: 9090, protocol: "tcp" }], status: "active", dnsName: "d", clusterIP: "1.1.1.1" };
-    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1?tab=network" });
     // pending の内容(9090)が、編集欄の初期値になる。
     expect(await screen.findByDisplayValue("9090")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "適用" }).length).toBeGreaterThan(0);
@@ -215,13 +216,12 @@ describe("deploy の画面", () => {
         "GET /api/v1/projects/project-a/volumes": () => jsonResponse(200, { volumes: [{ volumeId: "volume-1", name: "db-data", status: "active", sizeMB: 1024, pending_sizeMB: null }], nextCursor: null }),
         "PUT /api/v1/deploy/deploy-1/mounts": () => jsonResponse(200, {}),
       }),
-      { loggedIn: true, path: "/deploys/deploy-1" },
+      { loggedIn: true, path: "/deploys/deploy-1?tab=volumes" },
     );
     await user.click(await screen.findByRole("button", { name: "マウントを足す" }));
     await user.selectOptions(screen.getByLabelText("マウントする volume 1"), "volume-1");
     await user.type(screen.getByLabelText("マウント先のパス 1"), "/data");
-    const saves = screen.getAllByRole("button", { name: "保存(適用前の変更にする)" });
-    await user.click(saves[1] as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "保存(適用前の変更にする)" }));
     await waitFor(() => expect(requests.find((request) => request.method === "PUT" && request.path.endsWith("/mounts"))?.body).toEqual({ mounts: [{ volumeId: "volume-1", mountPath: "/data" }] }));
   });
 });

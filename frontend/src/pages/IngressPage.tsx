@@ -1,4 +1,5 @@
 // ingress 1つの画面(ホスト、path ルールの編集と適用、削除)。
+import { pollInterval } from "../lib/polling";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -20,9 +21,6 @@ import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import { Spinner } from "../components/ui/spinner";
 import { buildPortChoices, ingressStatusLabel, ingressStatusTone, ruleChoiceValue, validateRulePath } from "../lib/ingress";
-
-/** 状態が変わっていく間、確かめ直す間隔(ミリ秒)。 */
-const POLL_INTERVAL_MS = 2000;
 
 /** 編集中のルール1行(向き先は、「serviceId:port」の文字列。未選択は空)。 */
 interface RuleDraft {
@@ -65,7 +63,7 @@ export function IngressPage() {
   const ingress = useQuery({
     queryKey: ["ingress", ingressId],
     queryFn: ({ signal }) => getIngress(session.http, projectId, ingressId, signal),
-    refetchInterval: (query) => (query.state.data?.status === "applying" || query.state.data?.status === "deleting" ? POLL_INTERVAL_MS : false),
+    refetchInterval: (query) => pollInterval(query.state.data?.status === "applying" || query.state.data?.status === "deleting"),
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 2,
   });
 

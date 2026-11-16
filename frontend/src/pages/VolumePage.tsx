@@ -1,4 +1,5 @@
 // volume 1つの画面(名前の変更、拡大、マウントしている deploy、削除)。
+import { pollInterval } from "../lib/polling";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -21,9 +22,6 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Spinner } from "../components/ui/spinner";
 import { formatMegabytes } from "../lib/format";
 import { validateVolumeName, validateVolumeSize, volumeStatusLabel, volumeStatusTone } from "../lib/volume";
-
-/** 状態が変わっていく間、確かめ直す間隔(ミリ秒)。 */
-const POLL_INTERVAL_MS = 2000;
 
 /** quota が取れないときに使う、大きさの上限(MB。サーバーの既定と同じ)。 */
 const FALLBACK_MAX_SIZE_MB = 5120;
@@ -49,7 +47,7 @@ export function VolumePage() {
   const volume = useQuery({
     queryKey: ["volume", volumeId],
     queryFn: ({ signal }) => getVolume(session.http, projectId, volumeId, signal),
-    refetchInterval: (query) => (query.state.data?.status === "applying" || query.state.data?.status === "deleting" ? POLL_INTERVAL_MS : false),
+    refetchInterval: (query) => pollInterval(query.state.data?.status === "applying" || query.state.data?.status === "deleting"),
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 2,
   });
 

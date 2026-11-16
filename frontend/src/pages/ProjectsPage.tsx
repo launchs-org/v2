@@ -1,4 +1,5 @@
 // プロジェクトの一覧と、作成。
+import { pollInterval } from "../lib/polling";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -17,9 +18,6 @@ import { Spinner } from "../components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { projectStatusLabel, projectStatusTone, validateProjectName } from "../lib/project_name";
 
-/** 削除中のプロジェクトがあるとき、状態を確かめ直す間隔(ミリ秒)。 */
-const POLL_INTERVAL_MS = 3000;
-
 /** プロジェクトの一覧の画面。 */
 export function ProjectsPage() {
   const session = useSession();
@@ -33,7 +31,7 @@ export function ProjectsPage() {
     queryFn: ({ pageParam, signal }) => listProjects(session.http, pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    refetchInterval: (query) => (query.state.data?.pages.some((page) => page.projects.some((project) => project.status === "deleting")) ? POLL_INTERVAL_MS : false),
+    refetchInterval: (query) => pollInterval(query.state.data?.pages.some((page) => page.projects.some((project) => project.status === "deleting")) === true),
   });
 
   // 作成: 成功したら、一覧と、使用量を取り直す。
