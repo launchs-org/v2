@@ -61,6 +61,10 @@ export function appServer(state: ServerState, overrides: Record<string, Handler>
       state.projects.unshift({ projectId: `project-${name}`, name, status: "active" });
       return jsonResponse(200, { projectId: `project-${name}` });
     }
+    // deploy の一覧は、既定では空(deploy の画面のテストは、上書きする)。
+    if (/^GET \/api\/v1\/projects\/[^/]+\/deploys$/.test(key)) {
+      return jsonResponse(200, { deploys: [], nextCursor: null });
+    }
     const single = /^(GET|PATCH|DELETE) \/api\/v1\/projects\/([^/]+)$/.exec(key);
     if (single !== null) {
       const project = state.projects.find((candidate) => candidate.projectId === decodeURIComponent(single[2] ?? ""));
