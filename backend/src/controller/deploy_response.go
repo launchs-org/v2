@@ -80,7 +80,7 @@ type DeployResponse struct {
 	// Volumes は、ボリュームのマウント設定。ボリュームの機能ができるまでは、空のマウントを返す。
 	Volumes DeployVolumesResponse `json:"volumes"`
 
-	// Service は、deploy に紐づく service。service の機能ができるまでは、常に null(未作成)。
+	// Service は、deploy に紐づく service。まだ作っていなければ null(controller が、設定する)。
 	Service any `json:"service"`
 }
 
