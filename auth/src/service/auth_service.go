@@ -69,14 +69,19 @@ func NewAuthService(userStore UserStore, refreshTokenStore RefreshTokenStore, lo
 //   - userName: ユーザー名。
 //   - plainPassword: パスワード。
 //   - invitationCode: 招待コード(招待制のときだけ使う)。
+//   - turnstileToken: 人間であることの確認のトークン(確認が有効なときだけ使う)。
 //
 // 戻り値:
 //   - refresh token。
-//   - レート制限は RateLimitedError。入力が不正なら invalid_request、名前の重複は conflict。
-func (authService *AuthService) Signup(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, invitationCode string) (string, error) {
+//   - レート制限は RateLimitedError。確認に失敗したら invalid_request(確認のサービスに届かなければ service_unavailable)。入力が不正なら invalid_request、名前の重複は conflict。
+func (authService *AuthService) Signup(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, invitationCode string, turnstileToken string) (string, error) {
 	// 1. IP のレート制限(失敗した試行も数える)。
 	if limitError := authService.checkRateLimit(requestContext, rateLimitKindSignup, clientIP, authService.settings.SignupIPLimit, authService.settings.SignupIPWindow); limitError != nil {
 		return "", limitError
+	}
+	// 1.5. 人間であることの確認(有効なときだけ)。パスワードの照合などの、重い処理の前に行う。
+	if captchaError := authService.verifyCaptcha(requestContext, turnstileToken, clientIP); captchaError != nil {
+		return "", captchaError
 	}
 	// 2. 入力を検査する。
 	if nameError := model.ValidateUserName(userName); nameError != nil {
@@ -128,14 +133,19 @@ var errLoginFailed = apperror.New(apperror.KindUnauthorized, "userName または
 //   - userAgent: クライアントの User-Agent(履歴に残す)。
 //   - userName: ユーザー名。
 //   - plainPassword: パスワード。
+//   - turnstileToken: 人間であることの確認のトークン(確認が有効なときだけ使う)。
 //
 // 戻り値:
 //   - refresh token。
-//   - レート制限は RateLimitedError。認証できなければ unauthorized(理由は区別しない)。
-func (authService *AuthService) Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string) (string, error) {
+//   - レート制限は RateLimitedError。確認に失敗したら invalid_request(確認のサービスに届かなければ service_unavailable)。認証できなければ unauthorized(理由は区別しない)。
+func (authService *AuthService) Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, turnstileToken string) (string, error) {
 	// 1. IP のレート制限。
 	if limitError := authService.checkRateLimit(requestContext, rateLimitKindLogin, clientIP, authService.settings.LoginIPLimit, authService.settings.LoginIPWindow); limitError != nil {
 		return "", limitError
+	}
+	// 1.5. 人間であることの確認(有効なときだけ)。失敗は、ユーザー名の失敗(ロック)にも、ログイン履歴にも、数えない(他人のユーザー名で、ロックさせられないため)。
+	if captchaError := authService.verifyCaptcha(requestContext, turnstileToken, clientIP); captchaError != nil {
+		return "", captchaError
 	}
 	// 2. ユーザー名の形が不正なものは、記録せずに、同じ 401 にする(長い名前で、記録を膨らませないため)。ダミーの照合で、時間をそろえる。
 	if model.ValidateUserName(userName) != nil || len(plainPassword) > password.MaxLength {

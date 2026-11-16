@@ -33,6 +33,12 @@ export interface Quota {
   maxReplicas: number;
 }
 
+/** 認証コンテナの、公開の設定(GET /auth/config)。 */
+export interface AuthConfig {
+  /** 人間であることの確認(Cloudflare Turnstile)。enabled が true のとき、ログインとサインアップに、トークンが要る。 */
+  turnstile: { enabled: boolean; siteKey?: string };
+}
+
 /** ログインしているユーザー。 */
 export interface CurrentUser {
   userId: string;

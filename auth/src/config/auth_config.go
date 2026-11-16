@@ -78,6 +78,19 @@ type AuthConfig struct {
 	// ログには出さない。
 	BootstrapAdminPassword string
 
+	// TurnstileSiteKey は、Cloudflare Turnstile のサイトキー(環境変数 AUTH_TURNSTILE_SITE_KEY。公開してよい値。ブラウザが、ウィジェットに使う)。
+	TurnstileSiteKey string
+
+	// TurnstileSecretKey は、Turnstile のシークレットキー(環境変数 AUTH_TURNSTILE_SECRET_KEY。ログに出さない)。
+	// サイトキーと、シークレットキーを、両方指定すると、ログインとサインアップに、人間であることの確認が必要になる。両方とも空なら、無効。
+	TurnstileSecretKey string
+
+	// TurnstileVerifyURL は、siteverify の URL(環境変数 AUTH_TURNSTILE_VERIFY_URL。既定は Cloudflare の URL)。
+	TurnstileVerifyURL string
+
+	// TurnstileHostnames は、トークンを作ったページのホスト名として許すもの(環境変数 AUTH_TURNSTILE_HOSTNAMES。カンマ区切り。空なら確かめない)。
+	TurnstileHostnames []string
+
 	// HashMaxConcurrency は、パスワードのハッシュを、同時に計算できる数(環境変数 AUTH_HASH_MAX_CONCURRENCY)。メモリを守るための上限。
 	HashMaxConcurrency int
 }
@@ -111,6 +124,10 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 	bootstrapAdminName := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_NAME", "")
 	bootstrapAdminPassword := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_PASSWORD", "")
 	bootstrapAdminPasswordFile := reader.OptionalString("AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE", "")
+	turnstileSiteKey := reader.OptionalString("AUTH_TURNSTILE_SITE_KEY", "")
+	turnstileSecretKey := reader.OptionalString("AUTH_TURNSTILE_SECRET_KEY", "")
+	turnstileVerifyURL := reader.OptionalString("AUTH_TURNSTILE_VERIFY_URL", "")
+	turnstileHostnamesText := reader.OptionalString("AUTH_TURNSTILE_HOSTNAMES", "")
 	hashMaxConcurrency := reader.OptionalInt("AUTH_HASH_MAX_CONCURRENCY", defaultHashMaxConcurrency)
 	loginHistoryRetention := reader.OptionalDuration("AUTH_LOGIN_HISTORY_RETENTION", defaultLoginHistoryRetention)
 	loadError := reader.Err()
@@ -142,6 +159,13 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 			loadError = errors.Join(loadError, fmt.Errorf("環境変数 %s は、正の値でなければならない", name))
 		}
 	}
+	// Turnstile の設定: サイトキーとシークレットキーは、セットで指定する(片方だけだと、確認が、ブラウザか、サーバーのどちらかだけで行われて、誰も通れなくなる)。
+	if (turnstileSiteKey == "") != (turnstileSecretKey == "") {
+		loadError = errors.Join(loadError, errors.New("AUTH_TURNSTILE_SITE_KEY と AUTH_TURNSTILE_SECRET_KEY は、両方指定するか、両方省略しなければならない"))
+	}
+	if turnstileVerifyURL != "" && !strings.HasPrefix(turnstileVerifyURL, "https://") && !strings.HasPrefix(turnstileVerifyURL, "http://") {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 AUTH_TURNSTILE_VERIFY_URL は、http:// か https:// で始まる URL でなければならない: %q", turnstileVerifyURL))
+	}
 	// 最初の管理者の設定: 名前とパスワードは、セットで指定する。パスワードは、環境変数か、ファイル(Secret のマウント)のどちらか一方。
 	if bootstrapAdminPassword != "" && bootstrapAdminPasswordFile != "" {
 		loadError = errors.Join(loadError, errors.New("環境変数 AUTH_BOOTSTRAP_ADMIN_PASSWORD と AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE は、同時に指定できない"))
@@ -165,7 +189,7 @@ func LoadAuthConfig(reader *sharedconfig.EnvironmentReader) (AuthConfig, error) 
 		KeysAutoGenerate: autoGenerateText == "true", SignupMode: signupMode, TrustedProxyCIDRs: splitCommaSeparated(trustedProxyText),
 		LoginMaxFailures: loginMaxFailures, LoginLockDuration: loginLockDuration, LoginIPLimit: loginIPLimit, LoginIPWindow: loginIPWindow,
 		SignupIPLimit: signupIPLimit, SignupIPWindow: signupIPWindow, LoginHistoryRetention: loginHistoryRetention,
-		HashMaxConcurrency: hashMaxConcurrency, BootstrapAdminName: bootstrapAdminName, BootstrapAdminPassword: bootstrapAdminPassword,
+		HashMaxConcurrency: hashMaxConcurrency, TurnstileSiteKey: turnstileSiteKey, TurnstileSecretKey: turnstileSecretKey, TurnstileVerifyURL: turnstileVerifyURL, TurnstileHostnames: splitCommaSeparated(turnstileHostnamesText), BootstrapAdminName: bootstrapAdminName, BootstrapAdminPassword: bootstrapAdminPassword,
 	}, nil
 }
 

@@ -59,6 +59,11 @@ services:
       # 署名鍵(<kid>.pem)を置く場所。開発用は、無ければ作る(本番は、Secret をマウントして、AUTO_GENERATE を使わない)。
       AUTH_KEYS_DIR: /keys
       AUTH_KEYS_AUTOGENERATE: "true"
+      # 人間であることの確認(Cloudflare Turnstile)。.env に、サイトキーとシークレットキーを、両方書くと、ログインとサインアップで必要になる(空なら、無効)。
+      AUTH_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      AUTH_TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      AUTH_TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
+      AUTH_TURNSTILE_VERIFY_URL: ${TURNSTILE_VERIFY_URL:-}
       # サインアップの公開範囲(open か invite)。
       AUTH_SIGNUP_MODE: ${AUTH_SIGNUP_MODE:-open}
       # X-Forwarded-For を信頼するプロキシ(開発用は、同じ Docker のネットワークの nginx)。

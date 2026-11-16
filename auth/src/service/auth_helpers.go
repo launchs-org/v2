@@ -34,6 +34,23 @@ func (authService *AuthService) checkRateLimit(requestContext context.Context, k
 	return nil
 }
 
+// verifyCaptcha は、人間であることの確認が有効なら、トークンを検証する。無効(Settings.Captcha が nil)なら、何もしない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - turnstileToken: ブラウザのウィジェットが作った、トークン。
+//   - clientIP: クライアントの IP(Cloudflare に、確認の材料として渡す)。
+//
+// 戻り値:
+//   - 通れば(または、無効なら)nil。失敗は、CaptchaVerifier.Verify のエラー。
+func (authService *AuthService) verifyCaptcha(requestContext context.Context, turnstileToken string, clientIP string) error {
+	// 無効なら、何もしない。
+	if authService.settings.Captcha == nil {
+		return nil
+	}
+	return authService.settings.Captcha.Verify(requestContext, turnstileToken, clientIP)
+}
+
 // maxUserAgentLength は、履歴に保存する User-Agent の長さの上限(バイト)。
 const maxUserAgentLength = 256
 
