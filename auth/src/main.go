@@ -14,12 +14,14 @@ import (
 
 	"launchs/auth/src/clientip"
 	"launchs/auth/src/config"
+	"launchs/auth/src/controller"
 	"launchs/auth/src/keys"
 	"launchs/auth/src/password"
 	"launchs/auth/src/repository"
 	"launchs/auth/src/server"
 	"launchs/auth/src/service"
 	"launchs/auth/src/token"
+	"launchs/auth/src/turnstile"
 	sharedconfig "launchs/shared/config"
 	"launchs/shared/database"
 	"launchs/shared/logger"
@@ -89,9 +91,15 @@ func run() error {
 	loginFailureRepository := repository.NewLoginFailureRepository(appDatabase)
 	rateLimitRepository := repository.NewRateLimitRepository(appDatabase)
 	loginEventRepository := repository.NewLoginEventRepository(appDatabase)
+	// 人間であることの確認(Cloudflare Turnstile)は、サイトキーとシークレットキーが、設定されているときだけ、有効にする。
+	var captchaVerifier service.CaptchaVerifier
+	if authConfig.TurnstileSecretKey != "" {
+		captchaVerifier = turnstile.NewVerifier(turnstile.Options{SecretKey: authConfig.TurnstileSecretKey, VerifyURL: authConfig.TurnstileVerifyURL, Hostnames: authConfig.TurnstileHostnames})
+		appLogger.Info("人間であることの確認(Cloudflare Turnstile)を有効にした", "hostnames", authConfig.TurnstileHostnames)
+	}
 	authService, serviceError := service.NewAuthService(userRepository, refreshTokenRepository, loginFailureRepository, rateLimitRepository, loginEventRepository, appLogger,
 		password.NewHasher(password.DefaultParameters()).WithConcurrencyLimit(authConfig.HashMaxConcurrency, hashSlotWait), token.NewService(keyStore, time.Now), service.Settings{
-			SignupMode: authConfig.SignupMode, LoginMaxFailures: authConfig.LoginMaxFailures, LoginLockDuration: authConfig.LoginLockDuration,
+			Captcha: captchaVerifier, SignupMode: authConfig.SignupMode, LoginMaxFailures: authConfig.LoginMaxFailures, LoginLockDuration: authConfig.LoginLockDuration,
 			LoginIPLimit: authConfig.LoginIPLimit, LoginIPWindow: authConfig.LoginIPWindow,
 			SignupIPLimit: authConfig.SignupIPLimit, SignupIPWindow: authConfig.SignupIPWindow,
 		})
@@ -109,7 +117,7 @@ func run() error {
 		}
 		appLogger.Info("最初の管理者の確認を済ませた", "created", created, "user_name", authConfig.BootstrapAdminName)
 	}
-	echoServer := server.New(appLogger, authService, adminService, keyStore, resolver)
+	echoServer := server.New(appLogger, authService, adminService, keyStore, resolver, controller.PublicConfig{TurnstileSiteKey: authConfig.TurnstileSiteKey})
 
 	// 停止の合図で終わる context を作る。
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

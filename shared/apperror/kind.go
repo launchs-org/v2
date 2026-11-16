@@ -36,6 +36,9 @@ const (
 	// KindTooManyRequests は、レート制限にかかったとき(HTTP 429)。
 	KindTooManyRequests Kind = "too_many_requests"
 
+	// KindUnavailable は、外部のサービス(Cloudflare Turnstile など)に頼る処理で、そのサービスに届かないとき(HTTP 503)。
+	KindUnavailable Kind = "service_unavailable"
+
 	// KindInternal は、サーバー内部のエラーのとき(HTTP 500)。
 	KindInternal Kind = "internal_error"
 )
@@ -62,6 +65,8 @@ func (kind Kind) StatusCode() int {
 		return http.StatusRequestEntityTooLarge
 	case KindTooManyRequests:
 		return http.StatusTooManyRequests
+	case KindUnavailable:
+		return http.StatusServiceUnavailable
 	// 未知の種類は、想定外のエラーとして 500 にする。
 	default:
 		return http.StatusInternalServerError

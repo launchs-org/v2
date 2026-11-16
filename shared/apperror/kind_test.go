@@ -19,6 +19,7 @@ func TestKindStatusCode(testingT *testing.T) {
 		{"not_found は 404", KindNotFound, http.StatusNotFound},
 		{"conflict は 409", KindConflict, http.StatusConflict},
 		{"forbidden は 403", KindForbidden, http.StatusForbidden},
+		{"service_unavailable は 503", KindUnavailable, http.StatusServiceUnavailable},
 		{"payload_too_large は 413", KindPayloadTooLarge, http.StatusRequestEntityTooLarge},
 		{"too_many_requests は 429", KindTooManyRequests, http.StatusTooManyRequests},
 		{"internal_error は 500", KindInternal, http.StatusInternalServerError},

@@ -21,8 +21,8 @@ import (
 
 // AuthUseCase は、AuthController が使う、認証のユースケース。
 type AuthUseCase interface {
-	Signup(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, invitationCode string) (string, error)
-	Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string) (string, error)
+	Signup(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, invitationCode string, turnstileToken string) (string, error)
+	Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, turnstileToken string) (string, error)
 	LoginHistory(requestContext context.Context, accessToken string, limit int) ([]model.LoginEvent, error)
 	Refresh(requestContext context.Context, refreshToken string) (string, error)
 	Me(accessToken string) (string, string, error)
@@ -39,6 +39,9 @@ type SignupRequest struct {
 
 	// InvitationCode は、招待コード。招待制のときだけ必要。
 	InvitationCode string `json:"invitationCode"`
+
+	// TurnstileToken は、Cloudflare Turnstile のトークン(人間であることの確認)。確認が有効なときだけ必要。
+	TurnstileToken string `json:"turnstileToken"`
 }
 
 // LoginRequest は、ログインのリクエスト。
@@ -48,6 +51,9 @@ type LoginRequest struct {
 
 	// Password は、パスワード。
 	Password string `json:"password"`
+
+	// TurnstileToken は、Cloudflare Turnstile のトークン(人間であることの確認)。確認が有効なときだけ必要。
+	TurnstileToken string `json:"turnstileToken"`
 }
 
 // TokenResponse は、トークンを返すレスポンス(signup と login は refresh token、refresh は access token)。
@@ -98,11 +104,33 @@ type JSONWebKeySet struct {
 	Keys []keys.JSONWebKey `json:"keys"`
 }
 
+// PublicConfig は、ブラウザに見せてよい、認証の設定(GET /config)。シークレットキーは、含めない。
+type PublicConfig struct {
+	// TurnstileSiteKey は、Cloudflare Turnstile のサイトキー。空なら、人間であることの確認は、無効。
+	TurnstileSiteKey string
+}
+
+// PublicConfigResponse は、GET /config のレスポンス。
+type PublicConfigResponse struct {
+	// Turnstile は、人間であることの確認の設定。
+	Turnstile TurnstileConfigResponse `json:"turnstile"`
+}
+
+// TurnstileConfigResponse は、人間であることの確認(Cloudflare Turnstile)の設定。
+type TurnstileConfigResponse struct {
+	// Enabled は、確認が有効か(有効なら、ログインとサインアップに、turnstileToken が要る)。
+	Enabled bool `json:"enabled"`
+
+	// SiteKey は、ウィジェットに渡すサイトキー。無効なら、省略。
+	SiteKey string `json:"siteKey,omitempty"`
+}
+
 // AuthController は、認証の API のハンドラー。
 type AuthController struct {
-	authUseCase AuthUseCase
-	keyStore    *keys.KeyStore
-	resolver    *clientip.Resolver
+	authUseCase  AuthUseCase
+	keyStore     *keys.KeyStore
+	resolver     *clientip.Resolver
+	publicConfig PublicConfig
 }
 
 // NewAuthController は、AuthController を作る。
@@ -111,12 +139,13 @@ type AuthController struct {
 //   - authUseCase: 認証のユースケース。
 //   - keyStore: 署名鍵(JWKS の配信に使う)。
 //   - resolver: クライアントの IP を決めるもの。
+//   - publicConfig: ブラウザに見せてよい設定(GET /config)。
 //
 // 戻り値:
 //   - 作成した AuthController。
-func NewAuthController(authUseCase AuthUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver) *AuthController {
+func NewAuthController(authUseCase AuthUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver, publicConfig PublicConfig) *AuthController {
 	// 依存するものを持たせて返す。
-	return &AuthController{authUseCase: authUseCase, keyStore: keyStore, resolver: resolver}
+	return &AuthController{authUseCase: authUseCase, keyStore: keyStore, resolver: resolver, publicConfig: publicConfig}
 }
 
 // bearerToken は、Authorization ヘッダから、Bearer トークンを取り出す。
@@ -170,7 +199,7 @@ func (authController *AuthController) Signup(echoContext *echo.Context) error {
 		return apperror.Wrap(apperror.KindInvalidRequest, "リクエストのボディを読み取れませんでした", bindError)
 	}
 	// サインアップする。
-	refreshToken, signupError := authController.authUseCase.Signup(echoContext.Request().Context(), authController.resolver.Resolve(echoContext.Request()), echoContext.Request().UserAgent(), request.UserName, request.Password, request.InvitationCode)
+	refreshToken, signupError := authController.authUseCase.Signup(echoContext.Request().Context(), authController.resolver.Resolve(echoContext.Request()), echoContext.Request().UserAgent(), request.UserName, request.Password, request.InvitationCode, request.TurnstileToken)
 	if signupError != nil {
 		return translateError(echoContext, signupError)
 	}
@@ -191,7 +220,7 @@ func (authController *AuthController) Login(echoContext *echo.Context) error {
 		return apperror.Wrap(apperror.KindInvalidRequest, "リクエストのボディを読み取れませんでした", bindError)
 	}
 	// ログインする。
-	refreshToken, loginError := authController.authUseCase.Login(echoContext.Request().Context(), authController.resolver.Resolve(echoContext.Request()), echoContext.Request().UserAgent(), request.UserName, request.Password)
+	refreshToken, loginError := authController.authUseCase.Login(echoContext.Request().Context(), authController.resolver.Resolve(echoContext.Request()), echoContext.Request().UserAgent(), request.UserName, request.Password, request.TurnstileToken)
 	if loginError != nil {
 		return translateError(echoContext, loginError)
 	}
@@ -303,6 +332,23 @@ func (authController *AuthController) JSONWebKeys(echoContext *echo.Context) err
 	// キャッシュを許して、公開鍵を返す(鍵の入れ替えは、古い鍵を15分残すので、5分の遅れは問題ない)。
 	echoContext.Response().Header().Set("Cache-Control", "public, max-age=300")
 	return echoContext.JSON(http.StatusOK, JSONWebKeySet{Keys: authController.keyStore.JSONWebKeys()})
+}
+
+// Config は、GET /config のハンドラー。ブラウザが、人間であることの確認(Turnstile)を、使うか、サイトキーは何かを、知るための API。認証は要らない。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - 設定(200)。シークレットキーは、含めない。
+func (authController *AuthController) Config(echoContext *echo.Context) error {
+	// サイトキーがあれば、確認が有効。
+	enabled := authController.publicConfig.TurnstileSiteKey != ""
+	response := PublicConfigResponse{Turnstile: TurnstileConfigResponse{Enabled: enabled}}
+	if enabled {
+		response.Turnstile.SiteKey = authController.publicConfig.TurnstileSiteKey
+	}
+	return echoContext.JSON(http.StatusOK, response)
 }
 
 // Health は、GET /healthz のハンドラー。生きていることを返す。
