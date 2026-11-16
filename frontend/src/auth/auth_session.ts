@@ -113,11 +113,16 @@ export class AuthSession implements TokenSource {
    *
    * @param userName ユーザー名。
    * @param password パスワード。
-   * @throws ApiError 認証できない(401)、レート制限(429)、接続の失敗など。
+   * @param turnstileToken 人間であることの確認(Cloudflare Turnstile)のトークン。確認が有効なときだけ要る(無ければ送らない)。
+   * @throws ApiError 認証できない(401)、確認に失敗(400)、レート制限(429)、接続の失敗など。
    */
-  async login(userName: string, password: string): Promise<void> {
-    // refresh token を受け取って、ログインの状態にする。
-    const response = await this.http.request<{ token: string }>("POST", "/auth/login", { body: { userName, password }, authenticated: false });
+  async login(userName: string, password: string, turnstileToken?: string): Promise<void> {
+    // トークンは、あるときだけ送る。refresh token を受け取って、ログインの状態にする。
+    const body: Record<string, string> = { userName, password };
+    if (turnstileToken !== undefined && turnstileToken !== "") {
+      body["turnstileToken"] = turnstileToken;
+    }
+    const response = await this.http.request<{ token: string }>("POST", "/auth/login", { body, authenticated: false });
     await this.startSession(response.token);
   }
 
@@ -127,13 +132,17 @@ export class AuthSession implements TokenSource {
    * @param userName ユーザー名。
    * @param password パスワード。
    * @param invitationCode 招待コード(招待制のときだけ要る。空なら送らない)。
-   * @throws ApiError 入力の不正(400)、名前の重複(409)、レート制限(429)など。
+   * @param turnstileToken 人間であることの確認(Cloudflare Turnstile)のトークン。確認が有効なときだけ要る(無ければ送らない)。
+   * @throws ApiError 入力の不正・確認に失敗(400)、名前の重複(409)、レート制限(429)など。
    */
-  async signup(userName: string, password: string, invitationCode: string): Promise<void> {
-    // 招待コードは、あるときだけ送る。
+  async signup(userName: string, password: string, invitationCode: string, turnstileToken?: string): Promise<void> {
+    // 招待コードとトークンは、あるときだけ送る。
     const body: Record<string, string> = { userName, password };
     if (invitationCode.trim() !== "") {
       body["invitationCode"] = invitationCode.trim();
+    }
+    if (turnstileToken !== undefined && turnstileToken !== "") {
+      body["turnstileToken"] = turnstileToken;
     }
     const response = await this.http.request<{ token: string }>("POST", "/auth/signup", { body, authenticated: false });
     await this.startSession(response.token);

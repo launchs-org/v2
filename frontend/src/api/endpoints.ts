@@ -1,6 +1,17 @@
 // 画面から使う API の呼び出し。パスと型を、ここにまとめる。
 import type { HttpClient } from "./http_client";
-import type { Project, ProjectPage, Quota } from "./types";
+import type { AuthConfig, Project, ProjectPage, Quota } from "./types";
+
+/**
+ * 認証の公開の設定(人間であることの確認を使うか、サイトキーは何か)を取る。認証は要らない。
+ *
+ * @param http API の呼び出し道具。
+ * @param signal 中断の合図。
+ * @returns 公開の設定。
+ */
+export function getAuthConfig(http: HttpClient, signal?: AbortSignal): Promise<AuthConfig> {
+  return http.request<AuthConfig>("GET", "/auth/config", { authenticated: false, ...(signal === undefined ? {} : { signal }) });
+}
 
 /**
  * プロジェクトの一覧の、1ページを取る。
