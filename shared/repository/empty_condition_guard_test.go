@@ -101,6 +101,14 @@ func TestRepositoriesRejectEmptyConditions(testingT *testing.T) {
 			_, err := NewServiceRepository(database).CommitPortsApply(requestContext, "", true)
 			return err
 		}, expectedKind: apperror.KindInternal},
+		{name: "deploy の一覧: ユーザー ID が空", call: func() error {
+			_, _, err := NewDeployRepository(database).ListByProject(requestContext, "", "project-00000001", 20, nil)
+			return err
+		}, expectedKind: apperror.KindNotFound},
+		{name: "deploy の一覧: プロジェクトの ID が空", call: func() error {
+			_, _, err := NewDeployRepository(database).ListByProject(requestContext, "user-a", "", 20, nil)
+			return err
+		}, expectedKind: apperror.KindNotFound},
 		{name: "ingress 取得: ユーザー ID が空", call: func() error {
 			_, err := NewIngressRepository(database).FindByID(requestContext, "", "project-00000001", "ingress-1")
 			return err
