@@ -29,6 +29,7 @@ var defaultMessagesByKind = map[apperror.Kind]string{
 	apperror.KindConflict:        "現在の状態では実行できません",
 	apperror.KindPayloadTooLarge: "リクエストが大きすぎます",
 	apperror.KindTooManyRequests: "リクエストが多すぎます",
+	apperror.KindUnavailable:     "サービスを一時的に利用できません",
 }
 
 // NewErrorHandler は、Echo のエラーハンドラーを作る。
@@ -141,6 +142,8 @@ func kindFromStatusCode(statusCode int) apperror.Kind {
 		return apperror.KindPayloadTooLarge
 	case http.StatusTooManyRequests:
 		return apperror.KindTooManyRequests
+	case http.StatusServiceUnavailable:
+		return apperror.KindUnavailable
 	}
 
 	// 共通ルールに無い 4xx は、リクエストの不正として扱う。

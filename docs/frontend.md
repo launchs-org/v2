@@ -51,6 +51,14 @@ refresh token が localStorage にあるので、ページ内でスクリプト�
 | `/usage` | **使用量**。自分の上限と使用量(プロジェクト、deploy の合計、volume の数と容量、スペックごとの deploy、volume 1つの上限、replicas の最大)。棒は、値と最大が、読み上げに伝わる |
 | `/projects/:projectId` | パンくず、名前の変更、削除(確認のダイアログ。削除中は、進み具合を見せ、終わると、一覧へ戻る案内)、右に詳細のカード。`delete_failed` のときは、もう一度、削除できる |
 
+## 人間であることの確認(Cloudflare Turnstile)
+
+ログインとサインアップに、Cloudflare Turnstile を付けられる。**`.env` に `TURNSTILE_SITE_KEY` と `TURNSTILE_SECRET_KEY` を書いたときだけ有効**(設計と、サーバー側は、[docs/auth.md](auth.md) §16)。
+
+- ログイン画面を開くと、`GET /auth/config` で、有効かと、サイトキーを知る。有効なら、Cloudflare のスクリプトを読み込んで、ウィジェットを描く(`components/TurnstileWidget.tsx`、`auth/turnstile.ts`)。サイトキーは、ビルドに焼き込まない。
+- トークンができるまで、送信ボタンは押せない。送信に失敗したら、トークン(1回しか使えない)を捨てて、ウィジェットを作り直す。期限切れ・エラーのときも、ボタンは、また押せなくなる。
+- **本番**: 静的配信の nginx に、環境変数 `CSP_TURNSTILE=https://challenges.cloudflare.com` を渡す(渡さないと、CSP が、Cloudflare のスクリプトを遮断する)。渡したときだけ、`script-src`、`connect-src`、`frame-src` が、このオリジンを許す。開発の Vite の開発サーバーには、CSP が無いので、不要。
+
 ## まだ無いもの(次の PR 以降)
 
 - **deploy の一覧**: 仕様(`GET /api/v1/projects/:projectId/deploys`)にはあるが、**backend に、まだ実装されていない**(build の履歴の一覧も同じ)。backend に足してから、画面を作る。
@@ -58,6 +66,6 @@ refresh token が localStorage にあるので、ページ内でスクリプト�
 
 ## 確認した範囲
 
-- **単体・画面のテスト 70 件**(偽のサーバーで、トークンの更新の競合、エラーの表示、検査、cursor、確認のダイアログなど)。
+- **単体・画面のテスト 80 件**(Turnstile を含む)(偽のサーバーで、トークンの更新の競合、エラーの表示、検査、cursor、確認のダイアログなど)。
 - **実ブラウザ(Chromium)で、本物の backend・auth・worker につないで、14 の手順**: 未ログインのガード、ログインの失敗、サインアップ(弱いパスワードの拒否と成功)、プロジェクトの作成・重複(409)・名前の変更・削除(namespace まで)、リロードでの復帰、**access token を壊しての、自動更新**、ログアウト、ログインし直し、モバイル幅(390px)で横にはみ出さないこと、ダークモード、確認のダイアログ。
 - 実ブラウザの確認の手順は、リポジトリには入れていない(Playwright の Docker イメージが要る)。必要なら、`frontend/e2e/` として足す。

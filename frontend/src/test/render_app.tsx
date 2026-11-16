@@ -12,6 +12,8 @@ export interface ServerState {
   /** ページごとの、nextCursor(指定しなければ、1ページだけ)。 */
   pageSize?: number;
   quota?: { projectsUsed: number; projectsLimit: number };
+  /** 指定すると、人間であることの確認(Turnstile)が有効になる(GET /auth/config が、サイトキーを返す)。 */
+  turnstileSiteKey?: string;
 }
 
 /**
@@ -27,6 +29,9 @@ export function appServer(state: ServerState, overrides: Record<string, Handler>
     const override = overrides[key];
     if (override !== undefined) {
       return override(request);
+    }
+    if (key === "GET /auth/config") {
+      return jsonResponse(200, { turnstile: state.turnstileSiteKey === undefined ? { enabled: false } : { enabled: true, siteKey: state.turnstileSiteKey } });
     }
     if (key === "POST /auth/login" || key === "POST /auth/signup") {
       return jsonResponse(200, { token: "refresh-1" });

@@ -1,7 +1,10 @@
 // ログインとサインアップに共通の、フォーム(パソコンでは、左にロゴの面、右にフォームの、2 列)。
-import { useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { getAuthConfig } from "../api/endpoints";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { TurnstileWidget, type TurnstileHandle } from "../components/TurnstileWidget";
 import { Brand } from "../components/Brand";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -27,6 +30,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [invitationCode, setInvitationCode] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 人間であることの確認(Cloudflare Turnstile)。サーバーが有効と答えたときだけ、ウィジェットを出して、トークンを送る。
+  const authConfig = useQuery({ queryKey: ["authConfig"], queryFn: ({ signal }) => getAuthConfig(session.http, signal), staleTime: Infinity, retry: 1 });
+  const siteKey = authConfig.data?.turnstile.enabled === true ? (authConfig.data.turnstile.siteKey ?? "") : "";
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileHandle>(null);
   // ログイン後に戻る場所(保護された画面から送られてきたとき)。外部の URL に飛ばされないよう、サイト内のパスだけを受け付ける。
   const from = (location.state as { from?: unknown } | null)?.from;
   const destination = typeof from === "string" && from.startsWith("/") && !from.startsWith("//") ? from : "/projects";
@@ -48,13 +56,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
     try {
       // 種類に応じて、呼ぶ。
       if (mode === "login") {
-        await session.login(userName.trim(), password);
+        await session.login(userName.trim(), password, turnstileToken ?? undefined);
       } else {
-        await session.signup(userName.trim(), password, invitationCode);
+        await session.signup(userName.trim(), password, invitationCode, turnstileToken ?? undefined);
       }
       navigate(destination, { replace: true });
     } catch (cause) {
       setError(cause);
+      // トークンは、1回しか使えない。失敗したら、作り直させる。
+      turnstileRef.current?.reset();
     } finally {
       setSubmitting(false);
     }
@@ -94,8 +104,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
               <Input id="invitationCode" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} autoComplete="off" />
             </div>
           )}
+          {siteKey !== "" && <TurnstileWidget siteKey={siteKey} onToken={setTurnstileToken} handle={turnstileRef} />}
           <ErrorMessage error={error} />
-          <Button type="submit" size="lg" disabled={submitting}>
+          <Button type="submit" size="lg" disabled={submitting || authConfig.isPending || (siteKey !== "" && turnstileToken === null)}>
             {submitting && <Spinner />}
             {submitting ? "送信中…" : isLogin ? "ログイン" : "作成してログイン"}
           </Button>

@@ -43,10 +43,11 @@ func noStoreMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 //   - adminUseCase: アカウント管理のユースケース。
 //   - keyStore: 署名鍵(JWKS の配信に使う)。
 //   - resolver: クライアントの IP を決めるもの。
+//   - publicConfig: ブラウザに見せてよい設定(GET /auth/config)。
 //
 // 戻り値:
 //   - 組み立てた Echo のサーバー。起動は呼び出し側が行う。
-func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCase controller.AdminUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver) *echo.Echo {
+func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCase controller.AdminUseCase, keyStore *keys.KeyStore, resolver *clientip.Resolver, publicConfig controller.PublicConfig) *echo.Echo {
 	// エラーハンドラーと、ロガーを設定して、サーバーを作る。
 	echoServer := echo.NewWithConfig(echo.Config{
 		Logger:           appLogger,
@@ -59,7 +60,7 @@ func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCas
 	echoServer.Use(middleware.BodyLimit(MaxRequestBodyBytes))
 
 	// ルートを登録する。
-	authController := controller.NewAuthController(authUseCase, keyStore, resolver)
+	authController := controller.NewAuthController(authUseCase, keyStore, resolver, publicConfig)
 	echoServer.GET("/healthz", controller.Health)
 	authGroup := echoServer.Group("/auth")
 	// トークンなどを含むレスポンスは、中継やブラウザに保存させない(JWKS だけ、ハンドラーで上書きして、キャッシュを許す)。
@@ -71,6 +72,7 @@ func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCas
 	authGroup.POST("/logout", authController.Logout)
 	authGroup.GET("/login-history", authController.LoginHistory)
 	authGroup.GET("/.well-known/jwks.json", authController.JSONWebKeys)
+	authGroup.GET("/config", authController.Config)
 
 	// アカウント管理(管理者だけ。各ハンドラーが、最初に、DB の最新の状態で、管理者であることを確かめる)。
 	adminController := controller.NewAdminController(adminUseCase)

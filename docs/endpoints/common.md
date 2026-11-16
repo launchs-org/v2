@@ -42,6 +42,7 @@
 | 413 | `payload_too_large` | アップロードが上限を超えた |
 | 429 | `too_many_requests` | レート制限(`Retry-After` ヘッダ付き) |
 | 500 | `internal_error` | サーバー内部のエラー |
+| 503 | `service_unavailable` | 外部のサービス(Cloudflare Turnstile)に届かず、処理できない(あとで、もう一度) |
 
 403 は、リソースの存在を隠す必要がない権限エラー(例: 管理者用の操作)に限って使う。他のユーザーのリソースは、これまでどおり 404。
 
