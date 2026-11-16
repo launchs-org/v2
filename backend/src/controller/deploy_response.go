@@ -39,10 +39,10 @@ type DeployConfigResponse struct {
 // DeployVolumesResponse は、deploy のボリュームのマウント設定のレスポンス。
 type DeployVolumesResponse struct {
 	// Mounts は、現在のマウント。
-	Mounts []any `json:"mounts"`
+	Mounts []MountResponse `json:"mounts"`
 
 	// PendingMounts は、まだ適用していないマウント。変更が無ければ null。
-	PendingMounts []any `json:"pending_mounts"`
+	PendingMounts []MountResponse `json:"pending_mounts"`
 }
 
 // DeployResponse は、deploy 詳細のレスポンスのボディ。
@@ -94,6 +94,19 @@ type DeployResponse struct {
 // 戻り値:
 //   - レスポンスのボディ。
 func newDeployResponse(deploy model.Deploy) DeployResponse {
+	// 現在のマウント。無ければ、null ではなく、空の配列にする。
+	mounts := mountResponses(deploy.Mounts)
+	if mounts == nil {
+		mounts = []MountResponse{}
+	}
+	// 適用前のマウント。変更が無ければ null、空の配列は「全て外す変更」として、そのまま出す。
+	var pendingMounts []MountResponse
+	if deploy.HasPendingMounts() {
+		pendingMounts = mountResponses(deploy.PendingMounts)
+		if pendingMounts == nil {
+			pendingMounts = []MountResponse{}
+		}
+	}
 	return DeployResponse{
 		DeployID:  deploy.ID,
 		ProjectID: deploy.ProjectID,
@@ -113,7 +126,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 			Args:           jsonOrNull(deploy.Args),
 			PendingArgs:    jsonOrNull(deploy.PendingArgs),
 		},
-		Volumes: DeployVolumesResponse{Mounts: []any{}, PendingMounts: nil},
+		Volumes: DeployVolumesResponse{Mounts: mounts, PendingMounts: pendingMounts},
 		Service: nil,
 	}
 }
