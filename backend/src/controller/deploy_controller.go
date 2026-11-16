@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"launchs/backend/src/middlewares"
+	"launchs/shared/apperror"
 	"launchs/shared/model"
 	"launchs/shared/pagination"
 	"net/http"
@@ -50,6 +51,7 @@ type CreateDeployResponse struct {
 type DeployController struct {
 	deployUseCase    DeployUseCase
 	deployLogUseCase DeployLogUseCase
+	serviceUseCase   ServiceUseCase
 }
 
 // NewDeployController は、DeployController を作る。
@@ -57,12 +59,13 @@ type DeployController struct {
 // 引数:
 //   - deployUseCase: deploy のビジネスルール。
 //   - deployLogUseCase: ログの取得のビジネスルール。
+//   - serviceUseCase: service のビジネスルール(deploy の詳細に、service を含めるため)。
 //
 // 戻り値:
 //   - 作成した DeployController。
-func NewDeployController(deployUseCase DeployUseCase, deployLogUseCase DeployLogUseCase) *DeployController {
+func NewDeployController(deployUseCase DeployUseCase, deployLogUseCase DeployLogUseCase, serviceUseCase ServiceUseCase) *DeployController {
 	// ビジネスルールを持たせた DeployController を返す。
-	return &DeployController{deployUseCase: deployUseCase, deployLogUseCase: deployLogUseCase}
+	return &DeployController{deployUseCase: deployUseCase, deployLogUseCase: deployLogUseCase, serviceUseCase: serviceUseCase}
 }
 
 // Create は、deploy を作成して、起動を開始する(POST /deploy)。
@@ -127,5 +130,14 @@ func (deployController *DeployController) Get(echoContext *echo.Context) error {
 		return logPodsError
 	}
 	response.LogPods = newLogPodResponses(logStreams)
+	// service を読む。まだ作っていない(not_found)なら、null のままにする。他のエラーは、そのまま返す。
+	deployService, serviceError := deployController.serviceUseCase.Get(echoContext.Request().Context(), userID, deploy.ID)
+	if serviceError != nil && apperror.KindOf(serviceError) != apperror.KindNotFound {
+		return serviceError
+	}
+	if serviceError == nil {
+		serviceResponse := newServiceResponse(deployService)
+		response.Service = &serviceResponse
+	}
 	return echoContext.JSON(http.StatusOK, response)
 }
