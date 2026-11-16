@@ -57,6 +57,16 @@ tasks:
     cmds:
       - docker compose run --rm -T auth go run ./auth/src admin promote {{.CLI_ARGS}}
 
+  frontend:test:
+    desc: フロントエンドのテストと型の検査を実行する(コンテナの中で)
+    cmds:
+      - docker compose run --rm --no-deps frontend sh -c "npm install --no-audit --no-fund && npm run typecheck && npm test"
+
+  frontend:build:
+    desc: フロントエンドの本番用のイメージを作る(型の検査、ビルド、nginx のイメージ)
+    cmds:
+      - docker build -f frontend/dockerfile --target Production -t launchs-frontend:local .
+
   test:
     desc: 全てのテストを実行する
     deps: [image]
