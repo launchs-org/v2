@@ -1,6 +1,6 @@
 // プロジェクトの一覧と、作成。
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Folder, FolderPlus, Plus } from "lucide-react";
+import { ChevronRight, FolderPlus, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { createProject, listProjects } from "../api/endpoints";
@@ -11,8 +11,10 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { PageHeader } from "../components/PageHeader";
 import { Skeleton } from "../components/ui/skeleton";
 import { Spinner } from "../components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { projectStatusLabel, projectStatusTone, validateProjectName } from "../lib/project_name";
 
 /** 削除中のプロジェクトがあるとき、状態を確かめ直す間隔(ミリ秒)。 */
@@ -61,17 +63,17 @@ export function ProjectsPage() {
 
   const items = projects.data?.pages.flatMap((page) => page.projects) ?? [];
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-3xl font-normal tracking-tight">プロジェクト</h1>
+    <>
+      <PageHeader title="プロジェクト" description="deploy、ingress、volume は、プロジェクトの中に作ります。" />
 
       <Card>
         <CardContent className="p-5">
-          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleCreate}>
-            <div className="flex flex-1 flex-col gap-2">
+          <form className="flex flex-wrap items-end gap-3" onSubmit={handleCreate}>
+            <div className="flex w-full max-w-md flex-col gap-2">
               <Label htmlFor="newProjectName">新しいプロジェクトの名前</Label>
               <Input id="newProjectName" value={name} onChange={(event) => setName(event.target.value)} maxLength={64} placeholder="my-app" aria-invalid={validation !== null} aria-describedby="newProjectHelp" />
             </div>
-            <Button type="submit" disabled={create.isPending} className="sm:mb-px">
+            <Button type="submit" disabled={create.isPending}>
               {create.isPending ? <Spinner /> : <Plus aria-hidden="true" />}
               {create.isPending ? "作成中…" : "作成"}
             </Button>
@@ -85,9 +87,9 @@ export function ProjectsPage() {
       {projects.isPending && (
         <Card role="status" aria-label="読み込み中" className="divide-y overflow-hidden">
           {[0, 1, 2].map((row) => (
-            <div key={row} className="flex items-center gap-4 p-4">
-              <Skeleton className="size-10 rounded-full" />
-              <Skeleton className="h-4 w-40" />
+            <div key={row} className="flex items-center gap-4 px-4 py-3.5">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="ml-auto h-5 w-16" />
             </div>
           ))}
         </Card>
@@ -95,32 +97,42 @@ export function ProjectsPage() {
       <ErrorMessage error={projects.error} />
       {projects.isSuccess && items.length === 0 && (
         <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
-            <span className="grid size-14 place-items-center rounded-full bg-secondary text-secondary-foreground">
-              <FolderPlus aria-hidden="true" className="size-7" />
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <span className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
+              <FolderPlus aria-hidden="true" className="size-6" />
             </span>
             <p className="font-medium">プロジェクトはまだありません</p>
-            <p className="text-sm text-muted-foreground">上のフォームから、最初のプロジェクトを作れます。</p>
+            <p className="text-muted-foreground">上のフォームから、最初のプロジェクトを作れます。</p>
           </CardContent>
         </Card>
       )}
       {items.length > 0 && (
         <Card className="overflow-hidden">
-          <ul className="divide-y">
-            {items.map((project) => (
-              <li key={project.projectId} className="group relative flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-accent has-[a:focus-visible]:bg-accent">
-                <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
-                  <Folder className="size-5" />
-                </span>
-                {/* リンクは、名前だけ(読み上げの名前が、状態と混ざらないように)。after で、行の全体を押せる範囲にする。 */}
-                <Link to={`/projects/${project.projectId}`} className="min-w-0 flex-1 truncate font-medium outline-none after:absolute after:inset-0">
-                  {project.name}
-                </Link>
-                <Badge variant={projectStatusTone(project.status)}>{projectStatusLabel(project.status)}</Badge>
-                <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-              </li>
-            ))}
-          </ul>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>名前</TableHead>
+                <TableHead className="w-32">状態</TableHead>
+                <TableHead>プロジェクト ID</TableHead>
+                <TableHead className="w-10"><span className="sr-only">開く</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((project) => (
+                <TableRow key={project.projectId} className="group">
+                  <TableCell className="font-medium">
+                    {/* リンクは、名前だけ(読み上げの名前が、状態と混ざらないように)。after で、行の全体を押せる範囲にする。 */}
+                    <Link to={`/projects/${project.projectId}`} className="outline-none after:absolute after:inset-0 focus-visible:underline">
+                      {project.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell><Badge variant={projectStatusTone(project.status)}>{projectStatusLabel(project.status)}</Badge></TableCell>
+                  <TableCell><code className="font-mono text-xs text-muted-foreground">{project.projectId}</code></TableCell>
+                  <TableCell><ChevronRight aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </Card>
       )}
       {projects.hasNextPage && (
@@ -131,6 +143,6 @@ export function ProjectsPage() {
           </Button>
         </div>
       )}
-    </div>
+    </>
   );
 }

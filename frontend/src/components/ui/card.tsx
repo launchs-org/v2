@@ -4,7 +4,7 @@ import { cn } from "../../lib/utils";
 
 /** カード。白い面に、細い枠と、わずかな影。 */
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-xl border bg-card text-card-foreground shadow-xs", className)} {...props} />;
+  return <div className={cn("rounded-xl border bg-card text-card-foreground shadow-sm", className)} {...props} />;
 }
 
 /** カードの見出しの部分。 */
@@ -14,7 +14,7 @@ export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElemen
 
 /** カードの見出し(h2)。 */
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn("text-lg font-medium leading-none tracking-tight", className)} {...props} />;
+  return <h2 className={cn("font-semibold leading-none tracking-tight", className)} {...props} />;
 }
 
 /** カードの説明(薄い色)。 */

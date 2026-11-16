@@ -1,53 +1,57 @@
-/* Tailwind CSS v4 と、shadcn/ui のテーマ。色は、意味のある名前の変数にして、ライトとダーク(OS の設定に従う)で切り替える。
-   配色は、Google のサービスに近づけている(白地、Google ブルー、淡い青のタグ、灰色の枠)。 */
+/* Tailwind CSS v4 と、shadcn/ui のテーマ。色は、意味のある名前の変数にして、ライトとダーク(OS の設定に従う)で切り替える。 */
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* shadcn/ui の標準(zinc)の、無彩色のテーマ。強調の色は、ほとんど使わず、黒(ダークでは白)を主役にする。 */
 :root {
-  --background: #f8f9fa;
-  --foreground: #202124;
+  --background: #ffffff;
+  --foreground: #09090b;
   --card: #ffffff;
-  --card-foreground: #202124;
-  --muted: #f1f3f4;
-  --muted-foreground: #5f6368;
-  --border: #dadce0;
-  --input: #dadce0;
-  --ring: #1a73e8;
-  --primary: #1a73e8;
-  --primary-foreground: #ffffff;
-  --secondary: #e8f0fe;
-  --secondary-foreground: #1967d2;
-  --accent: #f1f3f4;
-  --accent-foreground: #202124;
-  --destructive: #d93025;
-  --destructive-foreground: #ffffff;
-  --success: #188038;
-  --warning: #b06000;
+  --card-foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
+  --success: #16a34a;
+  --warning: #d97706;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #3f3f46;
   --radius: 0.5rem;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #202124;
-    --foreground: #e8eaed;
-    --card: #292a2d;
-    --card-foreground: #e8eaed;
-    --muted: #35363a;
-    --muted-foreground: #9aa0a6;
-    --border: #3c4043;
-    --input: #5f6368;
-    --ring: #8ab4f8;
-    --primary: #8ab4f8;
-    --primary-foreground: #202124;
-    --secondary: #394457;
-    --secondary-foreground: #aecbfa;
-    --accent: #35363a;
-    --accent-foreground: #e8eaed;
-    --destructive: #f28b82;
-    --destructive-foreground: #202124;
-    --success: #81c995;
-    --warning: #fdd663;
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #0f0f12;
+    --card-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --input: #3f3f46;
+    --ring: #71717a;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
+    --destructive: #f87171;
+    --destructive-foreground: #18181b;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --sidebar: #0c0c0f;
+    --sidebar-foreground: #d4d4d8;
     color-scheme: dark;
   }
 }
@@ -72,12 +76,14 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 4px);
   --radius-xl: calc(var(--radius) + 8px);
-  /* 外のフォントは、読み込まない(CSP)。Google Sans が入っていれば使い、無ければ、Roboto や、OS の標準のフォント。 */
-  --font-sans: "Google Sans", "Google Sans Text", Roboto, "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* 外のフォントは、読み込まない(CSP)。Inter が入っていれば使い、無ければ、OS の標準のフォント。 */
+  --font-sans: Inter, "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -86,7 +92,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground font-sans text-sm antialiased;
   }
   /* キーボードで操作したときだけ、はっきりしたフォーカスの枠を出す。 */
   :focus-visible {

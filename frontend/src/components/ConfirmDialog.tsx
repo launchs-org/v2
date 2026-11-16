@@ -39,16 +39,16 @@ export function ConfirmDialog(props: { open: boolean; title: string; confirmLabe
       ref={dialogRef}
       onCancel={props.onCancel}
       aria-labelledby="confirm-title"
-      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-black/50 open:animate-in open:fade-in-0 open:zoom-in-95"
+      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-xl border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-black/50 open:animate-in open:fade-in-0 open:zoom-in-95"
     >
       {props.open && (
         <div className="p-6">
           <div className="flex items-start gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-destructive/12 text-destructive">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive">
               <TriangleAlert aria-hidden="true" className="size-5" />
             </span>
             <div className="min-w-0">
-              <h2 id="confirm-title" className="text-lg font-medium">{props.title}</h2>
+              <h2 id="confirm-title" className="text-lg font-semibold">{props.title}</h2>
               <div className="mt-2 text-sm text-muted-foreground">{props.children}</div>
             </div>
           </div>

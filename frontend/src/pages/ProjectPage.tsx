@@ -1,13 +1,14 @@
 // プロジェクト1つの画面(名前の変更、削除)。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/api_error";
 import { deleteProject, getProject, renameProject } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { PageHeader } from "../components/PageHeader";
 import { Alert } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -79,7 +80,7 @@ export function ProjectPage() {
   if (project.error instanceof ApiError && project.error.status === 404) {
     return (
       <Card>
-        <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
+        <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
           <p className="font-medium">プロジェクトが見つかりません(削除されたか、存在しません)。</p>
           <Button onClick={() => { void queryClient.invalidateQueries({ queryKey: ["projects"] }); navigate("/projects"); }}>プロジェクトの一覧へ</Button>
         </CardContent>
@@ -89,8 +90,9 @@ export function ProjectPage() {
   if (project.isPending) {
     return (
       <div role="status" aria-label="読み込み中" className="flex flex-col gap-4">
-        <Skeleton className="h-8 w-56" />
-        <Skeleton className="h-32 w-full rounded-xl" />
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-40 w-full rounded-xl" />
       </div>
     );
   }
@@ -101,58 +103,74 @@ export function ProjectPage() {
   // 削除中・削除失敗の間は、変更できない(サーバーも 409 を返す)。削除は、削除中でなければ、呼べる(失敗の後の、やり直しを含む)。
   const editable = data.status === "active";
   return (
-    <div className="flex flex-col gap-6">
-      <Button asChild variant="ghost" size="sm" className="-ml-3 w-fit text-muted-foreground">
-        <Link to="/projects"><ArrowLeft aria-hidden="true" />プロジェクトの一覧</Link>
-      </Button>
-      <div className="flex flex-col gap-2">
-        <h1 className="flex flex-wrap items-center gap-3 text-3xl font-normal tracking-tight">
-          <span className="break-all">{data.name}</span>
-          <Badge variant={projectStatusTone(data.status)} className="text-sm">{projectStatusLabel(data.status)}</Badge>
-        </h1>
-        <p className="text-sm text-muted-foreground">ID: <code className="break-all font-mono text-xs">{data.projectId}</code></p>
-      </div>
+    <>
+      <PageHeader
+        crumbs={[{ label: "プロジェクト", to: "/projects" }, { label: data.name }]}
+        title={<span className="flex flex-wrap items-center gap-3"><span className="break-all">{data.name}</span><Badge variant={projectStatusTone(data.status)}>{projectStatusLabel(data.status)}</Badge></span>}
+        description={<>ID: <code className="break-all font-mono text-xs">{data.projectId}</code></>}
+      />
       {data.status === "deleting" && <Alert variant="info">削除しています。終わると、一覧に戻ります…</Alert>}
       {data.status === "delete_failed" && <Alert>削除に失敗して、止まっています。もう一度、削除を試せます。</Alert>}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>名前の変更</CardTitle>
-          <CardDescription>英数字とハイフンだけ、64文字まで。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleRename}>
-            <div className="flex flex-1 flex-col gap-2">
-              <Label htmlFor="renameProject">新しい名前</Label>
-              <Input id="renameProject" value={newName ?? data.name} onChange={(event) => setNewName(event.target.value)} maxLength={64} disabled={!editable} aria-invalid={validation !== null} />
-            </div>
-            <Button type="submit" variant="tonal" disabled={!editable || rename.isPending || newName === null || newName.trim() === data.name} className="sm:mb-px">
-              {rename.isPending && <Spinner />}
-              変更
-            </Button>
-          </form>
-          {validation !== null && <p role="alert" className="mt-2 text-sm text-destructive">{validation}</p>}
-          <ErrorMessage error={rename.error} className="mt-3" />
-        </CardContent>
-      </Card>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>名前の変更</CardTitle>
+              <CardDescription>英数字とハイフンだけ、64文字まで。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form className="flex flex-wrap items-end gap-3" onSubmit={handleRename}>
+                <div className="flex w-full max-w-md flex-col gap-2">
+                  <Label htmlFor="renameProject">新しい名前</Label>
+                  <Input id="renameProject" value={newName ?? data.name} onChange={(event) => setNewName(event.target.value)} maxLength={64} disabled={!editable} aria-invalid={validation !== null} />
+                </div>
+                <Button type="submit" variant="secondary" disabled={!editable || rename.isPending || newName === null || newName.trim() === data.name}>
+                  {rename.isPending && <Spinner />}
+                  変更
+                </Button>
+              </form>
+              {validation !== null && <p role="alert" className="mt-2 text-sm text-destructive">{validation}</p>}
+              <ErrorMessage error={rename.error} className="mt-3" />
+            </CardContent>
+          </Card>
 
-      <Card className="border-destructive/30">
-        <CardHeader>
-          <CardTitle className="text-destructive">削除</CardTitle>
-          <CardDescription>プロジェクトの deploy、ingress、volume(データごと)も、全て削除されます。元に戻せません。</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <ErrorMessage error={remove.error} />
-          <Button variant="destructive-outline" className="w-fit" onClick={() => setConfirmingDelete(true)} disabled={data.status === "deleting" || remove.isPending}>
-            <Trash2 aria-hidden="true" />
-            プロジェクトを削除
-          </Button>
-        </CardContent>
-      </Card>
+          <Card className="border-destructive/30">
+            <CardHeader>
+              <CardTitle className="text-destructive">削除</CardTitle>
+              <CardDescription>プロジェクトの deploy、ingress、volume(データごと)も、全て削除されます。元に戻せません。</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <ErrorMessage error={remove.error} />
+              <Button variant="destructive-outline" className="w-fit" onClick={() => setConfirmingDelete(true)} disabled={data.status === "deleting" || remove.isPending}>
+                <Trash2 aria-hidden="true" />
+                プロジェクトを削除
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>詳細</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
+              <dt className="text-muted-foreground">状態</dt>
+              <dd><Badge variant={projectStatusTone(data.status)}>{projectStatusLabel(data.status)}</Badge></dd>
+              <dt className="text-muted-foreground">名前</dt>
+              <dd className="break-all font-medium">{data.name}</dd>
+              <dt className="text-muted-foreground">k8s の namespace</dt>
+              <dd><code className="break-all font-mono text-xs">{data.projectId}</code></dd>
+            </dl>
+            <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">deploy、ingress、volume の画面は、これから追加します。</p>
+          </CardContent>
+        </Card>
+      </div>
 
       <ConfirmDialog open={confirmingDelete} title="プロジェクトを削除しますか?" confirmLabel="削除する" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmingDelete(false)}>
         <p><strong className="text-foreground">{data.name}</strong> と、配下の全てのものを削除します。元に戻せません。</p>
       </ConfirmDialog>
-    </div>
+    </>
   );
 }

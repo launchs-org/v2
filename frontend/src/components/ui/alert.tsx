@@ -8,8 +8,8 @@ import { cn } from "../../lib/utils";
 const alertVariants = cva("flex items-start gap-3 rounded-lg border px-4 py-3 text-sm", {
   variants: {
     variant: {
-      destructive: "border-destructive/30 bg-destructive/8 text-destructive",
-      info: "border-primary/30 bg-secondary text-secondary-foreground",
+      destructive: "border-destructive/30 bg-destructive/5 text-destructive",
+      info: "bg-card text-foreground",
     },
   },
   defaultVariants: { variant: "destructive" },
