@@ -119,7 +119,7 @@
 - Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)
 - Note: config は [起動設定取得](#デプロイ-起動設定取得-環境変数起動コマンド引数)、volumes は [ボリュームマウント取得](volumes.md#デプロイ-ボリュームマウント取得)、service は [サービス取得](services.md#サービス取得) と同じ内容をこのレスポンスに埋め込んだもの。個別に叩かなくても、この1回のGETで全ての pending_* を確認できる
 - Note: service の status(pending / active / failed / deleting)は Service 自体の払い出し状態で、deploy の status とは別。config/volumes/service いずれかの apply 中に変化するのは deploy の status だけで、service の status は変わらない
-- Note: service はまだ作成されていない(サービス未作成の)deployでは null になる(1 deploy = 1 service で、作成は任意)
+- Note: service はまだ作成されていない(サービス未作成の)deployでは null になる。作成済みなら、[サービス取得](services.md#サービス取得)と同じ内容が入る(作成中の "pending" も含む)(1 deploy = 1 service で、作成は任意)
 - Note: pods は現在稼働している Pod の一覧(replicas が希望レプリカ数という数値であるのに対し、pods は実際の Pod 1つ1つの識別子と状態を返す)。[デプロイ ログ取得](#デプロイ-ログ取得) で特定の Pod のログを取得する際に、ここで取得した podId を指定する。status は "pending" | "running" | "terminating" のいずれか。status が "pending" の場合 deploy の status が "applying"(起動中)であることが多い
 - Note: logPods は、**ログが1行以上保存されている Pod**の一覧で、**既に終了・再作成された Pod も含む**(pods には、稼働中の Pod だけが出る)。新しい Pod(startedAt)が先で、最大 50 件(それより古い Pod も、podId を知っていれば、ログは取れる)。running は、ログの収集が続いている(Pod が稼働中の)か、endedAt は収集が終わった時刻(稼働中は null)。ロールアウトで消えた Pod や、スケールダウンした Pod のログを見るときの podId は、ここから取る。ログが無い Pod(起動前に落ちた、出力が無かった、保持期間で全て削除された)は載らない。logPods の podId は、必ず、ログ取得が 200 で返る
 
