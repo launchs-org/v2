@@ -46,7 +46,8 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	deployRepository := repository.NewDeployRepository(dependencies.Database)
 	podRepository := repository.NewDeployObservationRepository(dependencies.Database)
 	deployLogService := service.NewDeployLogService(deployRepository, repository.NewDeployLogQueryRepository(dependencies.Database))
-	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService)
+	serviceRepository := repository.NewServiceRepository(dependencies.Database)
+	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService, service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy", deployController.Create)
 	apiGroup.GET("/projects/:projectId/deploys", deployController.ListByProject)
 	apiGroup.GET("/deploy/:deployId", deployController.Get)
@@ -62,7 +63,6 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/deploy/:deployId/mounts/apply", deployController.ApplyMounts)
 	apiGroup.POST("/deploy/:deployId/mounts/discard", deployController.DiscardMounts)
 
-	serviceRepository := repository.NewServiceRepository(dependencies.Database)
 	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
 	apiGroup.GET("/deploy/:deployId/service", serviceController.Get)
