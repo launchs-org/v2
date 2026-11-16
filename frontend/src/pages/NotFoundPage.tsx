@@ -12,7 +12,7 @@ export function NotFoundPage() {
         <Brand large />
         <Card className="w-full">
           <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-            <h1 className="text-2xl font-normal">ページが見つかりません</h1>
+            <h1 className="text-xl font-semibold">ページが見つかりません</h1>
             <Button asChild>
               <Link to="/projects">プロジェクトの一覧へ</Link>
             </Button>

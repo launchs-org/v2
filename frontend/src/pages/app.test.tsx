@@ -86,12 +86,15 @@ describe("プロジェクトの一覧", () => {
     expect(await screen.findByText(/プロジェクトはまだありません/)).toBeInTheDocument();
   });
 
-  it("名前と、状態の言葉を出す", async () => {
+  it("表に、名前、状態の言葉、プロジェクト ID を出す。名前が、詳細へのリンクになる", async () => {
     renderApp(appServer({ projects: [{ projectId: "project-a", name: "app-a", status: "active" }, { projectId: "project-b", name: "app-b", status: "deleting" }] }), { loggedIn: true, path: "/projects" });
-    const items = await screen.findAllByRole("listitem");
-    expect(within(items[0]!).getByText("稼働中")).toBeInTheDocument();
-    expect(within(items[1]!).getByText("削除中")).toBeInTheDocument();
-    expect(within(items[0]!).getByRole("link", { name: "app-a" })).toHaveAttribute("href", "/projects/project-a");
+    const rows = await screen.findAllByRole("row");
+    // 先頭は、見出しの行。
+    expect(within(rows[0]!).getByText("プロジェクト ID")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("稼働中")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("project-a")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("削除中")).toBeInTheDocument();
+    expect(within(rows[1]!).getByRole("link", { name: "app-a" })).toHaveAttribute("href", "/projects/project-a");
   });
 
   it("「もっと見る」で、次のページ(cursor)を取って、続けて表示する。最後のページでは、ボタンが消える", async () => {
@@ -144,6 +147,43 @@ describe("プロジェクトの一覧", () => {
   });
 });
 
+describe("サイドバーと使用量", () => {
+  it("サイドバーに、ナビゲーションと、ユーザー名があり、いまの画面が分かる(aria-current)", async () => {
+    renderApp(appServer({ projects: [] }), { loggedIn: true, path: "/projects" });
+    const navigation = await screen.findByRole("navigation", { name: "メインメニュー" });
+    expect(within(navigation).getByRole("link", { name: "プロジェクト" })).toHaveAttribute("aria-current", "page");
+    expect(within(navigation).getByRole("link", { name: "使用量" })).not.toHaveAttribute("aria-current");
+    expect(await screen.findByText("alice")).toBeInTheDocument();
+  });
+
+  it("「使用量」を押すと、上限と使用量の画面へ移り、スペックごとの deploy も出る", async () => {
+    const user = userEvent.setup();
+    renderApp(appServer({ projects: [{ projectId: "project-a", name: "app-a", status: "active" }] }, {
+      "GET /api/v1/quota": () => jsonResponse(200, {
+        projects: { limit: 10, used: 9 }, deploys: { limit: 20, used: 3 }, deploysBySpec: { small: { limit: 20, used: 2 }, large: { limit: 5, used: 1 } },
+        volumes: { limit: 10, used: 1 }, volumeTotalMB: { limit: 20480, used: 1536 }, maxVolumeSizeMB: 5120, maxReplicas: 5,
+      }),
+    }), { loggedIn: true, path: "/projects" });
+    await user.click(await screen.findByRole("link", { name: "使用量" }));
+    expect(await screen.findByRole("heading", { name: "使用量" })).toBeInTheDocument();
+    // 容量は GB で出る。
+    expect(await screen.findByText("1.5 GB")).toBeInTheDocument();
+    expect(screen.getByText("/ 20 GB")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "スペックごとの deploy" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "largeの使用量" })).toHaveAttribute("aria-valuenow", "1");
+    // 上限に近い(9/10)プロジェクトの棒は、値と最大が、読み上げに伝わる。
+    const projectBar = screen.getAllByRole("progressbar", { name: "プロジェクトの使用量" }).at(-1)!;
+    expect(projectBar).toHaveAttribute("aria-valuenow", "9");
+    expect(projectBar).toHaveAttribute("aria-valuemax", "10");
+    expect(screen.getByText("5 GB")).toBeInTheDocument();
+  });
+
+  it("使用量が取れないときは、エラーを出す", async () => {
+    renderApp(appServer({ projects: [] }, { "GET /api/v1/quota": () => errorResponse(500, "internal_error", "サーバー内部のエラー") }), { loggedIn: true, path: "/usage" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("サーバー内部のエラー");
+  });
+});
+
 describe("プロジェクトの画面", () => {
   const baseState = () => ({ projects: [{ projectId: "project-a", name: "app-a", status: "active" }] });
 
@@ -157,6 +197,8 @@ describe("プロジェクトの画面", () => {
     const user = userEvent.setup();
     const { requests } = renderApp(appServer(baseState()), { loggedIn: true, path: "/projects/project-a" });
     expect(await screen.findByRole("heading", { name: /app-a/ })).toBeInTheDocument();
+    // パンくずに、一覧へ戻るリンクと、いまの名前がある。
+    expect(within(screen.getByRole("navigation", { name: "パンくず" })).getByRole("link", { name: "プロジェクト" })).toHaveAttribute("href", "/projects");
     const submit = screen.getByRole("button", { name: "変更" });
     expect(submit).toBeDisabled();
     const input = screen.getByLabelText("新しい名前");

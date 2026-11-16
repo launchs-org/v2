@@ -10,6 +10,7 @@ import { AuthForm } from "./pages/AuthForm";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { UsagePage } from "./pages/UsagePage";
 
 /**
  * 画面の全体を作る。
@@ -28,6 +29,7 @@ export function App({ session, queryClient = createQueryClient() }: { session: A
             <Route element={<RequireAuth><Layout /></RequireAuth>}>
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectPage />} />
+              <Route path="/usage" element={<UsagePage />} />
             </Route>
             <Route path="/" element={<Navigate to="/projects" replace />} />
             <Route path="*" element={<NotFoundPage />} />

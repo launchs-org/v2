@@ -10,9 +10,9 @@ import { cn } from "../lib/utils";
  */
 export function Brand({ className, large = false }: { className?: string; large?: boolean }) {
   return (
-    <span className={cn("inline-flex items-center gap-2.5 font-medium tracking-tight", large ? "text-2xl" : "text-xl", className)}>
-      <span className={cn("grid place-items-center rounded-xl bg-primary text-primary-foreground", large ? "size-11" : "size-9")}>
-        <Rocket aria-hidden="true" className={large ? "size-6" : "size-5"} />
+    <span className={cn("inline-flex items-center gap-2 font-semibold tracking-tight", large ? "text-xl" : "text-base", className)}>
+      <span className={cn("grid place-items-center rounded-lg bg-primary text-primary-foreground", large ? "size-9" : "size-8")}>
+        <Rocket aria-hidden="true" className={large ? "size-5" : "size-4"} />
       </span>
       launchs
     </span>
