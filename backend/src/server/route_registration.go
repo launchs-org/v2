@@ -48,6 +48,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	deployLogService := service.NewDeployLogService(deployRepository, repository.NewDeployLogQueryRepository(dependencies.Database))
 	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService)
 	apiGroup.POST("/deploy", deployController.Create)
+	apiGroup.GET("/projects/:projectId/deploys", deployController.ListByProject)
 	apiGroup.GET("/deploy/:deployId", deployController.Get)
 	apiGroup.GET("/deploy/:deployId/logs", deployController.GetLogs)
 	apiGroup.DELETE("/deploy/:deployId", deployController.Delete)
