@@ -81,6 +81,8 @@ export interface DeployLogPod {
 /** deploy の詳細(GET /deploy/:deployId)。この画面で使う項目だけを持つ(config などは、後の画面で足す)。 */
 export interface DeployDetail {
   deployId: string;
+  /** deploy が属するプロジェクトの ID。 */
+  projectId: string;
   status: DeployStatus;
   spec: string;
   replicas: number;
@@ -88,10 +90,109 @@ export interface DeployDetail {
   logPods: DeployLogPod[];
   imageRef: string;
   createdAt: string;
+  /** 起動設定(環境変数・コマンド・引数)。pending_* は、適用前の変更(無ければ null)。 */
+  config: DeployConfig;
+  /** ボリュームのマウント。 */
+  volumes: DeployMounts;
+  /** サービス(ポートの公開)。作っていなければ null。 */
+  service: DeployService | null;
 }
 
 /** ログの取得の結果。nextSince を、次の since に渡す。 */
 export interface DeployLogChunk {
   logs: string;
   nextSince: number;
+}
+
+/** 起動設定。env・command・args は、常に3つセットで置き換える。command と args が null なら、イメージの既定を使う。 */
+export interface DeployConfig {
+  env: Record<string, string>;
+  pending_env: Record<string, string> | null;
+  command: string | null;
+  pending_command: string | null;
+  args: string[] | null;
+  pending_args: string[] | null;
+}
+
+/** ボリュームのマウント1つ。 */
+export interface Mount {
+  volumeId: string;
+  mountPath: string;
+}
+
+/** deploy のボリュームのマウント構成。 */
+export interface DeployMounts {
+  mounts: Mount[];
+  pending_mounts: Mount[] | null;
+}
+
+/** サービスのポート1つ。 */
+export interface ServicePort {
+  name: string;
+  port: number;
+  protocol: "tcp" | "udp";
+}
+
+/** サービスの状態(払い出しの状態。deploy の状態とは別)。 */
+export type ServiceStatus = "pending" | "active" | "failed" | "deleting";
+
+/** サービス(deploy に1つ)。 */
+export interface DeployService {
+  serviceId: string;
+  ports: ServicePort[];
+  pending_ports: ServicePort[] | null;
+  status: ServiceStatus;
+  dnsName: string | null;
+  clusterIP: string | null;
+}
+
+/** ingress の path ルール1つ。 */
+export interface IngressRule {
+  path: string;
+  serviceId: string;
+  port: number;
+}
+
+/** ingress の状態。 */
+export type IngressStatus = "applying" | "active" | "failed" | "deleting";
+
+/** ingress の一覧の1件。 */
+export interface IngressSummary {
+  ingressId: string;
+  host: string;
+}
+
+/** ingress の一覧の1ページ。 */
+export interface IngressPage {
+  ingresses: IngressSummary[];
+  nextCursor: string | null;
+}
+
+/** ingress の詳細。 */
+export interface Ingress {
+  ingressId: string;
+  host: string;
+  rules: IngressRule[];
+  pending_rules: IngressRule[] | null;
+  status: IngressStatus;
+}
+
+/** ボリュームの状態。 */
+export type VolumeStatus = "applying" | "active" | "failed" | "deleting";
+
+/** ボリュームの一覧の1件(詳細にある mountedBy は、一覧には無い)。 */
+export interface Volume {
+  volumeId: string;
+  name: string;
+  status: VolumeStatus;
+  sizeMB: number;
+  pending_sizeMB: number | null;
+  /** マウントしている deploy の ID(詳細だけ)。 */
+  mountedBy?: string[];
+}
+
+/** ボリュームの一覧の1ページ。 */
+export interface VolumePage {
+  volumes: Volume[];
+  nextCursor: string | null;
 }
