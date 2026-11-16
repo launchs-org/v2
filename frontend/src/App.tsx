@@ -8,9 +8,11 @@ import { RequireAuth } from "./auth/RequireAuth";
 import { Layout } from "./components/Layout";
 import { DeployPage } from "./pages/DeployPage";
 import { AuthForm } from "./pages/AuthForm";
+import { IngressPage } from "./pages/IngressPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { VolumePage } from "./pages/VolumePage";
 import { UsagePage } from "./pages/UsagePage";
 
 /**
@@ -31,6 +33,8 @@ export function App({ session, queryClient = createQueryClient() }: { session: A
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectPage />} />
               <Route path="/deploys/:deployId" element={<DeployPage />} />
+              <Route path="/projects/:projectId/ingresses/:ingressId" element={<IngressPage />} />
+              <Route path="/projects/:projectId/volumes/:volumeId" element={<VolumePage />} />
               <Route path="/usage" element={<UsagePage />} />
             </Route>
             <Route path="/" element={<Navigate to="/projects" replace />} />
