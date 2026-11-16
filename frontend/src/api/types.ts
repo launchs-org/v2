@@ -44,3 +44,54 @@ export interface CurrentUser {
   userId: string;
   userName: string;
 }
+
+/** deploy の状態。"停止"という状態は無く、replicas を 0 にすると scaled_zero になる。 */
+export type DeployStatus = "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" | "delete_failed";
+
+/** deploy の一覧の1件(GET /projects/:projectId/deploys)。 */
+export interface DeploySummary {
+  deployId: string;
+  status: DeployStatus;
+  spec: string;
+  replicas: number;
+  imageRef: string;
+  createdAt: string;
+}
+
+/** deploy の一覧の1ページ。nextCursor が null なら、最後のページ。 */
+export interface DeployPage {
+  deploys: DeploySummary[];
+  nextCursor: string | null;
+}
+
+/** 稼働中の Pod 1つ。 */
+export interface DeployPod {
+  podId: string;
+  status: string;
+}
+
+/** ログのある Pod 1つ(終了した Pod も含む)。 */
+export interface DeployLogPod {
+  podId: string;
+  running: boolean;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/** deploy の詳細(GET /deploy/:deployId)。この画面で使う項目だけを持つ(config などは、後の画面で足す)。 */
+export interface DeployDetail {
+  deployId: string;
+  status: DeployStatus;
+  spec: string;
+  replicas: number;
+  pods: DeployPod[];
+  logPods: DeployLogPod[];
+  imageRef: string;
+  createdAt: string;
+}
+
+/** ログの取得の結果。nextSince を、次の since に渡す。 */
+export interface DeployLogChunk {
+  logs: string;
+  nextSince: number;
+}
