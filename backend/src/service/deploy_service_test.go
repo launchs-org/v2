@@ -10,6 +10,7 @@ import (
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
+	"launchs/shared/pagination"
 	"launchs/shared/repository"
 )
 
@@ -37,6 +38,11 @@ func (fakeStore *fakeDeployStore) Create(_ context.Context, deploy *model.Deploy
 // FindByID は、固定の deploy を返す。
 func (fakeStore *fakeDeployStore) FindByID(_ context.Context, userID string, deployID string) (model.Deploy, error) {
 	return model.Deploy{ID: deployID, UserID: userID}, fakeStore.findError
+}
+
+// ListByProject は、何も返さない(一覧の振る舞いは、リポジトリと API のテストで確かめる)。
+func (fakeStore *fakeDeployStore) ListByProject(_ context.Context, _ string, _ string, _ int, _ *pagination.Position) ([]model.Deploy, *pagination.Position, error) {
+	return nil, nil, nil
 }
 
 // DeleteUnstarted は、取り消された ID を覚えて、決めたエラーを返す。
