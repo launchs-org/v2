@@ -323,3 +323,24 @@ func TestServiceAPIDeletesWithDeploy(testingT *testing.T) {
 		testingT.Errorf("service も消えるはず: %d", count)
 	}
 }
+
+// TestServiceAPIIncludedInDeployDetail は、deploy の詳細(GET /deploy/:deployId)に、service が含まれることを確認する。
+// 以前は、常に null を返していて、画面が「service が無い」と判断し、作成が 409 になっていた。
+func TestServiceAPIIncludedInDeployDetail(testingT *testing.T) {
+	testingT.Run("service が無ければ null、作ったあとは、その service(ID とポート)が入る", func(subTest *testing.T) {
+		// service を作る前の deploy の詳細を取る。
+		environment := newServiceTestEnvironment(subTest)
+		deployPath := "/deploy/" + environment.deployID
+		statusCode, body := environment.ownerClient.call(http.MethodGet, deployPath, "")
+		if statusCode != 200 || body["service"] != nil {
+			subTest.Fatalf("service は null のはず: %d %v", statusCode, body["service"])
+		}
+		// service を作ってから、もう一度、取る。
+		_, created := environment.ownerClient.call(http.MethodPost, environment.servicePath, webPorts)
+		statusCode, body = environment.ownerClient.call(http.MethodGet, deployPath, "")
+		embedded, isObject := body["service"].(map[string]any)
+		if statusCode != 200 || !isObject || embedded["serviceId"] != created["serviceId"] || embedded["status"] != "pending" {
+			subTest.Errorf("作った service が入るはず: %d %v", statusCode, body["service"])
+		}
+	})
+}
