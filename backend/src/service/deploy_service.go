@@ -4,6 +4,7 @@ import (
 	"context"
 	"launchs/shared/apperror"
 	"launchs/shared/model"
+	"launchs/shared/pagination"
 	"launchs/shared/repository"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ type DeployStore interface {
 	FindSpec(requestContext context.Context, specName string) (model.DeploySpec, error)
 	Create(requestContext context.Context, deploy *model.Deploy) error
 	FindByID(requestContext context.Context, userID string, deployID string) (model.Deploy, error)
+	ListByProject(requestContext context.Context, userID string, projectID string, limit int, after *pagination.Position) ([]model.Deploy, *pagination.Position, error)
 	DeleteUnstarted(requestContext context.Context, deployID string) error
 	SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error
 	DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error
