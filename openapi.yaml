@@ -1,0 +1,2933 @@
+openapi: 3.1.0
+info:
+  title: Launchs API
+  version: 1.0.0
+  description: |
+    Launchs の全 API 仕様書。
+    認証サービス (`/auth/...`)、バックエンド API (`/api/v1/...`)、および運用のヘルスチェックエンドポイントを含みます。
+    同一オリジンでリバースプロキシ (Traefik / Nginx) 経由でルーティングされます。
+
+servers:
+  - url: /
+    description: Current host (Reverse proxy root)
+
+tags:
+  - name: Health
+    description: 運用のための死活監視・ヘルスチェック
+  - name: Auth
+    description: 認証・アカウント登録・セッション管理
+  - name: Auth Admin
+    description: アカウント管理 (管理者専用)
+  - name: Projects
+    description: プロジェクト管理
+  - name: Builds
+    description: ソースコードのアップロードとコンテナイメージのビルド
+  - name: Deploys
+    description: デプロイ・スケール・ログ・起動設定
+  - name: Services
+    description: デプロイのポート公開 (Kubernetes Service)
+  - name: Ingresses
+    description: 外部公開ルーティング (Kubernetes Ingress)
+  - name: Volumes
+    description: 永続ストレージ (PersistentVolumeClaim)
+  - name: Quota
+    description: リソースクォータ・利用状況の確認と管理
+
+paths:
+  # ============================================================================
+  # Health
+  # ============================================================================
+  /healthz:
+    get:
+      summary: バックエンドヘルスチェック
+      description: バックエンドプロセスが稼働しているかを返します。認証は不要です。
+      tags: [Health]
+      responses:
+        '200':
+          description: 正常稼働中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/healthz:
+    get:
+      summary: 認証サービスヘルスチェック
+      description: 認証サービスプロセスが稼働しているかを返します。認証は不要です。
+      tags: [Health]
+      responses:
+        '200':
+          description: 正常稼働中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # ============================================================================
+  # Auth
+  # ============================================================================
+  /auth/config:
+    get:
+      summary: 認証公開設定取得
+      description: Cloudflare Turnstile などの公開設定を取得します。認証は不要です。
+      tags: [Auth]
+      responses:
+        '200':
+          description: 認証公開設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthConfigResponse'
+
+  /auth/signup:
+    post:
+      summary: サインアップ (ユーザー登録)
+      description: 新規アカウントを作成し、初期ログイン用の refresh token を返します。
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '200':
+          description: サインアップ成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: ユーザー名の重複
+          $ref: '#/components/responses/ConflictError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
+
+  /auth/login:
+    post:
+      summary: ログイン
+      description: ユーザー名とパスワードを検証し、refresh token を返します。
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          description: 認証失敗 (ユーザー不在、パスワード不一致、ロック中、BAN中など)
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
+
+  /auth/refresh:
+    post:
+      summary: アクセストークン取得 (リフレッシュ)
+      description: 有効な refresh token を用いて新しい access token を取得します。
+      tags: [Auth]
+      security:
+        - RefreshTokenAuth: []
+      responses:
+        '200':
+          description: アクセストークン発行成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/me:
+    get:
+      summary: 自分のアカウント情報取得
+      description: ログイン中のユーザー自身の情報を取得します。
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: ユーザー情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      summary: ログアウト
+      description: 現在のセッションの refresh token を無効化します。
+      tags: [Auth]
+      security:
+        - RefreshTokenAuth: []
+      responses:
+        '200':
+          description: ログアウト成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/login-history:
+    get:
+      summary: ログイン履歴取得
+      description: ログイン中のユーザーの直近のログイン履歴を取得します。
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: ログイン履歴一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginHistoryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/.well-known/jwks.json:
+    get:
+      summary: JWKS (公開鍵) 取得
+      description: Access Token の署名検証用公開鍵セット (JWKS) を返します。
+      tags: [Auth]
+      responses:
+        '200':
+          description: JWKS データ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JWKSResponse'
+
+  # ============================================================================
+  # Auth Admin
+  # ============================================================================
+  /auth/admin/users:
+    get:
+      summary: ユーザー一覧 (管理者)
+      description: 登録ユーザーの一覧を新しい順に取得します。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: ユーザー一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /auth/admin/users/{userId}:
+    get:
+      summary: ユーザー詳細 (管理者)
+      description: 指定したユーザーの詳細を取得します。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: ユーザー情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /auth/admin/users/{userId}/ban:
+    post:
+      summary: ユーザー停止 (管理者)
+      description: ユーザーを停止 (banned) にし、発行済み refresh token をすべて無効化します。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: 停止完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          description: 自分自身の停止など
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに停止中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /auth/admin/users/{userId}/unban:
+    post:
+      summary: ユーザー停止解除 (管理者)
+      description: ユーザーの停止状態を解除 (active) に戻します。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: 停止解除完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 停止中でない場合
+          $ref: '#/components/responses/ConflictError'
+
+  /auth/admin/users/{userId}/unlock:
+    post:
+      summary: ログインロック解除 (管理者)
+      description: ログイン試行失敗によるアカウントロックを解除します。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: ロック解除完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /auth/admin/invitations:
+    post:
+      summary: 招待コード発行 (管理者)
+      description: 招待制サインアップ用の招待コードを発行します。コードは発行レスポンスでのみ返されます。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvitationRequest'
+      responses:
+        '200':
+          description: 招待コード発行成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateInvitationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    get:
+      summary: 招待コード一覧 (管理者)
+      description: 発行済みの招待コード一覧を取得します (コード文字列自体は含まれません)。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: 招待コード一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /auth/admin/invitations/{invitationId}:
+    delete:
+      summary: 招待コード取り消し (管理者)
+      description: 有効な招待コードを取り消し (revoked) にします。
+      tags: [Auth Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: invitation-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+      responses:
+        '200':
+          description: 取り消し完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに無効 (使用済み、期限切れ、取り消し済み) の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Projects
+  # ============================================================================
+  /api/v1/projects:
+    post:
+      summary: プロジェクト作成
+      description: 新しいプロジェクトを作成します。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '200':
+          description: プロジェクト作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: プロジェクト名の重複
+          $ref: '#/components/responses/ConflictError'
+    get:
+      summary: プロジェクト一覧取得
+      description: 自分が所有するプロジェクト一覧を作成日時の降順で取得します。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: プロジェクト一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/projects/{projectId}:
+    get:
+      summary: プロジェクト詳細取得
+      description: プロジェクトの詳細情報を取得します。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: プロジェクト情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      summary: プロジェクト名変更
+      description: プロジェクトの名前を変更します。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: 変更完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: プロジェクト名の重複、またはプロジェクトが deleting / delete_failed
+          $ref: '#/components/responses/ConflictError'
+    delete:
+      summary: プロジェクト削除
+      description: |
+        プロジェクトを削除します。配下のビルド、デプロイ、ボリューム、Ingress、および Kubernetes namespace も非同期で削除されます。
+        即座に応答し、status は "deleting" となります。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: 削除受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに deleting 中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/builds:
+    get:
+      summary: プロジェクトのビルド履歴一覧
+      description: プロジェクトに属するビルド履歴を作成日時の降順で取得します。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: ビルド履歴一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/projects/{projectId}/deploys:
+    get:
+      summary: プロジェクトのデプロイ履歴一覧
+      description: プロジェクトに属するデプロイ履歴を作成日時の降順で取得します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: デプロイ履歴一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ============================================================================
+  # Builds & Upload
+  # ============================================================================
+  /api/v1/upload:
+    post:
+      summary: ソースコード zip アップロード
+      description: ソースコードの zip アーカイブをアップロードし、一時的な asset トークンを取得します (最大 100MB)。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: アップロード成功 (assetToken 発行)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          description: zip 形式として不正な場合
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '413':
+          description: 100MB を超過した場合
+          $ref: '#/components/responses/PayloadTooLargeError'
+
+  /api/v1/build:
+    post:
+      summary: ビルド開始
+      description: ソース (asset または git) からコンテナイメージのビルドを非同期で開始します。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBuildRequest'
+      responses:
+        '200':
+          description: ビルド受付完了
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBuildResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: プロジェクトが deleting 中
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/build/{buildId}:
+    get:
+      summary: ビルド状態取得
+      description: ビルドの進捗ステータスとイメージ参照を取得します。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BuildIdPath'
+      responses:
+        '200':
+          description: ビルド詳細情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/build/{buildId}/logs:
+    get:
+      summary: ビルドログ取得
+      description: ビルドの標準出力ログをポーリング取得します。since パラメータで差分のみ取得可能です。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BuildIdPath'
+        - name: since
+          in: query
+          required: false
+          description: 前回取得した nextSince の値。省略時は先頭から
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: ログデータ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildLogsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/build/{buildId}/cancel:
+    post:
+      summary: ビルドキャンセル
+      description: 実行中のビルドを中断・キャンセルします。
+      tags: [Builds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BuildIdPath'
+      responses:
+        '200':
+          description: キャンセル要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに終了またはキャンセル処理中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Deploys
+  # ============================================================================
+  /api/v1/deploy:
+    post:
+      summary: デプロイ作成 (コンテナ起動)
+      description: イメージ参照とスペックを指定して新しいデプロイを作成します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeployRequest'
+      responses:
+        '200':
+          description: デプロイ作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateDeployResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: クォータ上限超過、またはプロジェクトが deleting 中
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}:
+    get:
+      summary: デプロイ詳細取得
+      description: デプロイのステータス、稼働中 Pod、未反映の変更 (pending)、マウント、Service 情報を一括取得します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: デプロイ詳細情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      summary: デプロイ削除
+      description: デプロイと関連する Pod、Service を削除します (ボリュームは残ります)。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 削除要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 削除中または反映中のため操作不能
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/scale:
+    post:
+      summary: デプロイスケール
+      description: デプロイの希望レプリカ数を変更します (0〜5)。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleDeployRequest'
+      responses:
+        '200':
+          description: スケール要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中・削除中・またはクォータ上限超過
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/logs:
+    get:
+      summary: デプロイログ取得
+      description: 指定した Pod の標準出力・標準エラーログをポーリング取得します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+        - name: podId
+          in: query
+          required: true
+          description: ログ対象の Pod ID
+          schema:
+            type: string
+            example: pod-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        - name: since
+          in: query
+          required: false
+          description: 前回取得した nextSince の値。省略時は最新ログ
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: ログデータ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployLogsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deploy/{deployId}/config:
+    get:
+      summary: 起動設定取得
+      description: 環境変数、コマンド、引数の現在値と未反映 (pending) の値を取得します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 起動設定情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployConfigResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: 起動設定の下書き保存 (ステージング)
+      description: 環境変数、コマンド、引数の変更を下書き (pending) として保存します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeployConfigRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/config/apply:
+    post:
+      summary: 起動設定の適用
+      description: 下書き (pending) にある起動設定を Pod に反映させます。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、またはすでに反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/config/discard:
+    post:
+      summary: 起動設定の下書き破棄
+      description: 下書き (pending) の起動設定を破棄します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 破棄完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/mounts:
+    get:
+      summary: ボリュームマウント一覧取得
+      description: デプロイにマウントされているボリューム一覧と未反映 (pending) の設定を取得します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: マウント一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployMountsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: ボリュームマウントの下書き保存
+      description: ボリュームマウントの変更を下書き (pending) として保存します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeployMountsRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/mounts/apply:
+    post:
+      summary: ボリュームマウントの適用
+      description: 下書き (pending) のマウント設定を Pod に反映させます。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、またはすでに反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/mounts/discard:
+    post:
+      summary: ボリュームマウントの下書き破棄
+      description: 下書き (pending) のマウント設定を破棄します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 破棄完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Services
+  # ============================================================================
+  /api/v1/deploy/{deployId}/service:
+    post:
+      summary: Service 作成 (ポート公開)
+      description: デプロイの公開ポートを定義する Service を作成します。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '200':
+          description: Service 作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateServiceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに Service が存在する場合
+          $ref: '#/components/responses/ConflictError'
+    get:
+      summary: Service 詳細取得
+      description: デプロイに紐づく Service のポート定義、クラスタ内 DNS、IP 等を取得します。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: Service 詳細情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      summary: Service 削除
+      description: デプロイの Service を削除します (Ingress から参照されている場合は削除不可)。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 削除要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: Ingress から参照されている場合
+          $ref: '#/components/responses/ConflictError'
+    patch:
+      summary: Service ポート定義の下書き保存
+      description: Service のポート定義の変更を下書き (pending) として保存します。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateServicePortsRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/service/apply:
+    post:
+      summary: Service ポート定義の適用
+      description: 下書き (pending) のポート定義を Kubernetes Service に反映させます。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、またはすでに反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/service/discard:
+    post:
+      summary: Service ポート定義の下書き破棄
+      description: 下書き (pending) のポート定義を破棄します。
+      tags: [Services]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 破棄完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Ingresses
+  # ============================================================================
+  /api/v1/projects/{projectId}/ingresses:
+    post:
+      summary: Ingress 作成
+      description: プロジェクトに外部からのアクセスを受け付ける Ingress を作成します (ホスト名は自動払い出し)。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: Ingress 作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIngressResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: プロジェクトが deleting 中
+          $ref: '#/components/responses/ConflictError'
+    get:
+      summary: Ingress 一覧取得
+      description: プロジェクトに属する Ingress 一覧を作成日時の降順で取得します。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: Ingress 一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngressListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/projects/{projectId}/ingresses/{ingressId}:
+    get:
+      summary: Ingress 詳細取得
+      description: Ingress のホスト名、ルーティングルール、未反映のルール (pending) を取得します。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IngressIdPath'
+      responses:
+        '200':
+          description: Ingress 詳細情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngressDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: Ingress ルール定義の下書き保存
+      description: パスごとの転送先 Service / Port ルールを下書き (pending) として保存します。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IngressIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIngressRulesRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+    delete:
+      summary: Ingress 削除
+      description: Ingress を削除します。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IngressIdPath'
+      responses:
+        '200':
+          description: 削除要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: すでに削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/ingresses/{ingressId}/apply:
+    post:
+      summary: Ingress ルール定義の適用
+      description: 下書き (pending) のルーティングルールを Kubernetes Ingress に反映させます。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IngressIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、またはすでに反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/ingresses/{ingressId}/discard:
+    post:
+      summary: Ingress ルール定義の下書き破棄
+      description: 下書き (pending) のルーティングルールを破棄します。
+      tags: [Ingresses]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IngressIdPath'
+      responses:
+        '200':
+          description: 破棄完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Volumes
+  # ============================================================================
+  /api/v1/projects/{projectId}/volumes:
+    post:
+      summary: ボリューム作成
+      description: プロジェクトに永続ストレージ (PersistentVolumeClaim) を作成します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVolumeRequest'
+      responses:
+        '200':
+          description: ボリューム作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateVolumeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 名前重複、クォータ上限超過、またはプロジェクトが deleting 中
+          $ref: '#/components/responses/ConflictError'
+    get:
+      summary: ボリューム一覧取得
+      description: プロジェクトに属するボリューム一覧を作成日時の降順で取得します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: ボリューム一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/projects/{projectId}/volumes/{volumeId}:
+    get:
+      summary: ボリューム詳細取得
+      description: ボリュームのステータス、容量 (MB)、未反映の拡大容量 (pending) を取得します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      responses:
+        '200':
+          description: ボリューム詳細情報
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      summary: ボリューム名変更 (即時反映)
+      description: ボリュームの名前を変更します (即時反映)。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameVolumeRequest'
+      responses:
+        '200':
+          description: 変更完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 名前重複または削除中
+          $ref: '#/components/responses/ConflictError'
+    delete:
+      summary: ボリューム削除
+      description: ボリュームを削除します (現在 Pod にマウント中の場合は削除不可)。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      responses:
+        '200':
+          description: 削除要求受付完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: マウント中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/volumes/{volumeId}/size:
+    patch:
+      summary: ボリューム拡張の下書き保存 (pending 保存)
+      description: ボリューム容量の拡大を下書き (pending) として保存します (縮小は不可)。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResizeVolumeRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          description: 容量縮小または上限超過
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: クォータ超過、または反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/volumes/{volumeId}/apply:
+    post:
+      summary: ボリューム容量拡大の適用
+      description: 下書き (pending) にあるボリューム容量拡大を Kubernetes PVC に反映させます。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、またはすでに反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/projects/{projectId}/volumes/{volumeId}/discard:
+    post:
+      summary: ボリューム容量拡大の下書き破棄
+      description: 下書き (pending) にあるボリューム容量拡大設定を破棄します。
+      tags: [Volumes]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/VolumeIdPath'
+      responses:
+        '200':
+          description: 破棄完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  # ============================================================================
+  # Quota
+  # ============================================================================
+  /api/v1/quota:
+    get:
+      summary: 自分のクォータとリソース使用量取得
+      description: ログイン中ユーザーのリソース上限 (projects, deploys, volumes, spec制限等) と現在の使用量を取得します。
+      tags: [Quota]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: クォータと使用量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/admin/users/{userId}/quota:
+    get:
+      summary: ユーザーのクォータ上限取得 (管理者)
+      description: 指定したユーザーに割り当てられているリソース上限値を取得します。
+      tags: [Quota]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      responses:
+        '200':
+          description: ユーザーのクォータ設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserQuotaResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: ユーザーのクォータ上限変更 (管理者)
+      description: 指定したユーザーのリソース上限値を更新します。
+      tags: [Quota]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserQuotaRequest'
+      responses:
+        '200':
+          description: 更新完了
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+# ==============================================================================
+# Components
+# ==============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Access Token (有効期限15分、ヘッダ Authorization: Bearer <accessToken>)"
+    RefreshTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Refresh Token (`/auth/refresh` や `/auth/logout` に使用)
+
+  parameters:
+    ProjectIdPath:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+    DeployIdPath:
+      name: deployId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: deploy-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+    BuildIdPath:
+      name: buildId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: build-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+    IngressIdPath:
+      name: ingressId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: ingress-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+    VolumeIdPath:
+      name: volumeId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: volume-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+    UserIdPath:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: 取得件数 (1〜100、デフォルト 20)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+        example: 20
+    CursorQuery:
+      name: cursor
+      in: query
+      required: false
+      description: ページング用カーソル (前回の nextCursor)
+      schema:
+        type: string
+        nullable: true
+
+  responses:
+    BadRequestError:
+      description: リクエストの形式やパラメータが不正
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    UnauthorizedError:
+      description: 認証失敗またはトークン期限切れ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ForbiddenError:
+      description: 操作権限がない (管理者でないなど)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    NotFoundError:
+      description: 対象リソースが存在しない、または他ユーザーのリソース
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ConflictError:
+      description: 競合・状態不整合 (排他制御中、名前重複、上限超過など)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    PayloadTooLargeError:
+      description: アップロードサイズが上限超過 (100MB超)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    TooManyRequestsError:
+      description: レートリミット制限
+      headers:
+        Retry-After:
+          description: 再試行可能になるまでの秒数
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ServiceUnavailableError:
+      description: 外部サービス接続不可など一時的エラー
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+
+  schemas:
+    # --------------------------------------------------------------------------
+    # Common
+    # --------------------------------------------------------------------------
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ApiErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_request
+                - unauthorized
+                - forbidden
+                - not_found
+                - conflict
+                - payload_too_large
+                - too_many_requests
+                - internal_error
+                - service_unavailable
+              example: not_found
+            message:
+              type: string
+              example: resource not found
+
+    # --------------------------------------------------------------------------
+    # Auth Schemas
+    # --------------------------------------------------------------------------
+    AuthConfigResponse:
+      type: object
+      required: [turnstile]
+      properties:
+        turnstile:
+          type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+              example: true
+            siteKey:
+              type: string
+              example: 0x4AAAAAAAx...
+
+    SignupRequest:
+      type: object
+      required: [userName, password]
+      properties:
+        userName:
+          type: string
+          pattern: '^[a-zA-Z0-9-]{1,64}$'
+          example: alice
+        password:
+          type: string
+          minLength: 12
+          example: CorrectHorseBatteryStaple123
+        invitationCode:
+          type: string
+          description: 招待制モードのときに必須
+          example: opIJOdrJssFhh9J1KslFxIttdk8qVSWx7tXcrkaQBu8
+        turnstileToken:
+          type: string
+          description: Turnstile 有効時に必須
+          example: 0.abcdef...
+
+    LoginRequest:
+      type: object
+      required: [userName, password]
+      properties:
+        userName:
+          type: string
+          example: alice
+        password:
+          type: string
+          example: CorrectHorseBatteryStaple123
+        turnstileToken:
+          type: string
+          description: Turnstile 有効時に必須
+          example: 0.abcdef...
+
+    AuthTokenResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: JWT トークン (signup/login 時は refreshToken、refresh 時は accessToken)
+          example: eyJhbGciOiJFZERTQ...
+
+    User:
+      type: object
+      required: [userId, userName, status, role, createdAt]
+      properties:
+        userId:
+          type: string
+          example: userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8
+        userName:
+          type: string
+          example: alice
+        status:
+          type: string
+          enum: [active, banned]
+          example: active
+        role:
+          type: string
+          enum: [user, admin]
+          example: user
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-15T20:38:25+09:00"
+
+    LoginHistoryItem:
+      type: object
+      required: [historyId, ip, userAgent, createdAt]
+      properties:
+        historyId:
+          type: string
+          example: loginhistory-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        ip:
+          type: string
+          example: 192.0.2.1
+        userAgent:
+          type: string
+          example: Mozilla/5.0...
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-15T20:38:25+09:00"
+
+    LoginHistoryResponse:
+      type: object
+      required: [history, nextCursor]
+      properties:
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoginHistoryItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    JWKSResponse:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, crv, x, kid, use, alg]
+            properties:
+              kty:
+                type: string
+                example: OKP
+              crv:
+                type: string
+                example: Ed25519
+              x:
+                type: string
+                example: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo
+              kid:
+                type: string
+                example: auth-key-2026-11
+              use:
+                type: string
+                example: sig
+              alg:
+                type: string
+                example: EdDSA
+
+    # --------------------------------------------------------------------------
+    # Auth Admin Schemas
+    # --------------------------------------------------------------------------
+    AdminUserListResponse:
+      type: object
+      required: [users, nextCursor]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    CreateInvitationRequest:
+      type: object
+      properties:
+        expiresInHours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          default: 168
+          example: 24
+        note:
+          type: string
+          maxLength: 200
+          example: for carol
+
+    CreateInvitationResponse:
+      type: object
+      required: [invitationId, code, expiresAt]
+      properties:
+        invitationId:
+          type: string
+          example: invitation-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        code:
+          type: string
+          example: opIJOdrJssFhh9J1KslFxIttdk8qVSWx7tXcrkaQBu8
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-11-16T20:38:26+09:00"
+
+    InvitationListItem:
+      type: object
+      required: [invitationId, note, status, createdBy, createdAt, expiresAt]
+      properties:
+        invitationId:
+          type: string
+          example: invitation-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        note:
+          type: string
+          example: for carol
+        status:
+          type: string
+          enum: [active, used, expired, revoked]
+          example: active
+        createdBy:
+          type: string
+          example: userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-11-15T20:38:26+09:00"
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-11-16T20:38:26+09:00"
+        usedBy:
+          type: string
+          nullable: true
+          example: null
+        usedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    InvitationListResponse:
+      type: object
+      required: [invitations, nextCursor]
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvitationListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    # --------------------------------------------------------------------------
+    # Project Schemas
+    # --------------------------------------------------------------------------
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9-]{1,64}$'
+          example: my-app
+
+    CreateProjectResponse:
+      type: object
+      required: [projectId]
+      properties:
+        projectId:
+          type: string
+          example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+
+    UpdateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9-]{1,64}$'
+          example: my-app-renamed
+
+    Project:
+      type: object
+      required: [projectId, name, status]
+      properties:
+        projectId:
+          type: string
+          example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: my-app
+        status:
+          type: string
+          enum: [active, deleting, delete_failed]
+          example: active
+
+    ProjectListResponse:
+      type: object
+      required: [projects, nextCursor]
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    # --------------------------------------------------------------------------
+    # Build Schemas
+    # --------------------------------------------------------------------------
+    UploadResponse:
+      type: object
+      required: [assetsToken]
+      properties:
+        assetsToken:
+          type: string
+          description: 30分間有効なアップロードアセットトークン
+          example: eyJhbGciOiJIUzUxMiIsInR5c...
+
+    CreateBuildRequest:
+      type: object
+      required: [projectId, sourceType, buildMethod]
+      properties:
+        projectId:
+          type: string
+          example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        sourceType:
+          type: string
+          enum: [asset, git]
+          example: asset
+        asset:
+          type: object
+          properties:
+            assetsToken:
+              type: string
+              example: eyJhbGciOiJIUzUxMiIsInR5c...
+        git:
+          type: object
+          properties:
+            repoUrl:
+              type: string
+              example: https://github.com/user/repo.git
+            ref:
+              type: string
+              example: main
+        buildTargetDirectory:
+          type: string
+          description: リポジトリ内のビルド対象ディレクトリ (省略時はルート)
+          example: packages/api
+        buildMethod:
+          type: string
+          enum: [dockerfile, railpack]
+          example: dockerfile
+
+    CreateBuildResponse:
+      type: object
+      required: [buildId, imageRef]
+      properties:
+        buildId:
+          type: string
+          example: build-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+
+    BuildListItem:
+      type: object
+      required: [buildId, status, imageRef, createdAt]
+      properties:
+        buildId:
+          type: string
+          example: build-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        status:
+          type: string
+          enum: [pending, running, canceling, success, failed, canceled]
+          example: success
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-16T09:00:00+09:00"
+
+    BuildListResponse:
+      type: object
+      required: [builds, nextCursor]
+      properties:
+        builds:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuildListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    BuildDetail:
+      type: object
+      required: [buildId, status, imageRef]
+      properties:
+        buildId:
+          type: string
+          example: build-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        status:
+          type: string
+          enum: [pending, running, canceling, success, failed, canceled]
+          example: running
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+
+    BuildLogsResponse:
+      type: object
+      required: [logs, nextSince]
+      properties:
+        logs:
+          type: string
+          example: "Step 1/5 : FROM golang:1.27\n..."
+        nextSince:
+          type: integer
+          example: 256
+
+    # --------------------------------------------------------------------------
+    # Deploy Schemas
+    # --------------------------------------------------------------------------
+    CreateDeployRequest:
+      type: object
+      required: [projectId, imageRef, spec]
+      properties:
+        projectId:
+          type: string
+          example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+        spec:
+          type: string
+          enum: [small, medium, large]
+          example: small
+
+    CreateDeployResponse:
+      type: object
+      required: [deployId]
+      properties:
+        deployId:
+          type: string
+          example: deploy-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+
+    ScaleDeployRequest:
+      type: object
+      required: [replicas]
+      properties:
+        replicas:
+          type: integer
+          minimum: 0
+          maximum: 5
+          example: 2
+
+    PodInfo:
+      type: object
+      required: [podId, status]
+      properties:
+        podId:
+          type: string
+          example: pod-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        status:
+          type: string
+          example: running
+
+    LogPodInfo:
+      type: object
+      required: [podId, running, startedAt]
+      properties:
+        podId:
+          type: string
+          example: pod-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        running:
+          type: boolean
+          example: true
+        startedAt:
+          type: string
+          format: date-time
+          example: "2026-09-16T09:00:00+09:00"
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    DeployListItem:
+      type: object
+      required: [deployId, status, spec, replicas, imageRef, createdAt]
+      properties:
+        deployId:
+          type: string
+          example: deploy-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        status:
+          type: string
+          enum: [pending, creating, active, applying, scaling, failed, deleting, delete_failed]
+          example: active
+        spec:
+          type: string
+          enum: [small, medium, large]
+          example: small
+        replicas:
+          type: integer
+          example: 1
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-16T09:00:00+09:00"
+
+    DeployListResponse:
+      type: object
+      required: [deploys, nextCursor]
+      properties:
+        deploys:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeployListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    DeployConfigData:
+      type: object
+      required: [env, pending_env, command, pending_command, args, pending_args]
+      properties:
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            PORT: "8080"
+            DATABASE_URL: "postgres://..."
+        pending_env:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          example: null
+        command:
+          type: string
+          nullable: true
+          example: /app/server
+        pending_command:
+          type: string
+          nullable: true
+          example: null
+        args:
+          type: array
+          nullable: true
+          items:
+            type: string
+          example: ["--config", "/app/config.yaml"]
+        pending_args:
+          type: array
+          nullable: true
+          items:
+            type: string
+          example: null
+
+    MountItem:
+      type: object
+      required: [volumeId, mountPath]
+      properties:
+        volumeId:
+          type: string
+          example: volume-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        mountPath:
+          type: string
+          example: /data
+
+    DeployMountsData:
+      type: object
+      required: [mounts, pending_mounts]
+      properties:
+        mounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MountItem'
+        pending_mounts:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/MountItem'
+
+    DeployDetail:
+      type: object
+      required:
+        - deployId
+        - projectId
+        - status
+        - spec
+        - replicas
+        - pods
+        - logPods
+        - imageRef
+        - createdAt
+        - config
+        - volumes
+      properties:
+        deployId:
+          type: string
+          example: deploy-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        projectId:
+          type: string
+          example: project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        status:
+          type: string
+          enum: [pending, creating, active, applying, scaling, failed, deleting, delete_failed]
+          example: active
+        spec:
+          type: string
+          enum: [small, medium, large]
+          example: small
+        replicas:
+          type: integer
+          example: 1
+        pods:
+          type: array
+          items:
+            $ref: '#/components/schemas/PodInfo'
+        logPods:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogPodInfo'
+        imageRef:
+          type: string
+          example: registry.launchs-org.internal/project-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b:build-6f1c2a3e
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-16T09:00:00+09:00"
+        config:
+          $ref: '#/components/schemas/DeployConfigData'
+        volumes:
+          $ref: '#/components/schemas/DeployMountsData'
+        service:
+          nullable: true
+          $ref: '#/components/schemas/ServiceInfo'
+
+    DeployLogsResponse:
+      type: object
+      required: [logs, nextSince]
+      properties:
+        logs:
+          type: string
+          example: "2026-09-16T09:00:01+09:00 server started on :8080\n"
+        nextSince:
+          type: integer
+          example: 128
+
+    DeployConfigResponse:
+      type: object
+      required: [config]
+      properties:
+        config:
+          $ref: '#/components/schemas/DeployConfigData'
+
+    UpdateDeployConfigRequest:
+      type: object
+      required: [env]
+      properties:
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            PORT: "8081"
+        command:
+          type: string
+          nullable: true
+          example: /app/start
+        args:
+          type: array
+          nullable: true
+          items:
+            type: string
+          example: ["--production"]
+
+    DeployMountsResponse:
+      type: object
+      required: [mounts]
+      properties:
+        mounts:
+          $ref: '#/components/schemas/DeployMountsData'
+
+    UpdateDeployMountsRequest:
+      type: object
+      required: [mounts]
+      properties:
+        mounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MountItem'
+
+    # --------------------------------------------------------------------------
+    # Service Schemas
+    # --------------------------------------------------------------------------
+    ServicePort:
+      type: object
+      required: [name, port, protocol]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9-]{1,15}$'
+          example: web
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 8080
+        protocol:
+          type: string
+          enum: [tcp, udp]
+          example: tcp
+
+    CreateServiceRequest:
+      type: object
+      required: [ports]
+      properties:
+        ports:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ServicePort'
+
+    CreateServiceResponse:
+      type: object
+      required: [serviceId]
+      properties:
+        serviceId:
+          type: string
+          example: service-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+
+    UpdateServicePortsRequest:
+      type: object
+      required: [ports]
+      properties:
+        ports:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ServicePort'
+
+    ServiceInfo:
+      type: object
+      required: [serviceId, ports, pending_ports, status, dnsName, clusterIP]
+      properties:
+        serviceId:
+          type: string
+          example: service-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        ports:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServicePort'
+        pending_ports:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ServicePort'
+        status:
+          type: string
+          enum: [active, applying, deleting]
+          example: active
+        dnsName:
+          type: string
+          example: web.svc.cluster.local
+        clusterIP:
+          type: string
+          example: 10.43.12.7
+
+    # --------------------------------------------------------------------------
+    # Ingress Schemas
+    # --------------------------------------------------------------------------
+    CreateIngressResponse:
+      type: object
+      required: [ingressId, host]
+      properties:
+        ingressId:
+          type: string
+          example: ingress-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        host:
+          type: string
+          example: red-fox-12.launchs.example.com
+
+    IngressRule:
+      type: object
+      required: [path, serviceId, port]
+      properties:
+        path:
+          type: string
+          pattern: '^/.*'
+          example: /api
+        serviceId:
+          type: string
+          example: service-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        port:
+          type: integer
+          example: 8080
+
+    UpdateIngressRulesRequest:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngressRule'
+
+    IngressListItem:
+      type: object
+      required: [ingressId, host]
+      properties:
+        ingressId:
+          type: string
+          example: ingress-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        host:
+          type: string
+          example: red-fox-12.launchs.example.com
+
+    IngressListResponse:
+      type: object
+      required: [ingresses, nextCursor]
+      properties:
+        ingresses:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngressListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    IngressDetail:
+      type: object
+      required: [ingressId, host, rules, pending_rules, status]
+      properties:
+        ingressId:
+          type: string
+          example: ingress-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        host:
+          type: string
+          example: red-fox-12.launchs.example.com
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngressRule'
+        pending_rules:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/IngressRule'
+        status:
+          type: string
+          enum: [active, applying, deleting]
+          example: active
+
+    # --------------------------------------------------------------------------
+    # Volume Schemas
+    # --------------------------------------------------------------------------
+    CreateVolumeRequest:
+      type: object
+      required: [name, sizeMB]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9-]{1,64}$'
+          example: db-data
+        sizeMB:
+          type: integer
+          minimum: 1024
+          example: 1024
+
+    CreateVolumeResponse:
+      type: object
+      required: [volumeId]
+      properties:
+        volumeId:
+          type: string
+          example: volume-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+
+    RenameVolumeRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9-]{1,64}$'
+          example: db-data-renamed
+
+    ResizeVolumeRequest:
+      type: object
+      required: [sizeMB]
+      properties:
+        sizeMB:
+          type: integer
+          description: 現在の容量より大きい値を指定 (縮小不可、pending 保存)
+          minimum: 1024
+          example: 2048
+
+    VolumeListItem:
+      type: object
+      required: [volumeId, name, status, sizeMB, pending_sizeMB]
+      properties:
+        volumeId:
+          type: string
+          example: volume-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: db-data
+        status:
+          type: string
+          enum: [active, creating, applying, deleting]
+          example: active
+        sizeMB:
+          type: integer
+          example: 1024
+        pending_sizeMB:
+          type: integer
+          nullable: true
+          example: null
+
+    VolumeListResponse:
+      type: object
+      required: [volumes, nextCursor]
+      properties:
+        volumes:
+          type: array
+          items:
+            $ref: '#/components/schemas/VolumeListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
+
+    VolumeDetail:
+      type: object
+      required: [volumeId, name, status, sizeMB, pending_sizeMB]
+      properties:
+        volumeId:
+          type: string
+          example: volume-6f1c2a3e-8b4d-4e5f-9a1b-2c3d4e5f6a7b
+        name:
+          type: string
+          example: db-data
+        status:
+          type: string
+          enum: [active, creating, applying, deleting]
+          example: active
+        sizeMB:
+          type: integer
+          example: 1024
+        pending_sizeMB:
+          type: integer
+          nullable: true
+          example: null
+
+    # --------------------------------------------------------------------------
+    # Quota Schemas
+    # --------------------------------------------------------------------------
+    QuotaUsageItem:
+      type: object
+      required: [used, limit]
+      properties:
+        used:
+          type: integer
+          example: 3
+        limit:
+          type: integer
+          example: 10
+
+    QuotaResponse:
+      type: object
+      required:
+        - maxReplicasPerDeploy
+        - maxVolumeSizeMB
+        - projects
+        - deploys
+        - volumes
+        - volumeTotalMB
+        - specs
+      properties:
+        maxReplicasPerDeploy:
+          type: integer
+          example: 5
+        maxVolumeSizeMB:
+          type: integer
+          example: 10240
+        projects:
+          $ref: '#/components/schemas/QuotaUsageItem'
+        deploys:
+          $ref: '#/components/schemas/QuotaUsageItem'
+        volumes:
+          $ref: '#/components/schemas/QuotaUsageItem'
+        volumeTotalMB:
+          $ref: '#/components/schemas/QuotaUsageItem'
+        specs:
+          type: object
+          properties:
+            small:
+              $ref: '#/components/schemas/QuotaUsageItem'
+            medium:
+              $ref: '#/components/schemas/QuotaUsageItem'
+            large:
+              $ref: '#/components/schemas/QuotaUsageItem'
+
+    AdminUserQuotaResponse:
+      type: object
+      required:
+        - maxProjects
+        - maxDeploys
+        - maxVolumes
+        - maxVolumeTotalMB
+        - maxReplicasPerDeploy
+        - maxVolumeSizeMB
+        - specs
+      properties:
+        maxProjects:
+          type: integer
+          example: 10
+        maxDeploys:
+          type: integer
+          example: 20
+        maxVolumes:
+          type: integer
+          example: 10
+        maxVolumeTotalMB:
+          type: integer
+          example: 51200
+        maxReplicasPerDeploy:
+          type: integer
+          example: 5
+        maxVolumeSizeMB:
+          type: integer
+          example: 10240
+        specs:
+          type: object
+          properties:
+            small:
+              type: integer
+              example: 10
+            medium:
+              type: integer
+              example: 5
+            large:
+              type: integer
+              example: 2
+
+    AdminUpdateUserQuotaRequest:
+      type: object
+      properties:
+        maxProjects:
+          type: integer
+          example: 10
+        maxDeploys:
+          type: integer
+          example: 20
+        maxVolumes:
+          type: integer
+          example: 10
+        maxVolumeTotalMB:
+          type: integer
+          example: 51200
+        specs:
+          type: object
+          properties:
+            small:
+              type: integer
+              example: 10
+            medium:
+              type: integer
+              example: 5
+            large:
+              type: integer
+              example: 2
