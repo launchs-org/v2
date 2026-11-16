@@ -4,6 +4,7 @@ import (
 	"context"
 	"launchs/backend/src/middlewares"
 	"launchs/shared/model"
+	"launchs/shared/pagination"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -15,6 +16,7 @@ import (
 type DeployUseCase interface {
 	Create(requestContext context.Context, userID string, projectID string, imageRef string, specName string) (string, error)
 	Get(requestContext context.Context, userID string, deployID string) (model.Deploy, error)
+	List(requestContext context.Context, userID string, projectID string, limit int, after *pagination.Position) ([]model.Deploy, *pagination.Position, error)
 	ListPods(requestContext context.Context, userID string, deployID string) ([]model.DeployPod, error)
 	UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error
 	DiscardConfig(requestContext context.Context, userID string, deployID string) error

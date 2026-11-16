@@ -92,6 +92,8 @@
     {
       "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       "status": "active",
+      "spec": "small",
+      "replicas": 1,
       "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
       "createdAt": "2026-09-16T09:00:00+09:00"
     }
@@ -99,6 +101,7 @@
   "nextCursor": null
 }
 ```
+- Note: `spec`(スペックの名前)と `replicas`(希望するレプリカ数)も返す(一覧で、deploy の大きさが分かるように)。起動設定(環境変数など)や、Pod の状態は、含まない([デプロイ詳細取得](deploys.md#デプロイ詳細取得) で取る)
 - Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
 - Note: deploy は削除が完了するとレコードごと消えるため、削除済みの deploy は含まれない。削除中(status が "deleting")のものは含まれる(仮)
 
