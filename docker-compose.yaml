@@ -237,6 +237,9 @@ services:
   nginx-certificate:
     image: alpine/openssl:3.5.9
     entrypoint: ["/bin/sh", "/dev-nginx/generate-certificate.sh"]
+    environment:
+      # 証明書を有効にする、追加の IP(公開するアドレス。127.0.0.1 は、いつも含める)。
+      CERTIFICATE_EXTRA_IP: ${HTTPS_BIND_ADDRESS:-127.0.0.1}
     volumes:
       - ./dev/nginx:/dev-nginx:ro
       - nginx-certificates:/certs
@@ -255,8 +258,9 @@ services:
         condition: service_started
     ports:
       # 手元から呼ぶためのポート。他のものと重なることがあるので、既定は 18443 にして、
-      # HTTPS_HOST_PORT で変えられるようにしてある。
-      - "127.0.0.1:${HTTPS_HOST_PORT:-18443}:443"
+      # HTTPS_HOST_PORT で変えられるようにしてある。公開するアドレスは、既定は手元だけ(127.0.0.1)。
+      # 別のアドレスで公開するときは、.env に HTTPS_BIND_ADDRESS=<ホストの IP> を書く(証明書も、その IP で有効になる)。
+      - "${HTTPS_BIND_ADDRESS:-127.0.0.1}:${HTTPS_HOST_PORT:-18443}:443"
     volumes:
       - ./dev/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx-certificates:/etc/nginx/certs:ro
