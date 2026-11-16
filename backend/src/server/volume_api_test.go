@@ -410,6 +410,25 @@ func TestDeployMountsAPI(testingT *testing.T) {
 			subTest.Errorf("現在と同じ内容なら pending は null のはず: %v", same)
 		}
 	})
+	testingT.Run("deploy の詳細にも、mounts と pending_mounts が入る(以前は、常に空で、画面が適用ボタンを出せなかった)", func(subTest *testing.T) {
+		// 保存する前の詳細は、mounts が空の配列、pending_mounts が null。
+		environment := newVolumeTestEnvironment(subTest)
+		volumeID := createVolume(environment, "a", 10)
+		_, before := environment.ownerClient.call(http.MethodGet, "/deploy/"+environment.deployID, "")
+		beforeVolumes, _ := before["volumes"].(map[string]any)
+		if beforeVolumes["pending_mounts"] != nil {
+			subTest.Fatalf("保存前は pending_mounts が null のはず: %v", beforeVolumes)
+		}
+		// 保存したあとの詳細は、pending_mounts に、その内容が入る。
+		body := fmt.Sprintf(`{"mounts":[{"volumeId":"%s","mountPath":"/data"}]}`, volumeID)
+		environment.ownerClient.call(http.MethodPut, "/deploy/"+environment.deployID+"/mounts", body)
+		_, after := environment.ownerClient.call(http.MethodGet, "/deploy/"+environment.deployID, "")
+		afterVolumes, _ := after["volumes"].(map[string]any)
+		pending, _ := afterVolumes["pending_mounts"].([]any)
+		if len(pending) != 1 {
+			subTest.Errorf("保存した内容が pending_mounts に入るはず: %v", afterVolumes)
+		}
+	})
 	testingT.Run("入力が不正なら 400(保存されない)", func(subTest *testing.T) {
 		environment := newVolumeTestEnvironment(subTest)
 		volumeID := createVolume(environment, "a", 10)
