@@ -7,6 +7,7 @@ import { ApiError } from "../api/api_error";
 import { deleteProject, getProject, renameProject } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DeploysSection } from "../components/DeploysSection";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageHeader } from "../components/PageHeader";
 import { Alert } from "../components/ui/alert";
@@ -114,6 +115,8 @@ export function ProjectPage() {
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-6">
+          <DeploysSection projectId={data.projectId} projectName={data.name} canCreate={editable} />
+
           <Card>
             <CardHeader>
               <CardTitle>名前の変更</CardTitle>
@@ -163,7 +166,7 @@ export function ProjectPage() {
               <dt className="text-muted-foreground">k8s の namespace</dt>
               <dd><code className="break-all font-mono text-xs">{data.projectId}</code></dd>
             </dl>
-            <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">deploy、ingress、volume の画面は、これから追加します。</p>
+            <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">ingress、volume の画面は、これから追加します。</p>
           </CardContent>
         </Card>
       </div>

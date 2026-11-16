@@ -6,6 +6,7 @@ import type { AuthSession } from "./auth/auth_session";
 import { AuthProvider } from "./auth/AuthProvider";
 import { RequireAuth } from "./auth/RequireAuth";
 import { Layout } from "./components/Layout";
+import { DeployPage } from "./pages/DeployPage";
 import { AuthForm } from "./pages/AuthForm";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectPage } from "./pages/ProjectPage";
@@ -29,6 +30,7 @@ export function App({ session, queryClient = createQueryClient() }: { session: A
             <Route element={<RequireAuth><Layout /></RequireAuth>}>
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectPage />} />
+              <Route path="/deploys/:deployId" element={<DeployPage />} />
               <Route path="/usage" element={<UsagePage />} />
             </Route>
             <Route path="/" element={<Navigate to="/projects" replace />} />
