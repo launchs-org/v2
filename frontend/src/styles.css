@@ -1,102 +1,95 @@
-/* 色は、変数にして、ライトとダークで切り替える(OS の設定に従う)。 */
+/* Tailwind CSS v4 と、shadcn/ui のテーマ。色は、意味のある名前の変数にして、ライトとダーク(OS の設定に従う)で切り替える。
+   配色は、Google のサービスに近づけている(白地、Google ブルー、淡い青のタグ、灰色の枠)。 */
+@import "tailwindcss";
+@import "tw-animate-css";
+
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --text: #1c2430;
-  --muted: #5b6676;
-  --border: #d8dde5;
-  --primary: #2457d6;
-  --primary-text: #ffffff;
-  --danger: #c4302b;
-  --ok: #1d7a46;
-  --warn: #9a6a00;
-  color-scheme: light dark;
+  --background: #f8f9fa;
+  --foreground: #202124;
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --muted: #f1f3f4;
+  --muted-foreground: #5f6368;
+  --border: #dadce0;
+  --input: #dadce0;
+  --ring: #1a73e8;
+  --primary: #1a73e8;
+  --primary-foreground: #ffffff;
+  --secondary: #e8f0fe;
+  --secondary-foreground: #1967d2;
+  --accent: #f1f3f4;
+  --accent-foreground: #202124;
+  --destructive: #d93025;
+  --destructive-foreground: #ffffff;
+  --success: #188038;
+  --warning: #b06000;
+  --radius: 0.5rem;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12161c;
-    --surface: #1b212a;
-    --text: #e6eaf0;
-    --muted: #9aa5b5;
-    --border: #2f3744;
-    --primary: #6b92ff;
-    --primary-text: #0d1220;
-    --danger: #ff7b72;
-    --ok: #56d364;
-    --warn: #e3b341;
+    --background: #202124;
+    --foreground: #e8eaed;
+    --card: #292a2d;
+    --card-foreground: #e8eaed;
+    --muted: #35363a;
+    --muted-foreground: #9aa0a6;
+    --border: #3c4043;
+    --input: #5f6368;
+    --ring: #8ab4f8;
+    --primary: #8ab4f8;
+    --primary-foreground: #202124;
+    --secondary: #394457;
+    --secondary-foreground: #aecbfa;
+    --accent: #35363a;
+    --accent-foreground: #e8eaed;
+    --destructive: #f28b82;
+    --destructive-foreground: #202124;
+    --success: #81c995;
+    --warning: #fdd663;
+    color-scheme: dark;
   }
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
-  line-height: 1.6;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 8px);
+  /* 外のフォントは、読み込まない(CSP)。Google Sans が入っていれば使い、無ければ、Roboto や、OS の標準のフォント。 */
+  --font-sans: "Google Sans", "Google Sans Text", Roboto, "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-a { color: var(--primary); }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; word-break: break-all; }
-h1 { font-size: 1.5rem; margin: 0 0 1rem; }
-h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
-
-.muted { color: var(--muted); }
-.error { color: var(--danger); margin: 0.25rem 0; }
-
-.app-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-  padding: 0.75rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
-}
-.app-header__right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-.brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--text); }
-
-.page { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
-.auth-page .card { width: 100%; max-width: 380px; }
-
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
-
-.form { display: flex; flex-direction: column; gap: 0.75rem; }
-.form--inline { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
-.form--inline > .error, .form--inline > p { flex-basis: 100%; }
-.form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
-.grow { flex: 1 1 14rem; }
-
-input {
-  font: inherit; padding: 0.5rem 0.625rem; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg); color: var(--text);
-}
-input:focus-visible, .button:focus-visible, a:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-input[aria-invalid="true"] { border-color: var(--danger); }
-input:disabled { opacity: 0.6; }
-
-.button {
-  font: inherit; cursor: pointer; padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--primary);
-  background: var(--primary); color: var(--primary-text);
-}
-.button:disabled { opacity: 0.55; cursor: not-allowed; }
-.button--ghost { background: transparent; color: var(--text); border-color: var(--border); }
-.button--danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-
-.list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.5rem; }
-.list__item {
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem;
-}
-
-.badge { font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
-.badge--active { color: var(--ok); }
-.badge--deleting { color: var(--warn); }
-.badge--delete_failed { color: var(--danger); }
-
-.dialog { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); max-width: 420px; width: calc(100% - 2rem); padding: 1rem; }
-.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-.actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
-
-@media (max-width: 480px) {
-  .page { padding-top: 1rem; }
-  .form--inline { align-items: stretch; }
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  /* キーボードで操作したときだけ、はっきりしたフォーカスの枠を出す。 */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
 }

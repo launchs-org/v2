@@ -2,6 +2,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { Brand } from "../components/Brand";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Spinner } from "../components/ui/spinner";
 import { useSession, useSessionState } from "../auth/AuthProvider";
 
 /** フォームの種類。 */
@@ -57,30 +63,47 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   const isLogin = mode === "login";
   return (
-    <main className="auth-page">
-      <form className="card form" onSubmit={(event) => void handleSubmit(event)}>
-        <h1>{isLogin ? "ログイン" : "アカウントを作る"}</h1>
-        <label>
-          ユーザー名
-          <input value={userName} onChange={(event) => setUserName(event.target.value)} autoComplete="username" required maxLength={64} autoFocus />
-        </label>
-        <label>
-          パスワード
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isLogin ? "current-password" : "new-password"} required />
-        </label>
-        {!isLogin && <p className="muted">12文字以上。よくあるパスワードは使えません。</p>}
-        {!isLogin && (
-          <label>
-            招待コード(招待制のときだけ)
-            <input value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} autoComplete="off" />
-          </label>
-        )}
-        <ErrorMessage error={error} />
-        <button type="submit" className="button" disabled={submitting}>{submitting ? "送信中…" : isLogin ? "ログイン" : "作成してログイン"}</button>
-        <p className="muted">
-          {isLogin ? <>アカウントが無い方は <Link to="/signup">アカウントを作る</Link></> : <>アカウントがある方は <Link to="/login">ログイン</Link></>}
-        </p>
-      </form>
+    <main className="grid min-h-screen place-items-center px-4 py-10">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex justify-center">
+          <Brand large />
+        </div>
+        <Card>
+          <CardContent className="p-8">
+            <form className="flex flex-col gap-5" onSubmit={(event) => void handleSubmit(event)}>
+              <div className="text-center">
+                <h1 className="text-2xl font-normal">{isLogin ? "ログイン" : "アカウントを作る"}</h1>
+                <p className="mt-1 text-sm text-muted-foreground">{isLogin ? "launchs を使うには、ログインしてください" : "ユーザー名とパスワードだけで、作れます"}</p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="userName">ユーザー名</Label>
+                <Input id="userName" value={userName} onChange={(event) => setUserName(event.target.value)} autoComplete="username" required maxLength={64} autoFocus />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="password">パスワード</Label>
+                <Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isLogin ? "current-password" : "new-password"} required />
+                {!isLogin && <p className="text-xs text-muted-foreground">12文字以上。よくあるパスワードは使えません。</p>}
+              </div>
+              {!isLogin && (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="invitationCode">招待コード(招待制のときだけ)</Label>
+                  <Input id="invitationCode" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} autoComplete="off" />
+                </div>
+              )}
+              <ErrorMessage error={error} />
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <Button asChild variant="link" className="px-0">
+                  <Link to={isLogin ? "/signup" : "/login"}>{isLogin ? "アカウントを作る" : "ログインへ"}</Link>
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting && <Spinner />}
+                  {submitting ? "送信中…" : isLogin ? "ログイン" : "作成してログイン"}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </main>
   );
 }

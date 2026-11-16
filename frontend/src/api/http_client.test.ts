@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, describeError } from "./api_error";
+import { ApiError, describeError, formatWait } from "./api_error";
 import { HttpClient, type TokenSource } from "./http_client";
 import { createFakeFetch, errorResponse, jsonResponse } from "../test/fake_server";
 
@@ -66,6 +66,15 @@ describe("HttpClient", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 429, code: "too_many_requests", retryAfterSeconds: 30 });
     expect(describeError(error)).toContain("30 秒後");
+  });
+
+  it("待つ時間は、1分未満は秒、それ以上は、切り上げた分で出す", () => {
+    expect(formatWait(0)).toBe("0 秒");
+    expect(formatWait(59)).toBe("59 秒");
+    expect(formatWait(60)).toBe("1 分");
+    expect(formatWait(61)).toBe("2 分");
+    expect(formatWait(2100)).toBe("35 分");
+    expect(describeError(new ApiError(429, "too_many_requests", "x", 2100))).toContain("35 分後");
   });
 
   it("形が違うエラー(プロキシの HTML など)は、ステータスから、汎用のメッセージにする", async () => {
