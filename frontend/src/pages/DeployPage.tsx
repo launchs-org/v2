@@ -1,8 +1,9 @@
 // deploy 1つの画面(状態、Pod、スケール、ログ、削除)。
+import { pollInterval } from "../lib/polling";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/api_error";
 import { deleteDeploy, getDeploy, scaleDeploy } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
@@ -22,10 +23,17 @@ import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
 import { ServiceSection } from "../components/ServiceSection";
 import { Spinner } from "../components/ui/spinner";
+import { cn } from "../lib/utils";
 import { DEFAULT_MAX_REPLICAS, deployStatusLabel, deployStatusTone, formatDateTime, isDeployTransitioning } from "../lib/deploy";
 
-/** 状態が変わっていく間、確かめ直す間隔(ミリ秒)。 */
-const POLL_INTERVAL_MS = 2000;
+/** deploy の画面のタブ。 */
+const DEPLOY_TABS = [
+  { id: "overview", label: "概要" },
+  { id: "logs", label: "ログ" },
+  { id: "config", label: "起動設定" },
+  { id: "network", label: "ネットワーク" },
+  { id: "volumes", label: "ボリューム" },
+] as const;
 
 /** 一覧から来たときに渡される、元のプロジェクト(パンくずを、元のプロジェクトにするため)。 */
 interface FromProject {
@@ -52,12 +60,16 @@ function readFromProject(state: unknown): FromProject | null {
 
 /** deploy 1つの画面。 */
 export function DeployPage() {
-  const { deployId = "" } = useParams();
+  const { deployId = "", projectId: routeProjectId } = useParams();
   const session = useSession();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const from = readFromProject(location.state);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 開いているタブ(知らない値は、概要にする)。
+  const requestedTab = searchParams.get("tab");
+  const tab = DEPLOY_TABS.find((candidate) => candidate.id === requestedTab)?.id ?? "overview";
   const [replicas, setReplicas] = useState<number | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -65,7 +77,7 @@ export function DeployPage() {
   const deploy = useQuery({
     queryKey: ["deploy", deployId],
     queryFn: ({ signal }) => getDeploy(session.http, deployId, signal),
-    refetchInterval: (query) => (query.state.data !== undefined && (isDeployTransitioning(query.state.data.status) || query.state.data.service?.status === "pending" || query.state.data.service?.status === "deleting") ? POLL_INTERVAL_MS : false),
+    refetchInterval: (query) => pollInterval(query.state.data !== undefined && (isDeployTransitioning(query.state.data.status) || query.state.data.service?.status === "pending" || query.state.data.service?.status === "deleting")),
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 2,
   });
 
@@ -89,7 +101,7 @@ export function DeployPage() {
   });
 
   // 元のプロジェクトが分かれば、そこへ戻る道を作る。分からなければ、一覧へ。
-  const backTo = from === null ? "/projects" : `/projects/${from.projectId}`;
+  const backTo = routeProjectId !== undefined ? `/projects/${routeProjectId}` : from === null ? "/projects" : `/projects/${from.projectId}`;
   const backLabel = from === null ? "プロジェクトの一覧へ" : "プロジェクトへ戻る";
 
   // 見つからない(他のユーザーのもの、削除が終わったもの)なら、戻る道を出す。
@@ -130,8 +142,100 @@ export function DeployPage() {
       {data.status === "failed" && <Alert>起動に失敗したか、安定して動かなかったため、止まっています。同じ台数でスケールし直すと、やり直せます。</Alert>}
       {data.status === "delete_failed" && <Alert>削除に失敗して、止まっています。もう一度、削除を試せます。</Alert>}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="flex flex-col gap-6">
+      {/* タブ: 画面を、用途ごとに分けて、一度に見える量を減らす。URL の ?tab= で、開くタブを指定できる。 */}
+      <div role="tablist" aria-label="deploy の項目" className="flex flex-wrap gap-1 border-b">
+        {DEPLOY_TABS.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            role="tab"
+            id={`deploy-tab-${candidate.id}`}
+            aria-selected={tab === candidate.id}
+            aria-controls="deploy-tabpanel"
+            onClick={() => setSearchParams(candidate.id === "overview" ? {} : { tab: candidate.id }, { replace: true })}
+            className={cn("-mb-px border-b-2 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40", tab === candidate.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
+          >
+            {candidate.label}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id="deploy-tabpanel" aria-labelledby={`deploy-tab-${tab}`} className="flex flex-col gap-5">
+        {tab === "overview" && (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>詳細</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
+                  <dt className="text-muted-foreground">状態</dt>
+                  <dd><Badge variant={deployStatusTone(data.status)}>{deployStatusLabel(data.status)}</Badge></dd>
+                  <dt className="text-muted-foreground">スペック</dt>
+                  <dd>{data.spec}</dd>
+                  <dt className="text-muted-foreground">台数</dt>
+                  <dd>{data.replicas}</dd>
+                  <dt className="text-muted-foreground">作成日時</dt>
+                  <dd>{formatDateTime(data.createdAt)}</dd>
+                  <dt className="text-muted-foreground">イメージ</dt>
+                  <dd><code className="break-all font-mono text-xs">{data.imageRef}</code></dd>
+                </dl>
+                <div className="border-t pt-4">
+                  <h3 className="mb-2 text-sm font-medium">稼働中の Pod</h3>
+                  {data.pods.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">稼働中の Pod はありません。</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {data.pods.map((pod) => (
+                        <li key={pod.podId} className="flex items-center justify-between gap-2 text-sm">
+                          <code className="truncate font-mono text-xs">{pod.podId}</code>
+                          <Badge variant={pod.status === "running" ? "success" : "warning"}>{pod.status}</Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>スケール</CardTitle>
+                <CardDescription>台数(レプリカ数)を変えます。0 にすると止まります。</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); scale.mutate(wanted); }}>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="scaleReplicas">台数</Label>
+                    <select id="scaleReplicas" value={wanted} onChange={(event) => setReplicas(Number(event.target.value))} disabled={!canScale} className="h-9 rounded-md border bg-background px-3 text-sm shadow-xs">
+                      {Array.from({ length: DEFAULT_MAX_REPLICAS + 1 }, (_, count) => <option key={count} value={count}>{count}</option>)}
+                    </select>
+                  </div>
+                  <Button type="submit" variant="secondary" disabled={!canScale || scale.isPending || (wanted === data.replicas && data.status !== "failed")}>
+                    {scale.isPending && <Spinner />}
+                    変更
+                  </Button>
+                </form>
+                <ErrorMessage error={scale.error} className="mt-3" />
+              </CardContent>
+            </Card>
+
+            <Card className="border-destructive/30">
+              <CardHeader>
+                <CardTitle className="text-destructive">削除</CardTitle>
+                <CardDescription>この deploy と、ログ、service を削除します。volume は、残ります。元に戻せません。</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <ErrorMessage error={remove.error} />
+                <Button variant="destructive-outline" className="w-fit" onClick={() => setConfirmingDelete(true)} disabled={!canDelete || remove.isPending}>
+                  <Trash2 aria-hidden="true" />
+                  deploy を削除
+                </Button>
+              </CardContent>
+            </Card>
+          </>
+        )}
+        {tab === "logs" && (
           <Card>
             <CardHeader>
               <CardTitle>ログ</CardTitle>
@@ -141,82 +245,10 @@ export function DeployPage() {
               <LogViewer deployId={data.deployId} pods={data.logPods} />
             </CardContent>
           </Card>
-
-          <ConfigSection deploy={data} locked={locked} />
-          <MountsSection deploy={data} locked={locked} />
-          <ServiceSection deploy={data} locked={locked} />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>スケール</CardTitle>
-              <CardDescription>台数(レプリカ数)を変えます。0 にすると止まります。</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); scale.mutate(wanted); }}>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="scaleReplicas">台数</Label>
-                  <select id="scaleReplicas" value={wanted} onChange={(event) => setReplicas(Number(event.target.value))} disabled={!canScale} className="h-9 rounded-md border bg-background px-3 text-sm shadow-xs">
-                    {Array.from({ length: DEFAULT_MAX_REPLICAS + 1 }, (_, count) => <option key={count} value={count}>{count}</option>)}
-                  </select>
-                </div>
-                <Button type="submit" variant="secondary" disabled={!canScale || scale.isPending || (wanted === data.replicas && data.status !== "failed")}>
-                  {scale.isPending && <Spinner />}
-                  変更
-                </Button>
-              </form>
-              <ErrorMessage error={scale.error} className="mt-3" />
-            </CardContent>
-          </Card>
-
-          <Card className="border-destructive/30">
-            <CardHeader>
-              <CardTitle className="text-destructive">削除</CardTitle>
-              <CardDescription>この deploy と、ログ、service を削除します。volume は、残ります。元に戻せません。</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <ErrorMessage error={remove.error} />
-              <Button variant="destructive-outline" className="w-fit" onClick={() => setConfirmingDelete(true)} disabled={!canDelete || remove.isPending}>
-                <Trash2 aria-hidden="true" />
-                deploy を削除
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>詳細</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
-              <dt className="text-muted-foreground">状態</dt>
-              <dd><Badge variant={deployStatusTone(data.status)}>{deployStatusLabel(data.status)}</Badge></dd>
-              <dt className="text-muted-foreground">スペック</dt>
-              <dd>{data.spec}</dd>
-              <dt className="text-muted-foreground">台数</dt>
-              <dd>{data.replicas}</dd>
-              <dt className="text-muted-foreground">作成日時</dt>
-              <dd>{formatDateTime(data.createdAt)}</dd>
-              <dt className="text-muted-foreground">イメージ</dt>
-              <dd><code className="break-all font-mono text-xs">{data.imageRef}</code></dd>
-            </dl>
-            <div className="border-t pt-4">
-              <h3 className="mb-2 text-sm font-medium">稼働中の Pod</h3>
-              {data.pods.length === 0 ? (
-                <p className="text-sm text-muted-foreground">稼働中の Pod はありません。</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {data.pods.map((pod) => (
-                    <li key={pod.podId} className="flex items-center justify-between gap-2 text-sm">
-                      <code className="truncate font-mono text-xs">{pod.podId}</code>
-                      <Badge variant={pod.status === "running" ? "success" : "warning"}>{pod.status}</Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        )}
+        {tab === "config" && <ConfigSection deploy={data} locked={locked} />}
+        {tab === "network" && <ServiceSection deploy={data} locked={locked} />}
+        {tab === "volumes" && <MountsSection deploy={data} locked={locked} />}
       </div>
 
       <ConfirmDialog open={confirmingDelete} title="deploy を削除しますか?" confirmLabel="削除する" busy={remove.isPending} onConfirm={() => remove.mutate()} onCancel={() => setConfirmingDelete(false)}>
@@ -235,7 +267,7 @@ function DeployHeader({ data }: { data: DeployDetail }) {
   const crumbs = useProjectCrumbs(data.projectId);
   return (
     <PageHeader
-      crumbs={[...crumbs, { label: "deploy" }]}
+      crumbs={[...crumbs, { label: "deploy", to: `/projects/${data.projectId}/deploys` }, { label: data.deployId }]}
       title={<span className="flex flex-wrap items-center gap-3"><span>deploy</span><Badge variant={deployStatusTone(data.status)}>{deployStatusLabel(data.status)}</Badge></span>}
       description={<>ID: <code className="break-all font-mono text-xs">{data.deployId}</code></>}
     />

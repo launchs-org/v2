@@ -195,7 +195,7 @@ describe("プロジェクトの画面", () => {
 
   it("名前の変更: 変更が無いうちは押せず、不正な名前は、送らず、正しければ、送って反映される", async () => {
     const user = userEvent.setup();
-    const { requests } = renderApp(appServer(baseState()), { loggedIn: true, path: "/projects/project-a" });
+    const { requests } = renderApp(appServer(baseState()), { loggedIn: true, path: "/projects/project-a/settings" });
     expect(await screen.findByRole("heading", { name: /app-a/ })).toBeInTheDocument();
     // パンくずに、一覧へ戻るリンクと、いまの名前がある。
     expect(within(screen.getByRole("navigation", { name: "パンくず" })).getByRole("link", { name: "プロジェクト" })).toHaveAttribute("href", "/projects");
@@ -216,7 +216,7 @@ describe("プロジェクトの画面", () => {
 
   it("名前の変更が、重複(409)なら、そのメッセージを出す", async () => {
     const user = userEvent.setup();
-    renderApp(appServer(baseState(), { "PATCH /api/v1/projects/project-a": () => errorResponse(409, "conflict", "同じ名前のプロジェクトがすでにあります") }), { loggedIn: true, path: "/projects/project-a" });
+    renderApp(appServer(baseState(), { "PATCH /api/v1/projects/project-a": () => errorResponse(409, "conflict", "同じ名前のプロジェクトがすでにあります") }), { loggedIn: true, path: "/projects/project-a/settings" });
     const input = await screen.findByLabelText("新しい名前");
     await user.clear(input);
     await user.type(input, "taken");
@@ -226,7 +226,7 @@ describe("プロジェクトの画面", () => {
 
   it("削除: 確認のあとで、削除を頼み、「削除中」になる。確認をやめれば、頼まない", async () => {
     const user = userEvent.setup();
-    const { requests } = renderApp(appServer(baseState()), { loggedIn: true, path: "/projects/project-a" });
+    const { requests } = renderApp(appServer(baseState()), { loggedIn: true, path: "/projects/project-a/settings" });
     await user.click(await screen.findByRole("button", { name: "プロジェクトを削除" }));
     await user.click(await screen.findByRole("button", { name: "やめる" }));
     expect(requests.some((request) => request.method === "DELETE")).toBe(false);
@@ -240,7 +240,7 @@ describe("プロジェクトの画面", () => {
   });
 
   it("削除に失敗して止まっている(delete_failed)ときは、もう一度、削除できる", async () => {
-    renderApp(appServer({ projects: [{ projectId: "project-a", name: "app-a", status: "delete_failed" }] }), { loggedIn: true, path: "/projects/project-a" });
+    renderApp(appServer({ projects: [{ projectId: "project-a", name: "app-a", status: "delete_failed" }] }), { loggedIn: true, path: "/projects/project-a/settings" });
     expect(await screen.findByText(/削除に失敗して、止まっています/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "プロジェクトを削除" })).toBeEnabled();
     await waitFor(() => expect(screen.getByLabelText("新しい名前")).toBeDisabled());

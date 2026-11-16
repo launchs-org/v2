@@ -99,3 +99,23 @@
     @apply outline-2 outline-offset-2 outline-ring;
   }
 }
+
+/* キャンバスの接続線アニメーションと背景装飾 */
+@keyframes canvas-edge-flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.canvas-flow-line {
+  stroke-dasharray: 6 6;
+  animation: canvas-edge-flow 1.5s linear infinite;
+}
+
+.bg-dot-grid {
+  background-image: radial-gradient(color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
+}

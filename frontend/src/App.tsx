@@ -1,16 +1,21 @@
 // 画面の組み立て(ルーティング)。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { POLL_SLOW_MS } from "./lib/polling";
 import { ApiError } from "./api/api_error";
 import type { AuthSession } from "./auth/auth_session";
 import { AuthProvider } from "./auth/AuthProvider";
 import { RequireAuth } from "./auth/RequireAuth";
+import { CreateDeployPage, CreateIngressPage, CreateVolumePage } from "./components/CreatePanel";
 import { Layout } from "./components/Layout";
 import { DeployPage } from "./pages/DeployPage";
 import { AuthForm } from "./pages/AuthForm";
 import { IngressPage } from "./pages/IngressPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { ProjectPage } from "./pages/ProjectPage";
+import { ProjectLayout } from "./pages/ProjectLayout";
+import { ProjectOverviewPage } from "./pages/ProjectOverviewPage";
+import { ProjectSettingsPage } from "./pages/ProjectSettingsPage";
+import { DeployListPage, IngressListPage, ServiceListPage, VolumeListPage } from "./pages/ResourceListPages";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { VolumePage } from "./pages/VolumePage";
 import { UsagePage } from "./pages/UsagePage";
@@ -31,10 +36,21 @@ export function App({ session, queryClient = createQueryClient() }: { session: A
             <Route path="/signup" element={<AuthForm mode="signup" />} />
             <Route element={<RequireAuth><Layout /></RequireAuth>}>
               <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/projects/:projectId" element={<ProjectPage />} />
+              <Route path="/projects/:projectId" element={<ProjectLayout />}>
+                <Route index element={<ProjectOverviewPage />} />
+                <Route path="deploys" element={<DeployListPage />} />
+                <Route path="deploys/new" element={<CreateDeployPage />} />
+                <Route path="deploys/:deployId" element={<DeployPage />} />
+                <Route path="services" element={<ServiceListPage />} />
+                <Route path="ingresses" element={<IngressListPage />} />
+                <Route path="ingresses/new" element={<CreateIngressPage />} />
+                <Route path="ingresses/:ingressId" element={<IngressPage />} />
+                <Route path="volumes" element={<VolumeListPage />} />
+                <Route path="volumes/new" element={<CreateVolumePage />} />
+                <Route path="volumes/:volumeId" element={<VolumePage />} />
+                <Route path="settings" element={<ProjectSettingsPage />} />
+              </Route>
               <Route path="/deploys/:deployId" element={<DeployPage />} />
-              <Route path="/projects/:projectId/ingresses/:ingressId" element={<IngressPage />} />
-              <Route path="/projects/:projectId/volumes/:volumeId" element={<VolumePage />} />
               <Route path="/usage" element={<UsagePage />} />
             </Route>
             <Route path="/" element={<Navigate to="/projects" replace />} />
@@ -56,7 +72,9 @@ export function createQueryClient(): QueryClient {
     defaultOptions: {
       queries: {
         retry: (failureCount, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 2,
-        refetchOnWindowFocus: false,
+        // 画面を開いている間は、落ち着いていても、定期的に取り直す(裏のタブでは止まる)。
+        refetchInterval: POLL_SLOW_MS,
+        refetchOnWindowFocus: true,
       },
     },
   });
