@@ -1,6 +1,6 @@
 
-body{margin:0;background:#F8F9FA}
-.app{--bg:#F8F9FA;--panel:#FFFFFF;--panel2:#F1F3F4;--line:#E3E5E8;--line2:#DADCE0;--text:#202124;--mut:#5F6368;--faint:#6B7076;--warn:#B83C0A;--bad:#C5221F;--info:#1967D2;--ink:#FFFFFF;
+body{margin:0;background:#F6F6FA}
+.app{--bg:#F6F6FA;--panel:#FFFFFF;--panel2:#F1F3F4;--line:#E3E5E8;--line2:#DADCE0;--text:#202124;--mut:#5F6368;--faint:#6B7076;--warn:#B83C0A;--bad:#C5221F;--info:#5B3DE0;--ink:#FFFFFF;
  display:flex;flex-wrap:wrap;height:100vh;min-height:720px;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.6 'Roboto','Noto Sans JP',system-ui,sans-serif;line-break:strict;overflow-wrap:break-word;text-wrap:pretty}
 .app *{box-sizing:border-box}
 .app button,.app input,.app select{font:inherit;color:inherit}
@@ -55,7 +55,7 @@ body{margin:0;background:#F8F9FA}
 .badge{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:4px;font:500 12px/1.8 'Roboto','Noto Sans JP',sans-serif;border:1px solid transparent;white-space:nowrap}
 .badge i{width:7px;height:7px;border-radius:50%;background:currentColor}
 .b-ok{color:#137333;background:#E6F4EA;border-color:#CEEAD6}
-.b-info{color:#1967D2;background:#E8F0FE;border-color:#D2E3FC}
+.b-info{color:#5B3DE0;background:#EFEBFF;border-color:#DCD3FF}
 .b-warn{color:#B83C0A;background:#FFF1E6;border-color:#FDCFAE}
 .b-bad{color:#C5221F;background:#FCE8E6;border-color:#FAD2CF}
 .b-dim{color:#5F6368;background:#F1F3F4;border-color:#DADCE0}
@@ -120,7 +120,7 @@ body{margin:0;background:#F8F9FA}
 /* ===== Next.js 用の追加 ===== */
 html { min-width: 320px; }
 body { margin: 0; background: #F8F9FA; }
-.app { --accent: #1A73E8; }
+.app { --accent: #6D4AFF; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .app-loading { display: grid; place-items: center; height: 100vh; }
 .loader { width: 22px; height: 22px; border: 3px solid #DADCE0; border-top-color: var(--accent, #1A73E8); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
@@ -132,3 +132,68 @@ body { margin: 0; background: #F8F9FA; }
 .app .tr.clickable { cursor: pointer; }
 .app .tr.clickable:hover { background: var(--panel2); }
 @media (prefers-reduced-motion: reduce) { .loader { animation: none; } }
+
+
+/* ===== Railway 風: 色つきのリソースのアイコン、キャンバス、右のパネル、動き ===== */
+.app { --k-deploy: #6D4AFF; --k-volume: #E8920C; --k-ingress: #0E8FD6; --k-service: #12A36B; }
+.kind-icon { display: inline-grid; place-items: center; flex: none; border-radius: 10px; color: #fff; }
+.kind-icon.k-deploy { background: var(--k-deploy); }
+.kind-icon.k-volume { background: var(--k-volume); }
+.kind-icon.k-ingress { background: var(--k-ingress); }
+.kind-icon.k-service { background: var(--k-service); }
+
+/* 画面の枠: 上のバー + 中身(キャンバスは、残りの高さ全部) */
+.shell { display: flex; flex-direction: column; height: 100vh; min-height: 640px; width: 100%; }
+.topnav { display: flex; align-items: center; gap: 14px; padding: 0 20px; height: 56px; flex: none; background: var(--panel); border-bottom: 1px solid var(--line); }
+.topnav .tabs { border-bottom: 0; align-self: stretch; gap: 2px; }
+.topnav .tab { min-height: 56px; }
+.stage { position: relative; flex: 1; min-height: 0; display: flex; }
+.stage > .page { flex: 1; }
+
+/* キャンバス */
+.canvas-wrap { position: relative; flex: 1; min-width: 0; background: #F6F6FA; }
+.react-flow { --xy-background-color: transparent; }
+.canvas-wrap .react-flow__attribution { display: none; }
+.canvas-hint { position: absolute; left: 16px; bottom: 16px; z-index: 5; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,.92); border: 1px solid var(--line); color: var(--mut); font-size: 12.5px; backdrop-filter: blur(6px); }
+.canvas-add { position: absolute; right: 16px; top: 16px; z-index: 6; }
+.addmenu { position: absolute; right: 0; top: 46px; width: 260px; padding: 6px; border-radius: 10px; background: #fff; border: 1px solid var(--line2); box-shadow: 0 10px 30px rgba(32,33,36,.16); animation: pop .14s ease-out; }
+.addmenu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; }
+.addmenu button:hover { background: var(--panel2); }
+.addmenu .t { font-weight: 500; }
+.addmenu .d { font-size: 12px; color: var(--mut); }
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* カード(ノード) */
+.rf-node { width: 264px; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line2); box-shadow: 0 1px 2px rgba(32,33,36,.05); cursor: pointer; transition: box-shadow .16s ease, border-color .16s ease, transform .16s ease; }
+.rf-node:hover { box-shadow: 0 8px 24px rgba(32,33,36,.10); transform: translateY(-1px); }
+.rf-node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 24px rgba(32,33,36,.10); }
+.rf-node .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .sub { font-size: 12px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.rf-node .url { font-size: 11.5px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .pend { position: absolute; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: #F76707; box-shadow: 0 0 0 3px #FFF1E6; }
+.react-flow__handle { opacity: 0; pointer-events: none; }
+.react-flow__edge-path { stroke: #C3C7D0; stroke-width: 2; }
+.react-flow__edge.live .react-flow__edge-path { stroke: color-mix(in srgb, var(--accent) 55%, #fff); }
+.react-flow__edge.pending .react-flow__edge-path { stroke-dasharray: 6 5; stroke: #F76707; }
+.flow-dot { fill: var(--accent); }
+
+/* 右のパネル(キャンバスの上に、右からスライドして重なる) */
+.panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; width: min(580px, 100%); background: var(--panel); border-left: 1px solid var(--line2); box-shadow: -12px 0 32px rgba(32,33,36,.10); display: flex; flex-direction: column; animation: slidein .2s ease-out; }
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.panel-frame { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.panel-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.panel-title { flex: 1; min-width: 0; }
+.panel-title h2 { margin: 0; font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 反映待ちのポップオーバー */
+.popover { position: absolute; right: 0; top: 44px; width: 420px; max-height: 70vh; overflow: auto; z-index: 30; padding: 6px; border-radius: 12px; background: #fff; border: 1px solid var(--line2); box-shadow: 0 12px 32px rgba(32,33,36,.18); animation: pop .14s ease-out; }
+
+/* 状態のアニメーション: 動きを減らす設定では、止める */
+.badge.live i { animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .panel, .addmenu, .popover { animation: none; }
+  .rf-node { transition: none; }
+  .flow-dot animateMotion { display: none; }
+}
