@@ -1,31 +1,42 @@
-# 開発用: Vite の開発サーバー(HMR つき)。リポジトリルートをマウントして使う。
+# 開発用: Next.js の開発サーバー(HMR つき)。リポジトリルートをマウントして使う。
 FROM node:24-slim AS Develop
 
 WORKDIR /app/frontend
 
-# 開発サーバーを動かす(nginx が、/ をここへ、/api と /auth を backend と auth へ振り分ける)
-CMD [ "sh", "-c", "npm install && npm run dev" ]
+# 本物の API につなぐ(未指定だと、画面は、見せかけのデータ(mock)で動く)。
+ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
+# pnpm を使う(ロックファイルが pnpm-lock.yaml のため)。
+RUN corepack enable
 
-# ビルド: 静的ファイルを作る。
+# 開発サーバーを動かす(nginx が、/ をここ(3000)へ、/api と /auth を backend と auth へ振り分ける)
+CMD [ "sh", "-c", "pnpm install --no-frozen-lockfile && pnpm exec next dev --hostname 0.0.0.0 --port 3000" ]
+
+# ビルド: Next.js を、単独で動かせる形(standalone)で、ビルドする。
 FROM node:24-slim AS Build
 
 WORKDIR /app
 
+ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
+RUN corepack enable
+
 # 依存だけを先に入れる(ソースが変わっても、依存の層を使い回すため)
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # ソースを入れて、ビルドする
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
-# 本番用: 静的ファイルを、nginx で配る(SPA なので、無いパスは index.html に戻す)。
-FROM nginx:1.29-alpine AS Production
+# 本番用: standalone の出力を、Node で動かす(/api と /auth は、Traefik が backend と auth へ振り分けるので、ここには来ない)。
+FROM node:24-slim AS Production
 
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
-# セキュリティのヘッダは、テンプレート(nginx のイメージが、起動時に、環境変数を差し込んで、conf.d/security-headers.inc に書き出す)。
-# 差し込むのは、CSP_ で始まる環境変数だけ(NGINX_ENVSUBST_FILTER)。nginx 自身の $uri などを、壊さないため。
-COPY frontend/security-headers.inc.template /etc/nginx/templates/security-headers.inc.template
-# 人間であることの確認(Turnstile)を使うときだけ、実行時に、CSP_TURNSTILE=https://challenges.cloudflare.com を指定する。
-ENV CSP_TURNSTILE="" NGINX_ENVSUBST_FILTER="^CSP_"
-COPY --from=Build /app/dist /usr/share/nginx/html
+WORKDIR /app
+
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+
+COPY --from=Build /app/.next/standalone ./
+COPY --from=Build /app/.next/static ./.next/static
+# 非 root で動かす(node イメージの node ユーザー)
+USER node
+EXPOSE 3000
+CMD [ "node", "server.js" ]
