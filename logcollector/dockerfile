@@ -15,3 +15,24 @@ WORKDIR /app
 
 # air を実行する(shared/ の変更でもリビルドされるよう、リポジトリルートから実行する)
 CMD [ "air","-c","logcollector/.air.toml" ]
+
+
+# ビルド: 静的なバイナリを作る(リポジトリルートを、ビルドコンテキストにして使う)。
+FROM golang:1.27 AS Build
+
+WORKDIR /src
+
+# 依存だけを先に取る(ソースが変わっても、依存の層を使い回すため)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# ソースを入れて、ビルドする(C のライブラリに依存しない、静的なバイナリ)
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/logcollector ./logcollector/src
+
+# 本番用: バイナリだけを入れた、小さなイメージ(シェルなし、非 root)。
+FROM gcr.io/distroless/static-debian12:nonroot AS Production
+
+COPY --from=Build /out/logcollector /logcollector
+USER nonroot:nonroot
+ENTRYPOINT [ "/logcollector" ]
