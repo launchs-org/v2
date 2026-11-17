@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import useSWR from "swr"
+import { revalidateProject } from "@/lib/revalidate"
 import { api, authenticatedFetcher } from "@/lib/api"
 import type { DeployTab, ProjectViewProps } from "@/lib/nav"
 import type { DeployDetail, ServicePort, VolumeListResponse } from "@/lib/types"
@@ -116,8 +117,8 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
     try { await action(); notify(done); await mutate() } catch (caught) { notify(caught instanceof Error ? caught.message : "操作を完了できませんでした", true) } finally { setBusy(false) }
   }
 
-  // 削除が終わって、deploy が無くなったら(取れなくなったら)、パネルを閉じる。
-  useEffect(() => { if (error && !data) onClose() }, [error, data, onClose])
+  // 削除が終わって(404 になって)、deploy が無くなったら(取れなくなったら)、パネルを閉じる。
+  useEffect(() => { if (error && (!data || (error as { status?: number }).status === 404)) onClose() }, [error, data, onClose])
 
   if (!data) return <PanelFrame kind="deploy" title={deployId} onClose={onClose}><LoadingState /></PanelFrame>
   // 反映中・起動中・削除中は、編集も削除もできない。
@@ -153,7 +154,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
         {tab === "logs" && <LogsTab data={data} refreshInterval={refreshInterval} />}
       </PanelFrame>
       {confirmDelete && (
-        <Modal title="デプロイを削除しますか?" description="デプロイとログ、Service を削除します。ボリュームは残ります。元に戻せません。" onClose={() => setConfirmDelete(false)} footer={<><button className="btn" type="button" onClick={() => setConfirmDelete(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirmDelete(false); onClose() }, "削除を受け付けました")}>削除する</button></>}><div className="mono">{data.deployId}</div></Modal>
+        <Modal title="デプロイを削除しますか?" description="デプロイとログ、Service を削除します。ボリュームは残ります。元に戻せません。" onClose={() => setConfirmDelete(false)} footer={<><button className="btn" type="button" onClick={() => setConfirmDelete(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirmDelete(false); await revalidateProject(project.projectId) }, "削除を始めました")}>削除する</button></>}><div className="mono">{data.deployId}</div></Modal>
       )}
       {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
     </>

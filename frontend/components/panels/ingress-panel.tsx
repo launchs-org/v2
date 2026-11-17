@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import useSWR from "swr"
 import { api, authenticatedFetcher } from "@/lib/api"
+import { revalidateProject } from "@/lib/revalidate"
 import type { ProjectViewProps } from "@/lib/nav"
 import { usePending } from "@/lib/pending"
 import type { IngressDetail, IngressRule } from "@/lib/types"
@@ -96,9 +97,9 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
     try { await action(); await mutate() } catch (caught) { notify(caught instanceof Error ? caught.message : "操作に失敗しました", true) } finally { setBusy(false) }
   }
 
-  // 削除が終わって、ingress が無くなったら(取れなくなったら)、パネルを閉じる。
+  // 削除が終わって(404 になって)、ingress が無くなったら(取れなくなったら)、パネルを閉じる。
   // 取れなくなったら(削除が終わった、など)、パネルを閉じる(描画の途中ではなく、描画の後に閉じる)。
-  useEffect(() => { if (error && !detail) onClose() }, [error, detail, onClose])
+  useEffect(() => { if (error && (!detail || (error as { status?: number }).status === 404)) onClose() }, [error, detail, onClose])
   if (!detail) return <PanelFrame kind="ingress" title={ingressId} onClose={onClose}><LoadingState /></PanelFrame>
   // 反映中と削除中は、編集も削除もできない(サーバーも 409)。
   const locked = isBusyStatus(detail.status)
@@ -176,7 +177,7 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
         )}
       </PanelFrame>
       {confirming && (
-        <Modal title="Ingress を削除しますか?" description={detail.host} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を開始しました"); onClose() })}>削除</button></>}>
+        <Modal title="Ingress を削除しますか?" description={detail.host} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>
           <div className="mut">ホスト名とルールが削除されます。</div>
         </Modal>
       )}
