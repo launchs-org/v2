@@ -22,7 +22,7 @@ services:
       # ingress に払い出すホスト名の、ベースドメインと、払い出さないサブドメイン(カンマ区切り。指定すると既定の一覧を置き換える)。
       # volume 1つの大きさの上限(MB)。アカウントごとの上限は、認証のコンテナを作るときに設ける。
       VOLUME_MAX_SIZE_MB: ${VOLUME_MAX_SIZE_MB:-5120}
-      INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-launchs.org}
+      INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-shconn.org}
       INGRESS_RESERVED_SUBDOMAINS: ${INGRESS_RESERVED_SUBDOMAINS:-www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard}
       # テストが、使い捨てのデータベースを作るための接続先。
       TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
