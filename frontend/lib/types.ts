@@ -65,6 +65,8 @@ export type Volume = {
   sizeMB: number
   pending_sizeMB: number | null
   createdAt?: string
+  /** マウントしている deploy の ID(詳細のみ)。 */
+  mountedBy?: string[]
 }
 export type VolumeListResponse = { volumes: Volume[]; nextCursor: string | null }
 export type IngressRule = { path: string; serviceId: string; port: number }
@@ -85,12 +87,16 @@ export type LoginHistoryResponse = {
 export type BuildListItem = { buildId: string; status: string; imageRef: string; createdAt: string }
 export type BuildListResponse = { builds: BuildListItem[]; nextCursor: string | null }
 export type QuotaUsage = { used: number; limit: number }
+/** GET /api/v1/quota の応答(docs/endpoints/quota.md)。 */
 export type QuotaResponse = {
-  maxReplicasPerDeploy: number
+  maxReplicas: number
   maxVolumeSizeMB: number
   projects: QuotaUsage
   deploys: QuotaUsage
   volumes: QuotaUsage
   volumeTotalMB: QuotaUsage
-  specs: Record<"small" | "medium" | "large", QuotaUsage>
+  deploysBySpec: Record<string, QuotaUsage>
 }
+/** GET /auth/login-history の応答(docs/endpoints/auth.md)。 */
+export type LoginEvent = { kind: "signup" | "login"; result: "success" | "failure"; reason: string | null; ip: string; userAgent: string; at: string }
+export type LoginEventsResponse = { events: LoginEvent[] }

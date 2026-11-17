@@ -1,103 +1,147 @@
 "use client"
 
-import { useState } from "react"
-import { FolderKanban, Pencil, Plus, Trash2 } from "lucide-react"
-import { api } from "@/lib/api"
-import type { Project, ProjectListResponse } from "@/lib/types"
-import { EmptyState, ErrorState, Modal, PageHeading, StatusPill, ToastNotice } from "@/components/ui-kit"
+import { useEffect, useRef, useState } from "react"
+import useSWR from "swr"
+import { api, authenticatedFetcher } from "@/lib/api"
+import type { ProjectViewProps } from "@/lib/nav"
+import { validateProjectName } from "@/lib/project-name"
+import type { DeployListResponse, Project, VolumeListResponse } from "@/lib/types"
+import { Badge, EmptyState, Modal, ToastNotice } from "@/components/ui-kit"
 
-type ProjectsViewProps = {
-  projects: Project[]
-  loading: boolean
-  onRefresh: () => Promise<ProjectListResponse | undefined>
-  onSelect: (project: Project) => void
+/** 表の列幅(モックと同じ)。 */
+const COLS = { "--cols": "1.4fr 1fr 90px 100px 130px 190px" } as React.CSSProperties
+
+type ProjectsViewProps = Pick<ProjectViewProps, "nav" | "search" | "createTick" | "refreshInterval"> & { projects: Project[]; onRefresh: () => Promise<unknown> }
+
+/**
+ * プロジェクト1行(デプロイ数とボリューム数は、行ごとに取る)。
+ *
+ * @param props.project プロジェクト。
+ * @param props.refreshInterval 自動更新の間隔。
+ * @param props.nav 画面を移る操作。
+ * @param props.onRename 名前変更のボタンが押されたとき。
+ * @param props.onDelete 削除のボタンが押されたとき。
+ */
+function ProjectRow({ project, refreshInterval, nav, onRename, onDelete }: { project: Project; refreshInterval: number; nav: ProjectsViewProps["nav"]; onRename: () => void; onDelete: () => void }) {
+  const base = `/api/v1/projects/${encodeURIComponent(project.projectId)}`
+  const { data: deploys } = useSWR<DeployListResponse>(`${base}/deploys?limit=100`, authenticatedFetcher, { refreshInterval })
+  const { data: volumes } = useSWR<VolumeListResponse>(`${base}/volumes?limit=100`, authenticatedFetcher, { refreshInterval })
+  // 削除中・削除失敗の間は、開けない・変えられない(削除失敗は、削除をやり直せる)。
+  const locked = project.status === "deleting"
+  return (
+    <div className="tr" style={COLS}>
+      <button className="lnk" type="button" style={{ fontSize: 14 }} onClick={() => nav.openProject(project)} disabled={locked}>{project.name}</button>
+      <span className="faint mono" style={{ wordBreak: "break-all", fontSize: 11.5 }}>{project.projectId.slice(0, 22)}</span>
+      <span className="mono">{deploys ? deploys.deploys.length : "…"}</span>
+      <span className="mono">{volumes ? volumes.volumes.length : "…"}</span>
+      <span><Badge status={project.status} /></span>
+      <div className="row" style={{ gap: 6, flexWrap: "nowrap", justifyContent: "flex-end" }}>
+        <button className="btn sm" type="button" onClick={onRename} disabled={project.status !== "active"}>名前変更</button>
+        <button className="btn sm danger" type="button" onClick={onDelete} disabled={locked}>削除</button>
+      </div>
+    </div>
+  )
 }
 
-export function ProjectsView({ projects, loading, onRefresh, onSelect }: ProjectsViewProps) {
+/**
+ * プロジェクトの一覧の画面(作成、名前の変更、削除)。
+ *
+ * @param props.projects プロジェクトの一覧。
+ * @param props.onRefresh 一覧を取り直す。
+ * @param props.search 検索の文字。
+ * @param props.createTick 増えたら、作成のダイアログを開く。
+ */
+export function ProjectsView({ projects, refreshInterval, onRefresh, nav, search, createTick }: ProjectsViewProps) {
   const [modal, setModal] = useState<"create" | "rename" | "delete" | null>(null)
   const [target, setTarget] = useState<Project | null>(null)
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
-  const [toast, setToast] = useState("")
   const [error, setError] = useState("")
+  const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
+  const lastTick = useRef(createTick)
+  const keyword = search.trim().toLowerCase()
+  const rows = projects.filter((project) => !keyword || project.name.toLowerCase().includes(keyword) || project.projectId.toLowerCase().includes(keyword))
+  const problem = validateProjectName(name.trim())
 
-  function openCreate() {
-    setTarget(null)
-    setName("")
-    setError("")
-    setModal("create")
-  }
+  // 上のバーの「作成」が押されたら、作成のダイアログを開く。
+  useEffect(() => {
+    if (createTick !== lastTick.current) {
+      lastTick.current = createTick
+      setName("")
+      setError("")
+      setModal("create")
+    }
+  }, [createTick])
 
-  function openRename(project: Project) {
-    setTarget(project)
-    setName(project.name)
-    setError("")
-    setModal("rename")
-  }
-
-  async function submitProject(event: React.FormEvent<HTMLFormElement>) {
+  /** 作成か名前変更を送る。作成したら、そのプロジェクトを開く。 */
+  async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (problem) return
     setBusy(true)
     setError("")
     try {
-      const normalizedName = name.trim()
       if (modal === "create") {
-        const result = await api.post<{ projectId: string }>("/api/v1/projects", { name: normalizedName })
-        const updated = await onRefresh()
-        const created = updated?.projects.find((project) => project.projectId === result.projectId)
-        setModal(null)
-        setToast("プロジェクトを作成しました")
-        if (created) onSelect(created)
-      } else if (modal === "rename" && target) {
-        await api.patch(`/api/v1/projects/${encodeURIComponent(target.projectId)}`, { name: normalizedName })
+        const created = await api.post<{ projectId: string }>("/api/v1/projects", { name: name.trim() })
         await onRefresh()
         setModal(null)
-        setToast("プロジェクト名を更新しました")
+        nav.openProject({ projectId: created.projectId, name: name.trim(), status: "active" })
+      } else if (modal === "rename" && target) {
+        await api.patch(`/api/v1/projects/${encodeURIComponent(target.projectId)}`, { name: name.trim() })
+        await onRefresh()
+        setModal(null)
+        setToast({ message: "名前を変更しました", error: false })
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "プロジェクトを保存できませんでした")
+      setError(caught instanceof Error ? caught.message : "保存できませんでした")
     } finally {
       setBusy(false)
     }
   }
 
-  async function deleteProject() {
+  /** 削除を頼む(実体の削除は、非同期に進む)。 */
+  async function remove() {
     if (!target) return
     setBusy(true)
-    setError("")
     try {
       await api.delete(`/api/v1/projects/${encodeURIComponent(target.projectId)}`)
       await onRefresh()
       setModal(null)
-      setToast("削除を受け付けました。配下リソースを非同期で削除しています")
+      setToast({ message: "削除を受け付けました", error: false })
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "プロジェクトを削除できませんでした")
+      setModal(null)
+      setToast({ message: caught instanceof Error ? caught.message : "削除できませんでした", error: true })
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <section>
-      <PageHeading eyebrow="WORKSPACE" title="プロジェクト" description="環境ごとのコンテナ、デプロイ、ストレージをまとめて管理します。" actions={<button className="btn btn-primary" type="button" onClick={openCreate}><Plus size={15} />新規プロジェクト</button>} />
-      {error && !modal && <ErrorState message={error} />}
-      {loading ? <div className="skeleton-table"><div /><div /><div /></div> : projects.length === 0 ? <div className="card"><EmptyState icon={<FolderKanban size={19} />} title="プロジェクトがありません" description="最初のプロジェクトを作成して、デプロイやリソースの管理を始めましょう。" action={<button className="btn btn-primary" type="button" onClick={openCreate}><Plus size={15} />プロジェクトを作成</button>} /></div> : (
-        <div className="card table-card">
-          <div className="table-toolbar"><div><strong>すべてのプロジェクト</strong><span className="muted-inline">{projects.length}件</span></div><span className="small-muted">リストは自動更新されます</span></div>
-          <div className="table-scroll"><table className="data-table"><thead><tr><th>プロジェクト名</th><th>状態</th><th>識別子</th><th className="align-right">操作</th></tr></thead><tbody>
-            {projects.map((project) => <tr key={project.projectId}>
-              <td><button className="project-cell-button" type="button" onClick={() => onSelect(project)}><span className="table-icon"><FolderKanban size={15} /></span><span className="project-cell-name">{project.name}</span></button></td>
-              <td><StatusPill status={project.status} /></td>
-              <td><code className="id-cell">{project.projectId}</code></td>
-              <td><div className="row-actions"><button className="icon-button" type="button" onClick={() => openRename(project)} aria-label={`${project.name} の名前を変更`} title="名前を変更" disabled={project.status !== "active"}><Pencil size={14} /></button><button className="icon-button danger-icon" type="button" onClick={() => { setTarget(project); setError(""); setModal("delete") }} aria-label={`${project.name} を削除`} title="削除" disabled={project.status === "deleting"}><Trash2 size={14} /></button></div></td>
-            </tr>)}
-          </tbody></table></div>
-        </div>
+    <>
+      <div><h1 className="h1 disp">プロジェクト</h1></div>
+      {projects.length === 0 && <EmptyState title="プロジェクトがありません" description="右上のボタンから、最初のプロジェクトを作成してください。" />}
+      {projects.length > 0 && (
+        <div className="card tscroll"><div className="tinner">
+          <div className="tr th" style={COLS}><span>名前</span><span>ID</span><span>デプロイ</span><span>ボリューム</span><span>状態</span><span /></div>
+          {rows.map((project) => <ProjectRow key={project.projectId} project={project} refreshInterval={refreshInterval} nav={nav} onRename={() => { setTarget(project); setName(project.name); setError(""); setModal("rename") }} onDelete={() => { setTarget(project); setModal("delete") }} />)}
+          {rows.length === 0 && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>一致するプロジェクトがありません。</div>}
+        </div></div>
       )}
-      {modal === "create" && <Modal title="プロジェクトを作成" description="英数字とハイフンを使用した1〜64文字の名前を指定してください。" onClose={() => setModal(null)} footer={<><button className="btn btn-secondary" type="button" onClick={() => setModal(null)}>キャンセル</button><button className="btn btn-primary" form="project-form" type="submit" disabled={busy || !name.trim()}>{busy ? "作成中…" : "作成する"}</button></>}><form id="project-form" onSubmit={submitProject}><label className="form-label" htmlFor="project-name">プロジェクト名</label><input id="project-name" className="form-control" value={name} onChange={(event) => setName(event.target.value)} pattern="[a-zA-Z0-9-]{1,64}" maxLength={64} placeholder="production-api" required autoFocus />{error && <div className="form-error">{error}</div>}</form></Modal>}
-      {modal === "rename" && target && <Modal title="プロジェクト名を変更" description={`${target.name} の表示名を更新します。`} onClose={() => setModal(null)} footer={<><button className="btn btn-secondary" type="button" onClick={() => setModal(null)}>キャンセル</button><button className="btn btn-primary" form="project-form" type="submit" disabled={busy || !name.trim()}>{busy ? "保存中…" : "変更を保存"}</button></>}><form id="project-form" onSubmit={submitProject}><label className="form-label" htmlFor="project-name">新しい名前</label><input id="project-name" className="form-control" value={name} onChange={(event) => setName(event.target.value)} pattern="[a-zA-Z0-9-]{1,64}" maxLength={64} required autoFocus />{error && <div className="form-error">{error}</div>}</form></Modal>}
-      {modal === "delete" && target && <Modal title="プロジェクトを削除しますか？" description="この操作はすぐに開始され、配下のすべてのリソースも削除対象になります。" onClose={() => setModal(null)} footer={<><button className="btn btn-secondary" type="button" onClick={() => setModal(null)}>キャンセル</button><button className="btn btn-danger" type="button" onClick={() => void deleteProject()} disabled={busy}>{busy ? "削除を開始中…" : "プロジェクトを削除"}</button></>}><div className="delete-warning"><Trash2 size={16} /><span><strong>{target.name}</strong> のデプロイ、ボリューム、Ingress も非同期で削除されます。</span></div>{error && <div className="form-error">{error}</div>}</Modal>}
-      {toast && <ToastNotice message={toast} onDismiss={() => setToast("")} />}
-    </section>
+      {(modal === "create" || modal === "rename") && (
+        <Modal title={modal === "create" ? "プロジェクトを作成" : "名前を変更"} onClose={() => setModal(null)} footer={<><button className="btn" type="button" onClick={() => setModal(null)}>やめる</button><button className="btn primary" type="submit" form="project-form" disabled={busy || problem !== null}>{modal === "create" ? "作成" : "保存"}</button></>}>
+          <form id="project-form" onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <label className="lbl">プロジェクト名<input className="inp" value={name} onChange={(event) => setName(event.target.value)} maxLength={64} placeholder="my-app" autoFocus /></label>
+            <div className="faint" style={{ fontSize: 12.5 }}>英数字とハイフン、1〜64文字。</div>
+            {name.trim() !== "" && problem && <div className="err" role="alert">{problem}</div>}
+            {error && <div className="err" role="alert">{error}</div>}
+          </form>
+        </Modal>
+      )}
+      {modal === "delete" && target && (
+        <Modal title="プロジェクトを削除しますか?" onClose={() => setModal(null)} footer={<><button className="btn" type="button" onClick={() => setModal(null)}>やめる</button><button className="btn warn" type="button" onClick={() => void remove()} disabled={busy}>削除する</button></>}>
+          <div><b>{target.name}</b> と、配下のデプロイ・Ingress・ボリュームを削除します。元に戻せません。</div>
+        </Modal>
+      )}
+      {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
+    </>
   )
 }

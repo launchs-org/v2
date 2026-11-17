@@ -1,71 +1,98 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import useSWR from "swr"
-import { Clipboard, Pause, Play, RefreshCw, TerminalSquare } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import type { DeployLogsResponse, LogPodInfo } from "@/lib/types"
 
-export function LogTail({ deployId, pods, refreshInterval }: { deployId: string; pods: LogPodInfo[]; refreshInterval: number }) {
-  const [podId, setPodId] = useState(pods.find((pod) => pod.running)?.podId ?? pods[0]?.podId ?? "")
-  const [streaming, setStreaming] = useState(true)
-  const [output, setOutput] = useState("")
-  const [copied, setCopied] = useState(false)
-  const nextSince = useRef<number | null>(null)
-  const outputRef = useRef<HTMLPreElement>(null)
-  const key = podId ? `/api/v1/deploy/${encodeURIComponent(deployId)}/logs?podId=${encodeURIComponent(podId)}` : null
-  const fetchLogs = useCallback(async (url: string) => {
-    const since = nextSince.current
-    const path = since === null ? url : `${url}&since=${since}`
-    const result = await api.get<DeployLogsResponse>(path)
-    nextSince.current = result.nextSince
-    return result
-  }, [])
-  const { data, error, isValidating, mutate } = useSWR<DeployLogsResponse>(key, fetchLogs, {
-    refreshInterval: streaming ? refreshInterval || 5000 : 0,
-    revalidateOnFocus: true,
-    refreshWhenHidden: false,
-    keepPreviousData: false,
-  })
+/** 画面に持つ、ログの最大の行数。超えたら、古い行から捨てる。 */
+const MAX_LINES = 50_000
 
+/** 新しい行が無いとき、次に取るまでの待ち(ミリ秒)。 */
+const IDLE_WAIT_MS = 2000
+
+type LogTailProps = {
+  deployId: string
+  pods: LogPodInfo[]
+  /** 選ばれている Pod の ID(上のチップで選ぶ)。 */
+  podId: string
+  /** 自動更新の間隔(ミリ秒)。0 なら、自動では取らない。 */
+  refreshInterval: number
+}
+
+/**
+ * 1つの Pod のログを、続きから取り続けて、端末の形で出す。
+ * Pod かタブが変わる(アンマウントされる)と、取得を止める。LIVE の切り替えと、クリアのボタンを持つ。
+ *
+ * @param props.deployId deploy の ID。
+ * @param props.pods ログのある Pod(稼働中かどうかの判定に使う)。
+ * @param props.podId 選ばれている Pod の ID。
+ * @param props.refreshInterval 0 なら、自動では取らない。
+ */
+export function LogTail({ deployId, pods, podId, refreshInterval }: LogTailProps) {
+  const [lines, setLines] = useState<string[]>([])
+  const [live, setLive] = useState(true)
+  const [error, setError] = useState("")
+  const outputRef = useRef<HTMLDivElement>(null)
+  const running = pods.find((pod) => pod.podId === podId)?.running ?? false
+  const polling = live && refreshInterval > 0
+
+  // Pod か、LIVE の状態が変わったら、取得のループを作り直す(古いループは、止める)。
   useEffect(() => {
-    if (data?.logs) setOutput((current) => `${current}${data.logs}`)
-  }, [data?.logs, data?.nextSince])
+    if (!podId) return
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let since: number | undefined
+    /** 続きを1回取り、まだあれば直ぐに、無ければ待ってから、もう1回取る(稼働中のときだけ)。 */
+    async function pull() {
+      try {
+        const path = `/api/v1/deploy/${encodeURIComponent(deployId)}/logs?podId=${encodeURIComponent(podId)}${since === undefined ? "" : `&since=${since}`}`
+        const chunk = await api.get<DeployLogsResponse>(path)
+        if (stopped) return
+        since = chunk.nextSince
+        setError("")
+        if (chunk.logs.length > 0) {
+          // 行に分けて、末尾に足す。多すぎたら、古い方を捨てる。
+          const added = chunk.logs.split("\n").filter((line) => line !== "")
+          setLines((current) => [...current, ...added].slice(-MAX_LINES))
+          void pull()
+          return
+        }
+        if (polling && running) timer = setTimeout(() => void pull(), IDLE_WAIT_MS)
+      } catch (caught) {
+        if (stopped) return
+        setError(caught instanceof Error ? caught.message : "ログを取得できませんでした")
+        if (polling && running) timer = setTimeout(() => void pull(), IDLE_WAIT_MS * 2)
+      }
+    }
+    void pull()
+    // 片付け: 取得を止め、待っている次の取得を取り消す。
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [deployId, podId, polling, running])
 
+  // Pod を変えたら、出力を空にする。
+  useEffect(() => { setLines([]) }, [podId])
+
+  // 行が増えたら、末尾が見えるようにスクロールする。
   useEffect(() => {
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight
-  }, [output])
-
-  function changePod(nextPodId: string) {
-    setPodId(nextPodId)
-    setOutput("")
-    nextSince.current = null
-  }
-
-  async function copyLogs() {
-    try {
-      await navigator.clipboard.writeText(output)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      setCopied(false)
-    }
-  }
+  }, [lines])
 
   return (
-    <div className="log-panel">
-      <div className="log-toolbar">
-        <label className="sr-only" htmlFor="log-pod-select">ログ対象 Pod</label>
-        <select id="log-pod-select" className="select-control log-pod-select" value={podId} onChange={(event) => changePod(event.target.value)} disabled={!pods.length}>
-          {pods.length ? pods.map((pod) => <option key={pod.podId} value={pod.podId}>{pod.podId.slice(0, 22)} · {pod.running ? "実行中" : "停止"}</option>) : <option value="">Pod がありません</option>}
-        </select>
-        <div className="log-toolbar-actions"><span className={`streaming-indicator ${streaming ? "on" : ""}`}><span className="live-dot" />{streaming ? "LIVE" : "PAUSED"}</span><button className="icon-button" type="button" onClick={() => setStreaming((active) => !active)} title={streaming ? "ログ取得を一時停止" : "ログ取得を再開"} aria-label={streaming ? "ログ取得を一時停止" : "ログ取得を再開"}>{streaming ? <Pause size={14} /> : <Play size={14} />}</button><button className="icon-button" type="button" onClick={() => void mutate()} title="ログを更新" aria-label="ログを更新"><RefreshCw size={14} className={isValidating ? "spin-icon" : ""} /></button><button className="icon-button" type="button" onClick={() => void copyLogs()} title="ログをコピー" aria-label="ログをコピー"><Clipboard size={14} /></button></div>
+    <>
+      <div className="term" role="log" aria-label="デプロイログ" ref={outputRef} style={{ height: "calc(100vh - 430px)", minHeight: 240 }}>
+        {lines.length === 0 ? <div className="l-dbg">{podId ? "ログを待機しています…" : "ログのある Pod がありません"}</div> : lines.map((line, index) => <div key={index} className="l-info">{line}</div>)}
       </div>
-      {error && <div className="log-error">ログを取得できませんでした。{error instanceof Error ? ` ${error.message}` : ""}</div>}
-      <pre ref={outputRef} className="logs-output" aria-label="コンテナログ">
-        {output || <span className="logs-empty"><TerminalSquare size={16} />{pods.length ? "ログを待機しています…" : "ログを表示できる Pod がありません。デプロイの作成後にここへ表示されます。"}</span>}
-      </pre>
-      <div className="log-footer"><span>{output ? `${output.split("\n").filter(Boolean).length} lines` : "0 lines"}</span><span>{copied ? "コピーしました" : isValidating ? "ログを同期中…" : "最終同期 · 自動更新"}</span></div>
-    </div>
+      {error && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal" }}>{error}</div>}
+      <div className="row">
+        <span className={`badge ${polling && running ? "b-ok live" : "b-dim"}`}><i />{polling && running ? "LIVE" : "PAUSED"}</span>
+        <span className="faint mono" style={{ fontSize: 12 }}>{lines.length.toLocaleString()} 行</span>
+        <div className="grow" />
+        <button className="btn sm" type="button" onClick={() => setLive((current) => !current)}>{live ? "一時停止" : "再開"}</button>
+        <button className="btn sm" type="button" onClick={() => setLines([])}>クリア</button>
+      </div>
+    </>
   )
 }

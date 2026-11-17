@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { ConsoleShell } from "@/components/console-shell"
-import { LoginScreen } from "@/components/login-screen"
-import { ApiError, clearSessionTokens, signIn, signOut } from "@/lib/api"
+import { LoginScreen, type LoginInput } from "@/components/login-screen"
+import { ApiError, clearSessionTokens, restoreSession, signIn, signOut, signUp } from "@/lib/api"
 import type { User } from "@/lib/types"
 
 export function ConsoleApp() {
@@ -19,15 +19,26 @@ export function ConsoleApp() {
       setAuthError("セッションの有効期限が切れました。もう一度ログインしてください。")
     }
     window.addEventListener("launchs:session-expired", onExpired)
-    setAuthReady(true)
-    return () => window.removeEventListener("launchs:session-expired", onExpired)
+    // 保存してある refresh token で、ログインの状態を戻してから、画面を出す。
+    let cancelled = false
+    void restoreSession().then((restored) => {
+      if (cancelled) return
+      if (restored) setUser(restored)
+      setAuthReady(true)
+    })
+    return () => {
+      cancelled = true
+      window.removeEventListener("launchs:session-expired", onExpired)
+    }
   }, [])
 
-  async function handleLogin(userName: string, password: string, turnstileToken?: string) {
+  async function handleSubmit(input: LoginInput) {
     setAuthenticating(true)
     setAuthError("")
     try {
-      const nextUser = await signIn(userName, password, turnstileToken)
+      const nextUser = input.mode === "login"
+        ? await signIn(input.userName, input.password, input.turnstileToken)
+        : await signUp(input.userName, input.password, input.invitationCode, input.turnstileToken)
       setUser(nextUser)
     } catch (error) {
       setAuthError(error instanceof ApiError ? error.message : "接続に失敗しました。APIの稼働状態をご確認ください。")
@@ -41,7 +52,7 @@ export function ConsoleApp() {
     setUser(null)
   }
 
-  if (!authReady) return <div className="app-loading"><span className="loader" /></div>
-  if (!user) return <LoginScreen onLogin={handleLogin} loading={authenticating} error={authError} />
+  if (!authReady) return <div className="app app-loading"><span className="loader" /></div>
+  if (!user) return <LoginScreen onSubmit={handleSubmit} loading={authenticating} error={authError} />
   return <ConsoleShell user={user} onLogout={handleLogout} />
 }
