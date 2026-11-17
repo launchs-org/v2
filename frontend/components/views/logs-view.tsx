@@ -20,7 +20,7 @@ const LEVEL_CHIPS: { key: "all" | LogLevel; label: string }[] = [
 
 /** ログの見た目の CSS(この画面だけで使う。色は、親が決めるトークンを使う)。 */
 const LOG_CSS = `
-.logs-screen{display:flex;flex-direction:column;gap:12px;height:calc(100vh - 64px - 44px);min-height:360px}
+.logs-screen{display:flex;flex-direction:column;gap:10px;height:100%;min-height:360px}
 .logs-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .logs-bar .inp{width:auto;min-height:36px}
 .logs-bar .sw{display:inline-flex;align-items:center;gap:6px;color:var(--mut);font-size:13px;cursor:pointer;white-space:nowrap}
