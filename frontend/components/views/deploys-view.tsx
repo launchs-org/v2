@@ -486,13 +486,19 @@ function LogsTab({ data, refreshInterval }: { data: DeployDetail; refreshInterva
   // 稼働中の Pod を先に、新しい順。
   const pods = [...data.logPods].sort((first, second) => Number(second.running) - Number(first.running) || second.startedAt.localeCompare(first.startedAt))
   const [picked, setPicked] = useState("")
-  const podId = pods.some((pod) => pod.podId === picked) ? picked : pods[0]?.podId ?? ""
+  // 終了した Pod は、既定では出さない(スイッチで出せる)。
+  const [showEnded, setShowEnded] = useState(false)
+  const endedCount = pods.filter((pod) => !pod.running).length
+  // 選んでいる Pod は、終了済みでも、チップから消さない(ログが、突然、切り替わらないように)。
+  const visible = pods.filter((pod) => showEnded || pod.running || pod.podId === picked)
+  const podId = visible.some((pod) => pod.podId === picked) ? picked : visible[0]?.podId ?? ""
   return (
     <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="row">
         <span className="faint" style={{ width: 36 }}>Pod</span>
-        {pods.map((pod) => <button key={pod.podId} type="button" className={`chip ${pod.podId === podId ? "on" : ""}`} onClick={() => setPicked(pod.podId)}>{pod.podId.replace("pod-", "").slice(0, 8)}{pod.running ? "" : "(終了)"}</button>)}
-        {pods.length === 0 && <span className="mut">ログのある Pod がありません</span>}
+        {visible.map((pod) => <button key={pod.podId} type="button" className={`chip ${pod.podId === podId ? "on" : ""}`} onClick={() => setPicked(pod.podId)}>{pod.podId.replace("pod-", "").slice(0, 8)}{pod.running ? "" : "(終了)"}</button>)}
+        {visible.length === 0 && <span className="mut">{pods.length === 0 ? "ログのある Pod がありません" : "稼働中の Pod がありません"}</span>}
+        {endedCount > 0 && <label className="row" style={{ gap: 6, marginLeft: "auto", cursor: "pointer" }}><input type="checkbox" checked={showEnded} onChange={(event) => setShowEnded(event.target.checked)} />終了した Pod も表示({endedCount})</label>}
       </div>
       <LogTail key={`${data.deployId}:${podId}`} deployId={data.deployId} pods={pods} podId={podId} refreshInterval={refreshInterval} />
     </div>
