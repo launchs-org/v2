@@ -1,10 +1,12 @@
-# プルリクエストと develop への push で、整形・静的解析・ビルド・テストを実行する。
+# プルリクエストと develop への push(と、release.yml からの呼び出し)で、整形・静的解析・ビルド・テストを実行する。
 name: test
 
 on:
   pull_request:
   push:
     branches: [develop]
+  # release.yml から呼ばれる(main に push されたとき、イメージを作る前に、同じテストを通す)。
+  workflow_call:
 
 # 同じブランチで新しい実行が始まったら、古い実行は止める。
 concurrency:

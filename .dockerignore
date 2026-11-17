@@ -1,0 +1,13 @@
+# ビルドのコンテキスト(リポジトリルート)に、含めないもの。送る量を減らし、秘密を、イメージに入れない。
+.git
+.github
+.env
+**/.env
+**/node_modules
+**/.next
+**/tmp
+frontend_org
+launchs-ui-mock
+docs
+**/*.md
+**/*_test.go
