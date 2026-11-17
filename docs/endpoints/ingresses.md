@@ -14,7 +14,7 @@
 ```json
 {
   "ingressId": "ingress-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "host": "random-word-1234.launchs.org",
+  "host": "random-word-1234.shconn.org",
   "rules": [],
   "pending_rules": null,
   "status": "active"
@@ -43,7 +43,7 @@
   "ingresses": [
     {
       "ingressId": "ingress-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "host": "random-word-1234.launchs.org"
+      "host": "random-word-1234.shconn.org"
     }
   ],
   "nextCursor": null
@@ -62,7 +62,7 @@
 ```json
 {
   "ingressId": "ingress-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "host": "random-word-1234.launchs.org",
+  "host": "random-word-1234.shconn.org",
   "rules": [
     {"path": "/", "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "port": 8080}
   ],
@@ -74,7 +74,7 @@
 ```json
 {
   "ingressId": "ingress-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "host": "random-word-1234.launchs.org",
+  "host": "random-word-1234.shconn.org",
   "rules": [
     {"path": "/", "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "port": 8080}
   ],
