@@ -11,6 +11,11 @@ import type { Selection } from "@/lib/nav"
 /** ノードに持たせるデータ(React Flow の型の制約で、index signature を付ける)。 */
 type NodeData = NodeInfo & { selected: boolean; [key: string]: unknown }
 
+/** 点が、線の端から端まで流れる時間(秒)。 */
+const FLOW_SECONDS = 3
+/** 3 つの点の、開始のずれ(秒)。流れる時間を、3 等分する。 */
+const FLOW_OFFSETS = [0, FLOW_SECONDS / 3, (FLOW_SECONDS * 2) / 3]
+
 /** 動きを減らす設定か(その場合、線の点は流さない)。 */
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -53,7 +58,13 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   return (
     <>
       <BaseEdge id={id} path={path} />
-      {animate && <circle r="3.5" className="flow-dot"><animateMotion dur="2.6s" repeatCount="indefinite" path={path} /></circle>}
+      {/* 流れる点: 3 つを、等間隔にずらして流す(1 つが端で消えても、次が続く)。端では、フェードイン・アウトして、急に戻って見えないようにする。 */}
+      {animate && FLOW_OFFSETS.map((offset) => (
+        <circle key={offset} r="3.5" className="flow-dot" opacity="0">
+          <animateMotion dur={`${FLOW_SECONDS}s`} begin={`${offset}s`} repeatCount="indefinite" path={path} keyPoints="0;1" keyTimes="0;1" calcMode="linear" />
+          <animate attributeName="opacity" dur={`${FLOW_SECONDS}s`} begin={`${offset}s`} repeatCount="indefinite" values="0;1;1;0" keyTimes="0;0.15;0.85;1" />
+        </circle>
+      ))}
       {data?.label && (
         <EdgeLabelRenderer>
           <span className="mono" style={{ position: "absolute", transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, padding: "1px 6px", borderRadius: 6, background: "#fff", border: "1px solid var(--line)", fontSize: 11, color: "var(--mut)", pointerEvents: "none" }}>{data.label}</span>
