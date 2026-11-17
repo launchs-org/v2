@@ -18,10 +18,69 @@ let accessToken: string | null = null
 let refreshToken: string | null = null
 let refreshPromise: Promise<string> | null = null
 
+/** refresh token を保存するキー(localStorage)。access token は、短命なので、メモリだけに置く。 */
+const REFRESH_TOKEN_KEY = "launchs.refreshToken"
+
+/**
+ * 保存してある refresh token を、読む(保存できない環境、プライベートモードなどでは、無かったことにする)。
+ *
+ * @returns 保存してある refresh token。無ければ null。
+ */
+function loadStoredRefreshToken(): string | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage.getItem(REFRESH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * refresh token を、保存する(null なら、消す)。保存できなくても、画面は動く(再読み込みで、ログインが要るだけ)。
+ *
+ * @param token 保存する refresh token。消すときは null。
+ */
+function storeRefreshToken(token: string | null) {
+  try {
+    if (typeof window === "undefined") return
+    if (token === null) window.localStorage.removeItem(REFRESH_TOKEN_KEY)
+    else window.localStorage.setItem(REFRESH_TOKEN_KEY, token)
+  } catch {
+    // 保存できないときは、メモリだけで動かす。
+  }
+}
+
 export function clearSessionTokens() {
   accessToken = null
   refreshToken = null
   refreshPromise = null
+  storeRefreshToken(null)
+}
+
+/**
+ * 画面を開いたとき、保存してある refresh token でログインの状態を戻す。
+ * 保存が無い、期限切れ、無効(ログアウト済み、BAN)のときは、null を返し、保存も消す。
+ *
+ * @returns ログインしているユーザー。戻せなければ null。
+ */
+export async function restoreSession(): Promise<import("./types").User | null> {
+  // live でないとき(見せかけのデータ)は、戻さない。
+  if (process.env.NEXT_PUBLIC_LAUNCHS_API_MODE !== "live") return null
+  const stored = loadStoredRefreshToken()
+  if (!stored) return null
+  refreshToken = stored
+  try {
+    // access token を取り直して、自分の情報を読む。
+    await refreshAccessToken()
+    return await request<import("./types").User>("/auth/me", "GET")
+  } catch (error) {
+    // サーバーに、無効と言われたときだけ、保存を消す。ネットワークの失敗では、消さない(後で、また戻せる)。
+    if (error instanceof ApiError && error.status === 401) clearSessionTokens()
+    else {
+      accessToken = null
+      refreshToken = null
+    }
+    return null
+  }
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -55,9 +114,10 @@ async function refreshAccessToken() {
   if (!refreshToken) throw new ApiError("セッションの有効期限が切れました。再度ログインしてください。", 401, "unauthorized")
   if (!refreshPromise) {
     refreshPromise = (async () => {
-      const response = await fetch("/auth/refresh", jsonInit("POST", undefined, refreshToken))
       try {
-        const data = await readResponse<{ token: string }>(response)
+        const data = process.env.NEXT_PUBLIC_LAUNCHS_API_MODE !== "live"
+          ? await mockRequest<{ token: string }>("/auth/refresh", "POST")
+          : await readResponse<{ token: string }>(await fetch("/auth/refresh", jsonInit("POST", undefined, refreshToken)))
         accessToken = data.token
         return data.token
       } catch (error) {
@@ -91,6 +151,30 @@ export async function signIn(userName: string, password: string, turnstileToken?
     ...(turnstileToken ? { turnstileToken } : {}),
   }, false)
   refreshToken = result.token
+  // 再読み込みしても、ログインが続くように、保存する。
+  storeRefreshToken(result.token)
+  await refreshAccessToken()
+  return request<import("./types").User>("/auth/me", "GET")
+}
+
+/**
+ * サインアップして、そのままログインの状態にする。
+ *
+ * @param userName ユーザー名。
+ * @param password パスワード。
+ * @param invitationCode 招待コード(招待制のときだけ)。
+ * @param turnstileToken 人間であることの確認のトークン(有効なときだけ)。
+ * @returns ログインしているユーザー。
+ */
+export async function signUp(userName: string, password: string, invitationCode?: string, turnstileToken?: string) {
+  const result = await request<{ token: string }>("/auth/signup", "POST", {
+    userName,
+    password,
+    ...(invitationCode ? { invitationCode } : {}),
+    ...(turnstileToken ? { turnstileToken } : {}),
+  }, false)
+  refreshToken = result.token
+  storeRefreshToken(result.token)
   await refreshAccessToken()
   return request<import("./types").User>("/auth/me", "GET")
 }

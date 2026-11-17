@@ -1,68 +1,110 @@
 "use client"
 
-import useSWR from "swr"
-import { Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Box, CircleHelp, Database, Globe2, Layers3, Plus } from "lucide-react"
-import { authenticatedFetcher } from "@/lib/api"
-import type { BuildListResponse, DeployListResponse, Project, QuotaResponse, VolumeListResponse, IngressListResponse } from "@/lib/types"
-import { EmptyState, ErrorState, formattedDate, PageHeading, StatusPill } from "@/components/ui-kit"
+import { useState } from "react"
+import { api } from "@/lib/api"
+import type { DeployTab, ProjectViewProps } from "@/lib/nav"
+import { usePending, type PendingItem } from "@/lib/pending"
+import { Badge, LoadingState, ToastNotice } from "@/components/ui-kit"
 
-type OverviewViewProps = {
-  project: Project
-  refreshInterval: number
-  onNavigate: (section: "deployments" | "volumes" | "ingresses" | "projects") => void
-}
+/** 反映待ちの種類から、開く deploy のタブを決める。 */
+const TAB_OF_KIND: Record<string, DeployTab> = { 起動設定: "config", マウント: "mounts", Service: "service" }
 
-function UsageMeter({ label, usage }: { label: string; usage?: { used: number; limit: number } }) {
-  const percentage = usage && usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 0
-  return <div className="usage-meter"><div className="usage-label"><span>{label}</span><strong>{usage ? <>{usage.used} <span>/ {usage.limit}</span></> : "—"}</strong></div><div className="meter-track"><span style={{ width: `${percentage}%` }} /></div></div>
-}
+/**
+ * 概要の画面(Apply センター)。リソースの数、反映待ちの変更(破棄と反映)、最近のデプロイを見せる。
+ *
+ * @param props 共通の引数(project、refreshInterval、nav)。
+ */
+export function OverviewView({ project, refreshInterval, nav }: ProjectViewProps) {
+  const { items, loading, refresh, deployDetails, ingressDetails } = usePending(project, refreshInterval)
+  const [busyKeys, setBusyKeys] = useState<string[]>([])
+  const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
+  const running = deployDetails.filter((deploy) => deploy.status === "active").length
+  const ruleCount = ingressDetails.reduce((total, ingress) => total + ingress.rules.length, 0)
+  const recent = [...deployDetails].sort((first, second) => second.createdAt.localeCompare(first.createdAt)).slice(0, 3)
+  const stats = [
+    { label: "デプロイ", value: deployDetails.length, sub: `${running} 稼働中` },
+    { label: "Ingress", value: ingressDetails.length, sub: `${ruleCount} ルール` },
+    { label: "反映待ち", value: items.length, sub: "件" },
+  ]
 
-export function OverviewView({ project, refreshInterval, onNavigate }: OverviewViewProps) {
-  const base = `/api/v1/projects/${encodeURIComponent(project.projectId)}`
-  const { data: deployData, error: deployError, mutate: refreshDeploys } = useSWR<DeployListResponse>(`${base}/deploys?limit=50`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const { data: volumeData, error: volumeError } = useSWR<VolumeListResponse>(`${base}/volumes?limit=50`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const { data: ingressData, error: ingressError } = useSWR<IngressListResponse>(`${base}/ingresses?limit=50`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const { data: quota } = useSWR<QuotaResponse>("/api/v1/quota", authenticatedFetcher, { refreshInterval: refreshInterval ? 15_000 : 0, revalidateOnFocus: true })
-  const { data: builds } = useSWR<BuildListResponse>(`${base}/builds?limit=5`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const deploys = deployData?.deploys ?? []
-  const activeDeploys = deploys.filter((deploy) => deploy.status === "active")
-  const healthyReplicas = activeDeploys.reduce((sum, deploy) => sum + deploy.replicas, 0)
-  const waiting = deploys.filter((deploy) => ["creating", "applying", "scaling", "pending"].includes(deploy.status)).length
-  const latestDeploy = deploys[0]
+  /**
+   * 反映待ちの変更に、操作(適用か破棄)を送る。
+   *
+   * @param targets 対象の変更。
+   * @param action 適用か破棄。
+   */
+  async function act(targets: PendingItem[], action: "apply" | "discard") {
+    // 操作中の印を付けてから、順に送る(失敗したら、止めて、知らせる)。
+    setBusyKeys((current) => [...current, ...targets.map((item) => item.key)])
+    try {
+      for (const item of targets) await api.post(action === "apply" ? item.applyPath : item.discardPath)
+      setToast({ message: action === "apply" ? "反映を開始しました" : "変更を破棄しました", error: false })
+    } catch (caught) {
+      setToast({ message: caught instanceof Error ? caught.message : "操作できませんでした", error: true })
+    } finally {
+      await refresh()
+      setBusyKeys((current) => current.filter((key) => !targets.some((item) => item.key === key)))
+    }
+  }
 
   return (
-    <section>
-      <PageHeading eyebrow="PROJECT OVERVIEW" title="プロジェクト概要" description={`${project.name} のリソースと稼働状況をリアルタイムで確認できます。`} actions={<button className="btn btn-primary" type="button" onClick={() => onNavigate("deployments")}><Plus size={15} />デプロイを作成</button>} />
-      {(deployError || volumeError || ingressError) && <ErrorState message="一部のリソースを読み込めませんでした。自動更新時に再試行します。" onRetry={() => void refreshDeploys()} />}
-
-      <div className="overview-hero">
-        <div className="hero-copy"><div className="hero-eyebrow"><span className="live-dot" />LIVE PROJECT</div><div className="hero-title-row"><h2>{project.name}</h2><StatusPill status={project.status} /></div><p>クラスターのリソース状態を監視しています。変更は下書き保存後に apply で反映されます。</p><div className="hero-stat-line"><span><strong>{healthyReplicas}</strong> healthy replicas</span><span className="hero-divider" /><span><strong>{waiting}</strong> changes in progress</span></div></div>
-        <div className="hero-orbit" aria-hidden="true"><div className="orbit-ring orbit-ring-one" /><div className="orbit-ring orbit-ring-two" /><div className="orbit-core"><Box size={25} /></div><span className="orbit-node orbit-node-one" /><span className="orbit-node orbit-node-two" /><span className="orbit-node orbit-node-three" /></div>
-        <div className="hero-graph" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /></div>
-      </div>
-
-      <div className="metric-grid">
-        <article className="metric-card"><div className="metric-top"><span className="metric-icon blue"><Box size={16} /></span><span className="metric-caption">DEPLOYMENTS</span><ArrowUpRight size={15} className="metric-arrow" /></div><div className="metric-value">{deployData ? deploys.length : "—"}</div><div className="metric-foot"><span className="metric-positive"><span className="live-dot" />{activeDeploys.length} 稼働中</span><span>このプロジェクト</span></div></article>
-        <article className="metric-card"><div className="metric-top"><span className="metric-icon violet"><Layers3 size={16} /></span><span className="metric-caption">READY REPLICAS</span><ArrowUpRight size={15} className="metric-arrow" /></div><div className="metric-value">{deployData ? healthyReplicas : "—"}<span className="metric-suffix"> pods</span></div><div className="metric-foot"><span>{waiting ? `${waiting} 件の変更を反映中` : "すべて最新です"}</span><span>max 5 / deploy</span></div></article>
-        <article className="metric-card"><div className="metric-top"><span className="metric-icon teal"><Database size={16} /></span><span className="metric-caption">VOLUMES</span><ArrowUpRight size={15} className="metric-arrow" /></div><div className="metric-value">{volumeData ? volumeData.volumes.length : "—"}</div><div className="metric-foot"><span>{volumeData?.volumes.reduce((sum, volume) => sum + volume.sizeMB, 0).toLocaleString() ?? "—"} MB allocated</span><span>{volumeData?.volumes.filter((volume) => volume.pending_sizeMB !== null).length ?? 0} pending</span></div></article>
-        <article className="metric-card"><div className="metric-top"><span className="metric-icon orange"><Globe2 size={16} /></span><span className="metric-caption">INGRESS RULES</span><ArrowUpRight size={15} className="metric-arrow" /></div><div className="metric-value">{ingressData ? ingressData.ingresses.length : "—"}</div><div className="metric-foot"><span>外部公開ルート</span><span>プロジェクト内</span></div></article>
-      </div>
-
-      <div className="overview-columns">
-        <div className="card usage-card">
-          <div className="card-heading"><div><h2>リソース使用量</h2><p>アカウントのクォータと現在値</p></div><span className="heading-icon"><Activity size={15} /></span></div>
-          {quota ? <div className="usage-list"><UsageMeter label="デプロイ" usage={quota.deploys} /><UsageMeter label="ボリューム" usage={quota.volumes} /><UsageMeter label="ストレージ容量" usage={quota.volumeTotalMB} /></div> : <div className="usage-unavailable"><CircleHelp size={15} />クォータ情報を取得しています</div>}
-          <div className="quota-foot"><span>レプリカ上限 <strong>{quota?.maxReplicasPerDeploy ?? "—"}</strong> / deploy</span><span>ボリューム上限 <strong>{quota?.maxVolumeSizeMB.toLocaleString() ?? "—"} MB</strong></span></div>
-        </div>
-        <div className="card recent-card">
-          <div className="card-heading"><div><h2>最近のデプロイ</h2><p>直近のデプロイ状態</p></div><button className="text-link" type="button" onClick={() => onNavigate("deployments")}>すべて表示<ArrowRight size={13} /></button></div>
-          {!deployData ? <div className="skeleton-row"><span /><span /><span /></div> : deploys.length === 0 ? <EmptyState icon={<Box size={17} />} title="デプロイはまだありません" description="イメージを指定して最初のデプロイを作成できます。" action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => onNavigate("deployments")}><Plus size={14} />デプロイを作成</button>} /> : <div className="recent-list">{deploys.slice(0, 4).map((deploy) => <button className="recent-item" key={deploy.deployId} type="button" onClick={() => onNavigate("deployments")}><span className="recent-status-icon"><Box size={15} /></span><span className="recent-copy"><strong>{deploy.imageRef.split("/").pop()}</strong><small>{deploy.deployId.slice(0, 22)} · {formattedDate(deploy.createdAt)}</small></span><StatusPill status={deploy.status} /></button>)}</div>}
+    <>
+      <div className="row">
+        <div className="grow">
+          <div className="row"><h1 className="h1 disp">{project.name}</h1><Badge status={project.status} /></div>
+          <div className="faint mono" style={{ marginTop: 2 }}>{project.projectId}</div>
         </div>
       </div>
-
-      <div className="card build-strip">
-        <div className="build-strip-icon"><ArrowDownRight size={16} /></div><div className="build-strip-copy"><strong>ビルド履歴</strong><span>{builds?.builds.length ? `${builds.builds.length} 件の最近のビルド` : "ビルド履歴を確認"}</span></div><div className="build-strip-items">{builds?.builds.slice(0, 3).map((build) => <span className="build-chip" key={build.buildId}><StatusPill status={build.status} /><code>{build.buildId.slice(0, 15)}</code></span>)}</div><button className="icon-button" type="button" onClick={() => onNavigate("deployments")} aria-label="デプロイ管理へ"><ArrowRight size={15} /></button>
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))" }}>
+        {stats.map((stat) => (
+          <div key={stat.label} style={{ padding: "12px 18px", borderRight: "1px solid var(--line)" }}>
+            <div className="faint" style={{ fontSize: 12.5 }}>{stat.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 500 }}>{stat.value} <span className="mut" style={{ fontSize: 12.5, fontWeight: 400 }}>{stat.sub}</span></div>
+          </div>
+        ))}
       </div>
-    </section>
+      <div className="split" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(460px,1fr))" }}>
+        <div className="card">
+          <div className="row pad" style={{ paddingBottom: 4 }}>
+            <h2 className="h2 grow">反映待ちの変更</h2>
+            {items.length > 0 && <button className="btn warn sm" type="button" onClick={() => void act(items, "apply")} disabled={busyKeys.length > 0}>すべて反映</button>}
+          </div>
+          {loading && <LoadingState />}
+          {!loading && items.length === 0 && <div className="mut pad" style={{ paddingTop: 8, borderTop: "1px solid var(--line)" }}>反映待ちの変更はありません。</div>}
+          <div className="tscroll"><div className="tinner" style={{ minWidth: 520 }}>
+            {items.map((item) => (
+              <div key={item.key} className="tr" style={{ "--cols": "92px 1fr auto" } as React.CSSProperties}>
+                <span className="tag" style={{ justifySelf: "start" }}>{item.kind}</span>
+                <div style={{ minWidth: 0 }}>
+                  {item.deployId ? <button className="lnk mono" type="button" onClick={() => nav.openDeploy(item.deployId!, TAB_OF_KIND[item.kind] ?? "overview")}>{item.target}</button> : <button className="lnk mono" type="button" onClick={() => nav.go(item.kind === "Ingress" ? "ingresses" : "volumes")}>{item.target}</button>}
+                  <div className="mut" style={{ fontSize: 12.5 }}>{item.sub}</div>
+                </div>
+                <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+                  <button className="btn sm" type="button" onClick={() => void act([item], "discard")} disabled={busyKeys.includes(item.key)}>破棄</button>
+                  <button className="btn sm warn" type="button" onClick={() => void act([item], "apply")} disabled={busyKeys.includes(item.key)}>反映</button>
+                </div>
+              </div>
+            ))}
+          </div></div>
+        </div>
+        <div className="col">
+          <div className="card">
+            <div className="pad" style={{ paddingBottom: 8 }}><h2 className="h2">最近のデプロイ</h2></div>
+            {recent.length === 0 && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>デプロイはまだありません。</div>}
+            {recent.map((deploy) => (
+              <div key={deploy.deployId} className="tr" style={{ "--cols": "1fr auto" } as React.CSSProperties}>
+                <button className="lnk" type="button" onClick={() => nav.openDeploy(deploy.deployId)}><span className="mono">{deploy.deployId.slice(0, 16)}</span> <span className="faint" style={{ fontWeight: 400 }}>{deploy.imageRef.split("/").pop()}</span></button>
+                <Badge status={deploy.status} />
+              </div>
+            ))}
+          </div>
+          <div className="card">
+            <div className="pad" style={{ paddingBottom: 8 }}><h2 className="h2">最近のビルド</h2></div>
+            <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>ビルドは未対応です。</div>
+          </div>
+        </div>
+      </div>
+      {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
+    </>
   )
 }

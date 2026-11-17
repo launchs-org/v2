@@ -60,7 +60,7 @@ tasks:
   frontend:test:
     desc: フロントエンドの型の検査を実行する(コンテナの中で。テストは、まだ無い)
     cmds:
-      - docker compose run --rm --no-deps frontend sh -c "npm install --no-audit --no-fund && npx tsc --noEmit"
+      - docker compose run --rm --no-deps frontend sh -c "corepack enable && pnpm install --no-frozen-lockfile && pnpm exec tsc --noEmit"
 
   frontend:build:
     desc: フロントエンドの本番用のイメージを作る(ビルドと、Node で動かすイメージ)

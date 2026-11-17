@@ -3,7 +3,6 @@
 import { useRef, useState } from "react"
 import Script from "next/script"
 import useSWR from "swr"
-import { ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck, TerminalSquare } from "lucide-react"
 import { publicFetcher } from "@/lib/api"
 import type { AuthConfig } from "@/lib/types"
 
@@ -16,38 +15,65 @@ declare global {
   }
 }
 
+/** ログインとサインアップの、入力。 */
+export type LoginInput = { mode: "login" | "signup"; userName: string; password: string; invitationCode?: string; turnstileToken?: string }
+
 type LoginScreenProps = {
-  onLogin: (userName: string, password: string, turnstileToken?: string) => Promise<void>
+  onSubmit: (input: LoginInput) => Promise<void>
   loading: boolean
   error: string
 }
 
-export function LoginScreen({ onLogin, loading, error }: LoginScreenProps) {
+/** 左の、飾りのコード(モックと同じ)。 */
+const CODE_BG = `// app.js
+import express from "express";
+const app = express();
+app.get("/", (req, res) => {
+  res.send("Hello, Launchs!");
+});
+app.listen(8080);
+
+# main.py
+from flask import Flask
+app = Flask(__name__)`
+
+/**
+ * ログインとサインアップの画面(左に飾り、右にフォーム。モックのデザイン)。
+ * 人間であることの確認(Turnstile)が有効なときは、ウィジェットを出す。
+ *
+ * @param props.onSubmit 送信されたとき(ログインかサインアップかを含む)。
+ * @param props.loading 送信中か。
+ * @param props.error 直前の失敗のメッセージ。
+ */
+export function LoginScreen({ onSubmit, loading, error }: LoginScreenProps) {
   const { data: authConfig } = useSWR<AuthConfig>("/auth/config", publicFetcher, { refreshInterval: 60_000, revalidateOnFocus: false })
+  const [mode, setMode] = useState<"login" | "signup">("login")
   const [userName, setUserName] = useState("")
   const [password, setPassword] = useState("")
+  const [invitationCode, setInvitationCode] = useState("")
   const [turnstileToken, setTurnstileToken] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
   const captchaNode = useRef<HTMLDivElement>(null)
   const captchaId = useRef<string | undefined>(undefined)
   const turnstileRequired = Boolean(authConfig?.turnstile?.enabled)
-  const turnstileEnabled = Boolean(turnstileRequired && authConfig?.turnstile.siteKey)
   const siteKey = authConfig?.turnstile?.siteKey
+  const turnstileEnabled = Boolean(turnstileRequired && siteKey)
   const challengeUnavailable = turnstileRequired && !siteKey
 
+  /** Turnstile のウィジェットを、1度だけ、描く。 */
   function mountTurnstile() {
     if (!siteKey || !captchaNode.current || !window.turnstile || captchaId.current) return
-    captchaId.current = window.turnstile.render(captchaNode.current, {
-      sitekey: siteKey,
-      callback: setTurnstileToken,
-      "expired-callback": () => setTurnstileToken(""),
-    })
+    captchaId.current = window.turnstile.render(captchaNode.current, { sitekey: siteKey, callback: setTurnstileToken, "expired-callback": () => setTurnstileToken("") })
   }
 
+  /**
+   * フォームが送信されたとき: 送ってから、Turnstile を取り直す(トークンは、1回しか使えない)。
+   *
+   * @param event フォームの送信イベント。
+   */
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (turnstileEnabled && !turnstileToken) return
-    await onLogin(userName.trim(), password, turnstileToken || undefined)
+    await onSubmit({ mode, userName: userName.trim(), password, invitationCode: invitationCode.trim() || undefined, turnstileToken: turnstileToken || undefined })
     if (turnstileEnabled) {
       setTurnstileToken("")
       if (captchaId.current) window.turnstile?.reset(captchaId.current)
@@ -55,49 +81,38 @@ export function LoginScreen({ onLogin, loading, error }: LoginScreenProps) {
   }
 
   return (
-    <main className="login-screen">
+    <div className="app">
       {turnstileEnabled && <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" strategy="afterInteractive" onLoad={mountTurnstile} />}
-      <section className="login-visual" aria-label="Launchs コンテナプラットフォーム">
-        <div className="brand-lockup"><span className="brand-mark"><TerminalSquare size={18} strokeWidth={2.2} /></span><span>launchs</span></div>
-        <div className="login-copy">
-          <div className="login-eyebrow">Container control plane</div>
-          <h1>Ship faster.<br />Stay in control.</h1>
-          <p>コンテナ、デプロイ、ネットワーク、ストレージ。インフラ運用に必要なすべてを、ひとつの静かなコントロールルームに。</p>
+      <div className="login">
+        <div className="lhero" style={{ position: "relative", overflow: "hidden" }}>
+          <pre className="codebg" aria-hidden="true">{CODE_BG}</pre>
+          <div className="row" style={{ gap: 12 }}>
+            <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)" /><path d="M9 22l7-14 7 14M12.5 17h7" stroke="#fff" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span className="disp" style={{ fontSize: 22, fontWeight: 500 }}>Launchs</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h1 className="disp" style={{ margin: 0, fontSize: 56, lineHeight: 1.2, fontWeight: 500, letterSpacing: "-.02em" }}><span style={{ display: "block" }}>デプロイを、</span><span style={{ display: "block", color: "var(--accent)" }}>もっと簡単に。</span></h1>
+            <p style={{ margin: 0, fontSize: 20 }}>インフラの心配を、減らす。</p>
+          </div>
         </div>
-        <div className="login-terminal" aria-hidden="true">
-          <div className="terminal-head"><span className="terminal-dot" /><span className="terminal-dot" /><span className="terminal-dot" /><span className="terminal-label">LAUNCHS / CONTROL PLANE</span></div>
-          <div className="terminal-line"><span className="prompt">$</span><span>launchs inspect --project &lt;id&gt;</span></div>
-          <div className="terminal-line"><span className="prompt">›</span><span>pending → apply → observed</span></div>
-        </div>
-        <div className="login-footer">SECURE WORKSPACE · OBSERVE · APPLY</div>
-      </section>
-      <section className="login-panel">
-        <div className="login-form-wrap">
-          <div className="login-mobile-brand"><span className="brand-mark"><TerminalSquare size={16} /></span><span>launchs</span></div>
-          <h2 className="login-title">おかえりなさい</h2>
-          <p className="login-subtitle">Launchs コントロールプレーンにログインしてください。</p>
-          <form onSubmit={handleSubmit}>
-            <div className="form-field">
-              <label className="form-label" htmlFor="username">ユーザー名</label>
-              <input id="username" className="form-control" autoComplete="username" autoCapitalize="none" value={userName} onChange={(event) => setUserName(event.target.value)} placeholder="ユーザー名を入力" required />
+        <div className="lform">
+          <form style={{ width: "min(400px,100%)", display: "flex", flexDirection: "column", gap: 18 }} onSubmit={handleSubmit}>
+            <div className="seg" role="tablist">
+              <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "on" : ""} onClick={() => setMode("login")}>ログイン</button>
+              <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "on" : ""} onClick={() => setMode("signup")}>サインアップ</button>
             </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="password">パスワード</label>
-              <div className="password-wrap">
-                <input id="password" className="form-control" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="パスワードを入力" required />
-                <button className="icon-button password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "パスワードを隠す" : "パスワードを表示"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
-              </div>
-            </div>
-            {turnstileEnabled && <div className="turnstile-slot"><div ref={captchaNode} /><p className="editor-help">安全確認を完了するとログインできます。</p></div>}
-            {challengeUnavailable && <div className="error-banner" role="alert"><ShieldCheck size={15} /><span>API 側で Turnstile が有効ですが、公開 site key を取得できません。管理者に設定をご確認ください。</span></div>}
-            {error && <div className="error-banner" role="alert"><ShieldCheck size={15} /><span>{error}</span></div>}
-            <button className="btn btn-primary btn-block" type="submit" disabled={loading || challengeUnavailable || (turnstileEnabled && !turnstileToken)}>
-              {loading ? <><span className="loader" />認証しています</> : <>ログイン<ArrowRight size={15} /></>}
+            <label className="lbl">ユーザー名<input className="inp" type="text" autoComplete="username" autoCapitalize="none" value={userName} onChange={(event) => setUserName(event.target.value)} placeholder="英数字とハイフン 1〜64文字" required /></label>
+            <label className="lbl">パスワード<input className="inp" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="12文字以上" required /></label>
+            {mode === "signup" && <label className="lbl">招待コード<input className="inp mono" type="text" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} placeholder="招待制のときに必須" /></label>}
+            {turnstileEnabled && <div ref={captchaNode} />}
+            {challengeUnavailable && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>人間であることの確認の設定を取得できません。管理者にご確認ください。</div>}
+            {error && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>{error}</div>}
+            <button className="btn primary" type="submit" style={{ minHeight: 46 }} disabled={loading || challengeUnavailable || (turnstileEnabled && !turnstileToken)}>
+              {loading ? "処理しています…" : mode === "login" ? "ログイン" : "アカウントを作成"}
             </button>
           </form>
-          <div className="login-note"><LockKeyhole size={13} style={{ verticalAlign: "-2px", marginRight: 5 }} />デモモードです。任意のユーザー名とパスワードでログインできます。データはこのプレビュー内のメモリだけで管理されます。</div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   )
 }
