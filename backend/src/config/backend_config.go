@@ -29,7 +29,7 @@ const (
 	defaultLogLevelText = "info"
 
 	// defaultIngressBaseDomain は、INGRESS_BASE_DOMAIN が設定されていないときに使う、ホスト名のベースドメイン。
-	defaultIngressBaseDomain = "launchs.org"
+	defaultIngressBaseDomain = "shconn.org"
 
 	// defaultIngressReservedSubdomains は、INGRESS_RESERVED_SUBDOMAINS が設定されていないときに使う、払い出さないサブドメイン。
 	defaultIngressReservedSubdomains = "www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard"
