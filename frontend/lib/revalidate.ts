@@ -10,5 +10,6 @@ import { mutate } from "swr"
  */
 export function revalidateProject(projectId: string): Promise<unknown> {
   // プロジェクトのパスと、deploy の詳細(usePending が、まとめて持つ)を含むキーを、全て対象にする。
-  return mutate((key) => typeof key === "string" && (key.includes(projectId) || key.startsWith("/api/v1/deploy/")), undefined, { revalidate: true })
+  // データを undefined にせず(キャッシュを残したまま)、取り直す。undefined にすると、取り直しが終わるまで、画面が空になる。
+  return mutate((key) => typeof key === "string" && (key.includes(projectId) || key.startsWith("/api/v1/deploy/")))
 }
