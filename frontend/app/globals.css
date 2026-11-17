@@ -179,7 +179,7 @@ body { margin: 0; background: #F8F9FA; }
 .flow-dot { fill: var(--accent); }
 
 /* 右のパネル(キャンバスの上に、右からスライドして重なる) */
-.panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; width: min(580px, 100%); background: var(--panel); border-left: 1px solid var(--line2); box-shadow: -12px 0 32px rgba(32,33,36,.10); display: flex; flex-direction: column; animation: slidein .2s ease-out; }
+.panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; width: min(780px, 100%); background: var(--panel); border-left: 1px solid var(--line2); box-shadow: -12px 0 32px rgba(32,33,36,.10); display: flex; flex-direction: column; animation: slidein .2s ease-out; }
 @keyframes slidein { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .panel-frame { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .panel-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); flex: none; }
@@ -197,3 +197,26 @@ body { margin: 0; background: #F8F9FA; }
   .rf-node { transition: none; }
   .flow-dot animateMotion { display: none; }
 }
+
+
+/* ===== ログ: 暗い端末風(大きな文字、はっきりしたレベルの色)。パネルの小さなログ(.term)も同じ見た目 ===== */
+.app .logs-card, .app .term { background: #14161F; border-color: #262A38; }
+.app .term { color: #D8DBE6; font-size: 13.5px; line-height: 1.75; border-radius: 10px; }
+.app .log-scroll { background: #14161F; color: #D8DBE6; font-size: 14px; line-height: 1.75; }
+.app .log-line:hover { background: rgba(255,255,255,.05); }
+.app .log-line.lv-error { border-left-color: #FF6B6B; background: rgba(255,107,107,.10); }
+.app .log-line.lv-warn { border-left-color: #FFB454; background: rgba(255,180,84,.07); }
+.app .log-time { flex: none; color: #8A90A6; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.app .log-pod { font-size: 11.5px; line-height: 20px; }
+.app .log-hit { background: #FFD95A; color: #14161F; border-radius: 3px; padding: 0 1px; }
+.app .log-empty { color: #8A90A6; }
+.app .log-msg.l-info, .app .term .l-info { color: #D8DBE6; }
+.app .log-msg.l-warn, .app .term .l-warn { color: #FFC978; }
+.app .log-msg.l-err, .app .term .l-err { color: #FF9A9A; }
+.app .log-msg.l-dbg, .app .term .l-dbg { color: #8A90A6; }
+.app .logs-foot { background: #1B1E2A; border-top-color: #262A38; color: #B7BBCC; }
+.app .logs-foot .faint, .app .logs-foot .sw { color: #B7BBCC; }
+.app .logs-foot .btn { background: #232736; border-color: #343A4F; color: #E6E8F0; }
+.app .logs-foot .btn:hover { background: #2C3144; }
+.app .log-scroll::-webkit-scrollbar, .app .term::-webkit-scrollbar { width: 10px; height: 10px; }
+.app .log-scroll::-webkit-scrollbar-thumb, .app .term::-webkit-scrollbar-thumb { background: #3A4054; border-radius: 6px; }

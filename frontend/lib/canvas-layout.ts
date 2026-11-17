@@ -3,13 +3,15 @@ import type { Selection } from "@/lib/nav"
 import type { DeployDetail, IngressDetail, Volume } from "@/lib/types"
 
 /** 列の間隔と、行の間隔(px)。 */
-const COLUMN_STEP = 380
+const COLUMN_STEP = 340
 const ROW_STEP = 168
 
 /** カードに出す情報。 */
 export type NodeInfo = {
-  kind: "deploy" | "ingress" | "volume"
+  kind: "deploy" | "ingress" | "volume" | "service"
   id: string
+  /** service のカードのとき、持ち主の deploy の ID(押すと、その deploy のパネルを開く)。 */
+  deployId?: string
   title: string
   subtitle: string
   /** API の状態(バッジに使う)。 */
@@ -96,12 +98,24 @@ export function buildCanvas(input: { deploys: DeployDetail[]; ingresses: Ingress
     const ports = deploy.service?.ports.map((port) => `:${port.port}`).join(" ") ?? ""
     const running = deploy.pods.filter((pod) => pod.status === "running").length
     const pending = deploy.config.pending_env !== null || deploy.config.pending_command !== null || deploy.config.pending_args !== null || deploy.volumes.pending_mounts !== null || Boolean(deploy.service?.pending_ports)
-    nodes.push({ key: nodeKey("deploy", deploy.deployId), kind: "deploy", id: deploy.deployId, title: shortImage(deploy.imageRef), subtitle: `${deploy.spec} · ${running}/${deploy.replicas} 台${ports ? ` · ${ports}` : ""}`, status: deploy.status, pending, x: COLUMN_STEP, y: row * ROW_STEP })
+    nodes.push({ key: nodeKey("deploy", deploy.deployId), kind: "deploy", id: deploy.deployId, title: shortImage(deploy.imageRef), subtitle: `${deploy.spec} · ${running}/${deploy.replicas} 台${ports ? ` · ${ports}` : ""}`, status: deploy.status, pending, x: COLUMN_STEP * 2, y: row * ROW_STEP })
   })
+
+  // service のカード(ingress と deploy の間の列)。service を持つ deploy ごとに、1枚。
+  let serviceRow = 0
+  const serviceNodeByDeploy = new Map<string, string>()
+  for (const deploy of input.deploys) {
+    const service = deploy.service
+    if (!service) continue
+    const ports = service.ports.map((port) => `${port.port}/${port.protocol}`).join("  ")
+    nodes.push({ key: nodeKey("service", service.serviceId), kind: "service", id: service.serviceId, deployId: deploy.deployId, title: service.dnsName ? service.dnsName.split(".")[0]! : service.serviceId, subtitle: ports || "ポートなし", status: service.status, extra: service.clusterIP ?? undefined, pending: Boolean(service.pending_ports), x: COLUMN_STEP, y: serviceRow * ROW_STEP })
+    serviceNodeByDeploy.set(deploy.deployId, nodeKey("service", service.serviceId))
+    serviceRow += 1
+  }
 
   // volume のカード(右の列)。
   input.volumes.forEach((volume, row) => {
-    nodes.push({ key: nodeKey("volume", volume.volumeId), kind: "volume", id: volume.volumeId, title: volume.name, subtitle: `${volume.sizeMB.toLocaleString("ja-JP")} MB${volume.pending_sizeMB !== null ? ` → ${volume.pending_sizeMB.toLocaleString("ja-JP")} MB` : ""}`, status: volume.status, pending: volume.pending_sizeMB !== null, x: COLUMN_STEP * 2, y: row * ROW_STEP })
+    nodes.push({ key: nodeKey("volume", volume.volumeId), kind: "volume", id: volume.volumeId, title: volume.name, subtitle: `${volume.sizeMB.toLocaleString("ja-JP")} MB${volume.pending_sizeMB !== null ? ` → ${volume.pending_sizeMB.toLocaleString("ja-JP")} MB` : ""}`, status: volume.status, pending: volume.pending_sizeMB !== null, x: COLUMN_STEP * 3, y: row * ROW_STEP })
   })
 
   // ingress → deploy の線(いまのルールと、未適用のルール)。
@@ -115,8 +129,15 @@ export function buildCanvas(input: { deploys: DeployDetail[]; ingresses: Ingress
       const key = `${ingress.ingressId}>${target.deployId}>${entry.rule.path}`
       if (seen.has(key)) continue
       seen.add(key)
-      edges.push({ id: key, source: nodeKey("ingress", ingress.ingressId), target: nodeKey("deploy", target.deployId), label: entry.rule.path, live: !entry.pending && ingress.status === "active" && target.status === "active", pending: entry.pending })
+      edges.push({ id: key, source: nodeKey("ingress", ingress.ingressId), target: serviceNodeByDeploy.get(target.deployId) ?? nodeKey("deploy", target.deployId), label: entry.rule.path, live: !entry.pending && ingress.status === "active" && target.status === "active", pending: entry.pending })
     }
+  }
+
+  // service → deploy の線(ポートを添える)。
+  for (const deploy of input.deploys) {
+    const serviceNode = serviceNodeByDeploy.get(deploy.deployId)
+    if (!serviceNode || !deploy.service) continue
+    edges.push({ id: `${serviceNode}>${deploy.deployId}`, source: serviceNode, target: nodeKey("deploy", deploy.deployId), label: "", live: deploy.service.status === "active" && deploy.status === "active", pending: false })
   }
 
   // deploy → volume の線(いまのマウントと、未適用のマウント)。
