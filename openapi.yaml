@@ -592,6 +592,61 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/projects/{projectId}/events:
+    get:
+      summary: プロジェクトのイベント一覧
+      description: |
+        プロジェクトの namespace で起きた k8s の Event (Pulling / Failed / BackOff / FailedScheduling など) を、最後に起きた時刻の新しい順に取得します。
+        watcher が k8s から集めて DB に保存したものを読みます (保持は 7 日、1 プロジェクト最大 5,000 件)。
+      tags: [Projects]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - name: limit
+          in: query
+          required: false
+          description: 取得件数 (1〜100、デフォルト 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - $ref: '#/components/parameters/CursorQuery'
+        - name: type
+          in: query
+          required: false
+          description: 種類で絞り込む
+          schema:
+            type: string
+            enum: [Normal, Warning]
+        - name: deployId
+          in: query
+          required: false
+          description: この deploy の Event だけにする
+          schema:
+            type: string
+        - name: reason
+          in: query
+          required: false
+          description: 理由 (完全一致)
+          schema:
+            type: string
+            example: BackOff
+      responses:
+        '200':
+          description: イベント一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEventListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
   # ============================================================================
   # Builds & Upload
   # ============================================================================
@@ -2364,6 +2419,57 @@ components:
           type: string
           format: date-time
           example: "2026-09-16T09:00:00+09:00"
+
+    ProjectEvent:
+      type: object
+      required: [eventId, type, reason, message, objectKind, objectName, deployId, count, firstSeenAt, lastSeenAt]
+      properties:
+        eventId:
+          type: string
+          example: event-1024
+        type:
+          type: string
+          enum: [Normal, Warning]
+        reason:
+          type: string
+          example: BackOff
+        message:
+          type: string
+          example: Back-off pulling image "nginx:nothing"
+        objectKind:
+          type: string
+          example: Pod
+        objectName:
+          type: string
+        deployId:
+          type: string
+          nullable: true
+          description: 対象が deploy に属するときの deploy の ID。属さなければ null
+        count:
+          type: integer
+          description: 同じ Event が起きた回数
+          example: 3
+        firstSeenAt:
+          type: string
+          format: date-time
+          example: '2026-11-17T12:00:00+09:00'
+        lastSeenAt:
+          type: string
+          format: date-time
+          example: '2026-11-17T12:05:00+09:00'
+
+    ProjectEventListResponse:
+      type: object
+      required: [events, nextCursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectEvent'
+        nextCursor:
+          type: string
+          nullable: true
+          example: null
 
     DeployListResponse:
       type: object

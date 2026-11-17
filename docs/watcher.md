@@ -7,7 +7,7 @@ k8s の Pod と Deployment の変化を受け取り、**実際の状態**を DB 
 1. **実際の k8s の状態(観測値)を DB に書くのは、watcher だけ。** バックエンドとワーカーは、観測値のテーブルに書かない。
 2. watcher は、**同時に1つだけ**動く。複数起動しても、PostgreSQL の advisory lock(`shared/leader`)で、リーダーになった1つだけが観測する。リーダーが止まる(プロセスの終了、DB の接続の切断)と、ロックが外れ、待っていた別の watcher が引き継ぐ。Raft は使わない(3台以上のクラスターと永続化が要るため、重い)。
 3. **k8s が正で、DB は k8s の写し。** 起動したとき(引き継いだときも同じ)は、先に k8s の全件を読み込み、**DB を k8s の値で上書き**する(DB の古い値は使わない)。DB にあって k8s に無いものは削除する。そのあと、イベントの受け取り(watch)に入る。
-4. watcher は、k8s を**読み取るだけ**。必要な権限は、全 namespace の `pods` と `deployments` の `get` / `list` / `watch` だけ(本番の ServiceAccount は、この ClusterRole にする)。
+4. watcher は、k8s を**読み取るだけ**。必要な権限は、全 namespace の `pods` と `deployments`(`apps`)と `events`(`core`)の `get` / `list` / `watch` だけ(本番の ServiceAccount は、この ClusterRole にする)。
 
 ## 観測するもの
 
@@ -82,6 +82,18 @@ watcher の Monitor(リーダーだけ) → Temporal に Workflow の開始を�
   3. FinishCrashLoopStop   deploy を failed にする(2 に失敗しても、applying のまま残さない)
 ```
 止まったあと、`replicas`(希望する数)はそのまま。利用者は、**同じ数でスケールし直す**(`failed` の deploy は、同じ数でもスケールできる)か、設定を直して適用して、やり直せる。
+
+## プロジェクトの Event(`project_events`)
+
+プロジェクトの namespace で起きた、**k8s の Event**(`kubectl get events` に出るもの。`Failed to pull image`、`FailedScheduling`、`BackOff`、`Killing` など)を、DB に溜める。k8s の Event は、約 1 時間で消えるので、溜めて、過去も見られるようにする。上の「Pod の状態変化のログ」(`deploy_pod_events`。watcher が、Pod の状態の差から作る)とは、別のもの。詳細と API は [project-events.md](project-events.md)。
+
+- 観測するもの: `core/v1` の `Event`。**namespace が `project-` + UUID の形のものだけ**(`events.IsProjectNamespace`)。`kube-system` などの Event は、保存しない。
+- 書き方: k8s の Event の UID(`event_uid`)で upsert する。k8s は、同じ Event を、`count` を増やして更新するので、1 行にまとまり、回数と最後の時刻が進む(古い値で上書きしても、戻らない)。
+- 起動したとき(引き継いだときも同じ)は、いまの k8s の全件を保存する。止まっていた間に増えた Event も、k8s に残っている分は拾える。
+- **k8s から Event が消えても、DB からは消さない**。保存期間(7 日)と件数の上限(1 プロジェクトにつき 5000 件)で、リーダーの watcher が、1 時間ごとに掃除する(`retention.ProjectEventPruner`。始めに 1 回)。
+- **deploy を消しても、Event は残る**(「なぜ消えたか」を見られる。deploy の行への外部キーは、持たない)。
+- `deploy_id`: 対象(Deployment、ReplicaSet、Pod)の名前から求める(`deploy-<UUID>` の部分。Deployment の名前は deploy の ID そのもの、ReplicaSet は `<deploy の ID>-<ハッシュ>`、Pod は `<deploy の ID>-<ハッシュ>-<乱数>`)。PVC など、deploy の名前でないものは空。
+- 収集は、リーダーの間だけ動く。収集が止まっても(エラー)、Pod と Deployment の観測は続ける。
 
 ## イベントの保存期間(上限)
 

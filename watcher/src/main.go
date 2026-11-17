@@ -21,6 +21,7 @@ import (
 	"launchs/shared/repository"
 	"launchs/watcher/src/config"
 	"launchs/watcher/src/crashloop"
+	"launchs/watcher/src/events"
 	"launchs/watcher/src/observer"
 	"launchs/watcher/src/retention"
 )
@@ -92,6 +93,7 @@ func run() error {
 		return electorError
 	}
 	observationRepository := repository.NewDeployObservationRepository(appDatabase)
+	projectEventRepository := repository.NewProjectEventRepository(appDatabase)
 	appLogger.Info("watcher を起動する(リーダーになるまで待つ)")
 	return elector.Run(ctx, func(leaderContext context.Context) error {
 		// ----- 上限を超えた Pod のイベントを、一定の間隔で削除する(リーダーの間だけ。観測が終わったら止める) -----
@@ -99,6 +101,17 @@ func run() error {
 		defer stopWork()
 		pruner := retention.NewPruner(observationRepository, retention.PodEventRetention, retention.MaxPodEventsPerDeploy, retention.PruneInterval, appLogger)
 		go pruner.Run(workContext)
+
+		// ----- 上限を超えたプロジェクトの k8s の Event を、一定の間隔で削除する(リーダーの間だけ) -----
+		projectEventPruner := retention.NewProjectEventPruner(projectEventRepository, retention.ProjectEventRetention, retention.MaxProjectEventsPerProject, retention.PruneInterval, appLogger)
+		go projectEventPruner.Run(workContext)
+
+		// ----- プロジェクトの namespace の k8s の Event を、DB に保存する(リーダーの間だけ。止まったときは、ログに出して、観測は続ける) -----
+		go func() {
+			if collectError := events.New(clientset, projectEventRepository, appLogger).Run(workContext); collectError != nil && workContext.Err() == nil {
+				appLogger.Error("k8s の Event の収集が止まりました", "error", collectError)
+			}
+		}()
 
 		// ----- 異常な状態が続く deploy を探して、止める Workflow を開始する(リーダーの間だけ) -----
 		crashLoopMonitor := crashloop.NewMonitor(observationRepository, crashloop.NewTemporalStarter(temporalClient), watcherConfig.CrashLoop, crashloop.CheckInterval, appLogger)
