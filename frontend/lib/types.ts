@@ -100,3 +100,19 @@ export type QuotaResponse = {
 /** GET /auth/login-history の応答(docs/endpoints/auth.md)。 */
 export type LoginEvent = { kind: "signup" | "login"; result: "success" | "failure"; reason: string | null; ip: string; userAgent: string; at: string }
 export type LoginEventsResponse = { events: LoginEvent[] }
+
+/** プロジェクトの namespace で起きた、k8s の Event(GET /api/v1/projects/:projectId/events)。 */
+export type ProjectEvent = {
+  eventId: string
+  type: "Normal" | "Warning"
+  reason: string
+  message: string
+  objectKind: string
+  objectName: string
+  deployId: string | null
+  /** 同じ Event が、起きた回数(k8s がまとめる)。 */
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+}
+export type ProjectEventListResponse = { events: ProjectEvent[]; nextCursor: string | null }

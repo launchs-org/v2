@@ -5,21 +5,22 @@ import useSWR from "swr"
 import { authenticatedFetcher } from "@/lib/api"
 import { usePending } from "@/lib/pending"
 import type { DeployTab, Nav, Selection, View } from "@/lib/nav"
-import type { Project, ProjectListResponse, User } from "@/lib/types"
+import type { Project, ProjectEventListResponse, ProjectListResponse, User } from "@/lib/types"
 import { PendingPopover } from "@/components/pending-popover"
 import { ErrorState, LoadingState } from "@/components/ui-kit"
 import { ProjectsView } from "@/components/views/projects-view"
 import { CanvasView } from "@/components/views/canvas-view"
+import { EventsView } from "@/components/views/events-view"
 import { LogsView } from "@/components/views/logs-view"
 import { SettingsView } from "@/components/views/settings-view"
 import { QuotaView } from "@/components/views/quota-view"
 import { AccountView } from "@/components/views/account-view"
 
 /** 画面の名前。 */
-const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", logs: "ログ", settings: "設定" }
+const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", events: "イベント", logs: "ログ", settings: "設定" }
 
 /** プロジェクトの中のタブ(上のバー)。 */
-const PROJECT_TABS: View[] = ["canvas", "logs", "settings"]
+const PROJECT_TABS: View[] = ["canvas", "events", "logs", "settings"]
 
 /** 最後に開いたプロジェクトを覚えるキー(localStorage)。 */
 const LAST_PROJECT_KEY = "launchs.lastProject"
@@ -104,7 +105,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
           )}
           <div className="tabs" role="tablist" style={{ marginLeft: 8 }}>
             {inProject
-              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}</button>)
+              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}{key === "events" && project && <EventsTabBadge project={project} refreshInterval={refreshInterval} />}</button>)
               : (["projects", "quota", "account"] as View[]).map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}</button>)}
           </div>
           <div className="grow" />
@@ -132,11 +133,27 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
         {data && view === "account" && <div className="page"><AccountView user={user} refreshInterval={refreshInterval} onLogout={onLogout} /></div>}
         {data && !project && PROJECT_TABS.includes(view) && <div className="page"><ProjectsView projects={projects} refreshInterval={refreshInterval} onRefresh={mutate} nav={nav} search="" createTick={0} /></div>}
         {project && view === "canvas" && <CanvasView project={project} refreshInterval={refreshInterval} nav={nav} selection={selection} deployTab={deployTab} onDeployTabChange={setDeployTab} wizardOpen={wizardOpen} onWizardClose={() => setWizardOpen(false)} />}
+        {project && view === "events" && <div className="page fill"><EventsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "logs" && <div className="page fill"><LogsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "settings" && <div className="page"><SettingsView project={project} refreshInterval={refreshInterval} nav={nav} onChanged={() => void mutate()} /></div>}
       </div>
     </div>
   )
+}
+
+/**
+ * 「イベント」タブの、警告の件数(直近 1 時間の警告。多くても 99+)。0 のときは、出さない。
+ *
+ * @param props.project プロジェクト。
+ * @param props.refreshInterval 自動更新の間隔(ミリ秒)。
+ */
+function EventsTabBadge({ project, refreshInterval }: { project: Project; refreshInterval: number }) {
+  const { data } = useSWR<ProjectEventListResponse>(`/api/v1/projects/${encodeURIComponent(project.projectId)}/events?type=Warning&limit=100`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true, refreshWhenHidden: false })
+  // 直近 1 時間に最後に起きた警告だけを数える(古い警告で、いつまでも赤くならないように)。
+  const since = Date.now() - 60 * 60 * 1000
+  const recent = (data?.events ?? []).filter((event) => new Date(event.lastSeenAt).getTime() >= since).length
+  if (recent === 0) return null
+  return <span className="cnt" style={{ marginLeft: 6, background: "#D9480F", color: "#fff", borderRadius: 4, font: "500 11px/1 Roboto, sans-serif", padding: "3px 6px" }} aria-label={`直近 1 時間の警告 ${recent} 件`}>{recent > 99 ? "99+" : recent}</span>
 }
 
 /** 上のバーの、反映待ち(プロジェクトごとに集計する)。 */
