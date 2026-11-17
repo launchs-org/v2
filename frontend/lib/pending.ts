@@ -46,7 +46,8 @@ export type PendingSummary = {
  */
 export function usePending(project: Project, refreshInterval: number): PendingSummary {
   const base = `/api/v1/projects/${encodeURIComponent(project.projectId)}`
-  const options = { refreshInterval, revalidateOnFocus: true }
+  // 一覧が変わると、詳細の問い合わせのキー(ID の並び)も変わる。そのとき、前のデータを残して、取れるまで、画面を空にしない。
+  const options = { refreshInterval, revalidateOnFocus: true, keepPreviousData: true }
   const { data: deployList } = useSWR<DeployListResponse>(`${base}/deploys?limit=100`, authenticatedFetcher, options)
   const { data: ingressList } = useSWR<IngressListResponse>(`${base}/ingresses?limit=100`, authenticatedFetcher, options)
   const { data: volumeList, mutate: refreshVolumes } = useSWR<VolumeListResponse>(`${base}/volumes?limit=100`, authenticatedFetcher, options)
@@ -70,6 +71,7 @@ export function usePending(project: Project, refreshInterval: number): PendingSu
   for (const volume of volumeList?.volumes ?? []) {
     if (volume.pending_sizeMB !== null) items.push({ key: `volume:${volume.volumeId}`, kind: "ボリューム", target: volume.name, sub: `${volume.sizeMB} MB → ${volume.pending_sizeMB} MB`, applyPath: `${base}/volumes/${encodeURIComponent(volume.volumeId)}/apply`, discardPath: `${base}/volumes/${encodeURIComponent(volume.volumeId)}/discard` })
   }
+  // 「読み込み中」は、最初のデータが届くまでだけ。キーが変わって、取り直している間は、前のデータを見せ続ける(keepPreviousData)。
   const loading = !deployList || !ingressList || !volumeList || (deployKey !== null && !deployDetails) || (ingressKey !== null && !ingressDetails)
   const refresh = () => Promise.all([refreshDeploys(), refreshIngresses(), refreshVolumes()])
   return { items, loading, refresh, deployDetails: deployDetails ?? [], ingressDetails: ingressDetails ?? [], volumes: volumeList?.volumes ?? [] }
