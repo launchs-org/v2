@@ -38,8 +38,10 @@ services:
       dockerfile: frontend/dockerfile
       target: Develop
     environment:
-      # HMR の WebSocket の接続先のポート(ブラウザが nginx につなぐ、ホスト側のポート)。
-      VITE_HMR_CLIENT_PORT: ${HTTPS_HOST_PORT:-18443}
+      # 本物の API につなぐ(live)。
+      NEXT_PUBLIC_LAUNCHS_API_MODE: live
+      # 開発サーバーに、別のホスト名のブラウザからつなぐことを許す(.env で、HTTPS_BIND_ADDRESS と同じ IP を指定する。カンマ区切り)。
+      DEV_ALLOWED_ORIGINS: ${HTTPS_BIND_ADDRESS:-127.0.0.1},localhost
     volumes:
       - .:/app
       - frontend-node-modules:/app/frontend/node_modules
