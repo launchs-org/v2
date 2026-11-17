@@ -1,0 +1,42 @@
+# nginx で、簡単なページを公開する。ページの内容(HTML)は、deploy の「ファイル」として渡す。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: nginx
+  name: nginx(静的なページ)
+  description: nginx で、簡単なページを公開します。ページの内容は、あとから、ファイルの設定で変えられます。
+  icon: globe
+  category: web
+
+variables:
+  - name: title
+    label: ページの題
+    type: string
+    default: Hello, Launchs!
+    maxLength: 100
+
+resources:
+  - kind: deploy
+    name: web
+    image: nginx:alpine
+    spec: small
+    replicas: 1
+    files:
+      - path: /usr/share/nginx/html/index.html
+        content: |
+          <!doctype html>
+          <html lang="ja">
+          <head><meta charset="utf-8"><title>${title}</title></head>
+          <body><h1>${title}</h1></body>
+          </html>
+    service:
+      ports:
+        - name: http
+          port: 80
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: web
+        port: 80
