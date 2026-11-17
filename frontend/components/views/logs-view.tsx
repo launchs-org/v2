@@ -26,17 +26,11 @@ const LOG_CSS = `
 .logs-bar .sw{display:inline-flex;align-items:center;gap:6px;color:var(--mut);font-size:13px;cursor:pointer;white-space:nowrap}
 .logs-card{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;background:var(--panel);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
 .log-viewer{position:relative;display:flex;flex-direction:column;flex:1;min-height:0}
-.log-scroll{flex:1;min-height:0;overflow:auto;padding:6px 0;line-height:1.7;font-size:12.5px;background:var(--panel)}
-.log-line{display:flex;gap:10px;align-items:baseline;padding:0 14px 0 11px;border-left:3px solid transparent}
-.log-line:hover{background:var(--panel2)}
-.log-line.lv-error{border-left-color:var(--bad);background:color-mix(in srgb,var(--bad) 6%,var(--panel))}
-.log-line.lv-warn{border-left-color:var(--warn)}
-.log-line.lv-debug{border-left-color:transparent}
+.log-scroll{flex:1;min-height:0;overflow:auto;padding:8px 0}
+.log-line{display:flex;gap:12px;align-items:baseline;padding:1px 16px 1px 12px;border-left:3px solid transparent}
 .log-pod{flex:none;color:#fff;border-radius:4px;padding:0 6px;font-size:11px;line-height:18px}
-.log-time{flex:none;color:var(--faint);font-size:11.5px}
 .log-msg{min-width:0;overflow-wrap:anywhere}
-.log-hit{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;border-radius:2px}
-.log-empty{padding:28px;color:var(--mut);text-align:center}
+.log-empty{padding:32px;text-align:center}
 .log-jump{position:absolute;right:18px;bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .logs-foot{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--line);background:var(--bg)}
 @media (prefers-reduced-motion:no-preference){.log-jump{animation:logjump .18s ease-out}@keyframes logjump{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}}

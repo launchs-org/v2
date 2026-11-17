@@ -75,7 +75,8 @@ const edgeTypes = { flow: FlowEdge }
  * @param props.onBackgroundClick 何もない所を押したとき(パネルを閉じる)。
  */
 export function Canvas({ model, selection, onSelect, onBackgroundClick }: { model: CanvasModel; selection: Selection | null; onSelect: (selection: Selection) => void; onBackgroundClick: () => void }) {
-  const selectedKey = selectionKey(selection)
+  // deploy のパネルを「service」のタブで開いているときは、service のカードを強調し、それ以外は deploy のカードを強調する。
+  const selectedKey = selection?.kind === "deploy" && selection.tab === "service" ? `service:${model.nodes.find((node) => node.kind === "service" && node.deployId === selection.id)?.id ?? ""}` : selectionKey(selection)
   // モデルから、React Flow のノードと線を作る(選択の変化でも、作り直す)。
   const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey } })), [model.nodes, selectedKey])
   const edges = useMemo<Edge[]>(() => model.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "flow", className: edge.pending ? "pending" : edge.live ? "live" : "", data: { label: edge.label, live: edge.live } })), [model.edges])
@@ -93,7 +94,7 @@ export function Canvas({ model, selection, onSelect, onBackgroundClick }: { mode
       nodesConnectable={false}
       elementsSelectable={false}
       proOptions={{ hideAttribution: true }}
-      onNodeClick={(_event, node) => { const data = node.data as NodeData; onSelect(data.kind === "deploy" ? { kind: "deploy", id: data.id } : data.kind === "ingress" ? { kind: "ingress", id: data.id } : { kind: "volume", id: data.id }) }}
+      onNodeClick={(_event, node) => { const data = node.data as NodeData; onSelect(data.kind === "deploy" ? { kind: "deploy", id: data.id } : data.kind === "service" ? { kind: "deploy", id: data.deployId ?? "", tab: "service" } : data.kind === "ingress" ? { kind: "ingress", id: data.id } : { kind: "volume", id: data.id }) }}
       onPaneClick={onBackgroundClick}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="#D5D7E0" />
