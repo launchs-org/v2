@@ -1,8 +1,0 @@
-# 全てのレスポンスに付けるセキュリティのヘッダ(frontend/nginx.conf から include する)。
-# このファイルは、nginx のイメージが、起動時に、環境変数 CSP_* を差し込んで、/etc/nginx/conf.d/security-headers.inc に書き出す(テンプレート)。
-#   CSP_TURNSTILE: 人間であることの確認(Cloudflare Turnstile)を使うときだけ、https://challenges.cloudflare.com を指定する。
-#                  空(既定)なら、外のオリジンを、一切許さない。使うときは、スクリプト、フレーム、通信の、3つだけを、そのオリジンに許す。
-add_header Content-Security-Policy "default-src 'self'; script-src 'self' ${CSP_TURNSTILE}; style-src 'self'; img-src 'self' data:; connect-src 'self' ${CSP_TURNSTILE}; frame-src 'self' ${CSP_TURNSTILE}; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header Referrer-Policy "no-referrer" always;
-add_header X-Frame-Options "DENY" always;
