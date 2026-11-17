@@ -4,6 +4,7 @@
 package server
 
 import (
+	"launchs/backend/src/template"
 	"log/slog"
 
 	"github.com/labstack/echo/v5"
@@ -36,6 +37,9 @@ type Dependencies struct {
 
 	// VolumeWorkflowStarter は、volume の拡張の反映・削除の Workflow を開始するもの。
 	VolumeWorkflowStarter service.VolumeWorkflowStarter
+
+	// TemplateRegistry は、読み込み済みのテンプレート(docs/templates.md)。nil のときは、同梱のものを読み込む(テスト用)。
+	TemplateRegistry *template.Registry
 
 	// VolumeMaxSizeMB は、volume の大きさの上限(MB)。0 のときは、既定(5120)を使う。
 	VolumeMaxSizeMB int

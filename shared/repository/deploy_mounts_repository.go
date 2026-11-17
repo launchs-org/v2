@@ -93,6 +93,19 @@ func (deployRepository *DeployRepository) SavePendingMounts(requestContext conte
 		if targetError := validateMountTargets(transaction, deploy.ProjectID, mounts, apperror.KindInvalidRequest); targetError != nil {
 			return targetError
 		}
+		// マウント先が、ファイルの path と、まったく同じでないことを確かめる(ファイルで、ボリュームを覆わないため)。
+		// 照らすファイルは、pending があればそれ、無ければ、現在のもの。
+		filesRaw := deploy.Files
+		if deploy.HasPendingFiles() {
+			filesRaw = deploy.PendingFiles
+		}
+		files, parseFilesError := model.ParseFiles(filesRaw)
+		if parseFilesError != nil {
+			return apperror.Wrap(apperror.KindInternal, "ファイルを読めませんでした", parseFilesError)
+		}
+		if overlapError := model.ValidateFiles(files, mounts); overlapError != nil {
+			return apperror.New(apperror.KindInvalidRequest, "マウント先が、ファイルの path と重なっています: "+overlapError.Error())
+		}
 		// 現在と同じ内容なら、pending は空にする(現在が NULL のときは、空の配列と同じ内容として比べる)。
 		deploy.PendingMounts = datatypes.JSON(encoded)
 		if sameMounts(deploy.Mounts, encoded) {
