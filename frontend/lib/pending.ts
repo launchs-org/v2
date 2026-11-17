@@ -1,7 +1,7 @@
 // プロジェクトの「未適用の変更(pending)」を、全リソースから集める(概要の Apply センターと、ナビの件数に使う)。
 import useSWR from "swr"
 import { api, authenticatedFetcher } from "@/lib/api"
-import type { DeployDetail, DeployListResponse, IngressDetail, IngressListResponse, Project, VolumeListResponse } from "@/lib/types"
+import type { DeployDetail, DeployListResponse, IngressDetail, IngressListResponse, Project, Volume, VolumeListResponse } from "@/lib/types"
 
 /** 未適用の変更の種類。 */
 export type PendingKind = "起動設定" | "マウント" | "Service" | "Ingress" | "ボリューム"
@@ -33,6 +33,8 @@ export type PendingSummary = {
   /** deploy の詳細(ID で引ける。概要の「最近のデプロイ」などに使い回す)。 */
   deployDetails: DeployDetail[]
   ingressDetails: IngressDetail[]
+  /** volume の一覧(キャンバスのカードに使う)。 */
+  volumes: Volume[]
 }
 
 /**
@@ -70,5 +72,5 @@ export function usePending(project: Project, refreshInterval: number): PendingSu
   }
   const loading = !deployList || !ingressList || !volumeList || (deployKey !== null && !deployDetails) || (ingressKey !== null && !ingressDetails)
   const refresh = () => Promise.all([refreshDeploys(), refreshIngresses(), refreshVolumes()])
-  return { items, loading, refresh, deployDetails: deployDetails ?? [], ingressDetails: ingressDetails ?? [] }
+  return { items, loading, refresh, deployDetails: deployDetails ?? [], ingressDetails: ingressDetails ?? [], volumes: volumeList?.volumes ?? [] }
 }
