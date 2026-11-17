@@ -11,6 +11,7 @@ import { KindIcon, type Kind } from "@/components/kind-icon"
 import { DeployPanel } from "@/components/panels/deploy-panel"
 import { IngressPanel } from "@/components/panels/ingress-panel"
 import { VolumePanel } from "@/components/panels/volume-panel"
+import { ResizeHandle, usePanelWidth } from "@/components/panels/resize-handle"
 import { DeployWizard } from "@/components/wizard/deploy-wizard"
 import { ErrorState, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import type { DeployTab } from "@/lib/nav"
@@ -43,6 +44,8 @@ export function CanvasView(props: CanvasViewProps) {
   const { project, refreshInterval, nav, selection } = props
   const pending = usePending(project, refreshInterval)
   const [menuOpen, setMenuOpen] = useState(false)
+  // 右のパネルの幅(ドラッグで変えられ、覚えておく)。
+  const [panelWidth, setPanelWidth] = usePanelWidth()
   const [volumeModal, setVolumeModal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
@@ -98,7 +101,8 @@ export function CanvasView(props: CanvasViewProps) {
       </div>
 
       {selection && (
-        <aside className="panel" aria-label="詳細">
+        <aside className="panel" aria-label="詳細" style={{ width: `min(${panelWidth}px, 100%)` }}>
+          <ResizeHandle width={panelWidth} onChange={setPanelWidth} />
           {selection.kind === "deploy" && <DeployPanel project={project} refreshInterval={refreshInterval} nav={nav} deployId={selection.id} tab={props.deployTab} onTabChange={props.onDeployTabChange} onClose={nav.closePanel} />}
           {selection.kind === "ingress" && <IngressPanel project={project} refreshInterval={refreshInterval} nav={nav} ingressId={selection.id} onClose={nav.closePanel} />}
           {selection.kind === "volume" && <VolumePanel project={project} refreshInterval={refreshInterval} nav={nav} volumeId={selection.id} onClose={nav.closePanel} />}
