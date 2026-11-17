@@ -105,6 +105,42 @@
 - Note: 作成日時の降順で返す。`limit` は1〜100(デフォルト20)。範囲外の `limit` と不正な `cursor` は 400(仮)。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
 - Note: deploy は削除が完了するとレコードごと消えるため、削除済みの deploy は含まれない。削除中(status が "deleting")のものは含まれる(仮)
 
+### プロジェクト イベント一覧
+- Get: /projects/:projectId/events
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Query(すべて任意)
+```json
+{"limit": 50, "cursor": "<前回の nextCursor>", "type": "Warning", "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "reason": "BackOff"}
+```
+- Response (200)
+```json
+{
+  "events": [
+    {
+      "eventId": "event-1024",
+      "type": "Warning",
+      "reason": "BackOff",
+      "message": "Back-off pulling image \"nginx:nothing\"",
+      "objectKind": "Pod",
+      "objectName": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-7568565fbc-b2jxm",
+      "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "count": 3,
+      "firstSeenAt": "2026-11-17T12:00:00+09:00",
+      "lastSeenAt": "2026-11-17T12:05:00+09:00"
+    }
+  ],
+  "nextCursor": null
+}
+```
+- Note: プロジェクトの namespace で起きた、**k8s の Event**(`Pulling`、`Failed`、`BackOff`、`FailedScheduling` など。`kubectl get events` に出るもの)を返す。watcher が k8s から集めて DB に保存したものを読む([watcher](../watcher.md))。k8s の Event は約 1 時間で消えるが、ここには保持の間は残る
+- Note: **最後に起きた時刻(`lastSeenAt`)の新しい順**に返す。k8s は、同じ Event を、`count` を増やして更新するので、同じ Event は 1 件にまとまり、`count` と `lastSeenAt` が進む。`limit` は 1〜100(デフォルト 50)。範囲外の `limit` と不正な `cursor` は 400。`cursor` はクライアントが解釈しない文字列で、`nextCursor` は最後のページなら null、続きがあれば文字列
+- Note: 絞り込み: `type` は `Normal` か `Warning`(それ以外は 400)、`deployId` はその deploy の Event だけ、`reason` は完全一致。`deployId` は、対象が deploy に属する(Pod、Deployment、ReplicaSet など)ときの、deploy の ID で、属さない Event(PVC、namespace 全体のものなど)は null
+- Note: 保持は 7 日、1 プロジェクトにつき最大 5,000 件(超えたら古い順に消える)。deploy やプロジェクトの Pod が消えても、保持の間は残る(deploy を削除すると、`deployId` で絞れなくなるだけ)
+- Note: 他のユーザーのプロジェクトと存在しないプロジェクトは、どちらも 404
+
 ### プロジェクト更新
 - Patch: /projects/:projectId
 - Header
