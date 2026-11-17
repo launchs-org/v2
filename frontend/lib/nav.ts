@@ -2,7 +2,7 @@
 import type { Project } from "@/lib/types"
 
 /** 画面の種類。プロジェクトを選ばなくても開ける画面(projects、quota、account)と、プロジェクトの中の画面(canvas、logs、settings)。 */
-export type View = "projects" | "quota" | "account" | "canvas" | "logs" | "settings"
+export type View = "projects" | "quota" | "account" | "canvas" | "events" | "logs" | "settings"
 
 /** deploy の詳細のタブ。 */
 export type DeployTab = "overview" | "config" | "mounts" | "service" | "logs"
