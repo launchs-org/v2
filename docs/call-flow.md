@@ -330,6 +330,24 @@ PUT /deploy/:deployId/mounts  →  POST .../mounts/apply  →  POST .../mounts/d
 - 現在のマウントは、`newDeploymentDefinition` が `deploy.Mounts` から Deployment の内容に入れる。作成・スケーリング・起動設定の反映・crash-loop の停止の、どの経路でも、マウントが落ちない。
 - マウントを持つ Deployment は、更新方式を Recreate にする(ReadWriteOnce の PVC を、古い Pod が持ったままにしないため。既定の ReadWriteMany でも、同じ方式にしている)。
 - volume の行は、マウントの保存・適用(行をロック)と、削除の受け付け(行をロック)で、同時には進まない。
+### 5.8.1 ファイル(設定ファイルなど): `/deploy/:deployId/files`
+
+マウントと同じ「pending → 適用」の形で、deploy に、設定ファイルなどを持たせる(`docs/templates.md` の段階 A)。
+
+```
+PUT  /deploy/:id/files        DeployService.UpdateFiles → model.ValidateFiles(形) → DeployRepository.SavePendingFiles
+                                (行をロックして、現在(または pending)のマウント先との重なりを確かめ、pending_files に保存。現在と同じ内容なら NULL)
+POST /deploy/:id/files/apply  DeployService.ApplyFiles → DeployRepository.BeginFilesApply(applying にする。重なりを再確認)
+ └─ ApplyDeployFilesWorkflow    ApplyPendingFiles: namespace を用意 → ConfigMap(名前は deploy の ID。キーは path の順に f0、f1 …)を作る/更新
+                                → pending のファイルを含めた Deployment に更新(各ファイルを subPath でマウント)
+                                → 起動を待つ → 失敗したら ConfigMap と Deployment を元のファイルに戻す → 結果を確定
+```
+
+- 現在のファイルは、`newDeploymentDefinition` が `deploy.Files` から Deployment の内容に入れる。起動設定・マウント・スケールの適用でも、ファイルは落ちない。
+- ファイルを持つ Deployment も、更新方式を Recreate にする(subPath のマウントは、ConfigMap を更新しても反映されないため、Pod を作り直す)。
+- ConfigMap は、deploy を削除するとき、Deployment と一緒に消す(`KubernetesDeploymentOperator.DeleteDeployment`)。プロジェクトを削除すると、namespace ごと消える。
+- ConfigMap の volume の名前は `files`。PVC の volume(名前は volume の ID)とは、ぶつからない。ボリュームの上(`/data/init.sql`)にも、別の場所にも、置ける(実機で確認)。
+
 - プロジェクトのレコードを消すとき、配下の volume の行も消す。PVC は、namespace の削除で消える。
 
 ## 6. どのファイルを見ればよいか
