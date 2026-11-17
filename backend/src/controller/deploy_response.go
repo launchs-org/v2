@@ -39,16 +39,19 @@ type DeployConfigResponse struct {
 // DeployVolumesResponse は、deploy のボリュームのマウント設定のレスポンス。
 type DeployVolumesResponse struct {
 	// Mounts は、現在のマウント。
-	Mounts []any `json:"mounts"`
+	Mounts []MountResponse `json:"mounts"`
 
 	// PendingMounts は、まだ適用していないマウント。変更が無ければ null。
-	PendingMounts []any `json:"pending_mounts"`
+	PendingMounts []MountResponse `json:"pending_mounts"`
 }
 
 // DeployResponse は、deploy 詳細のレスポンスのボディ。
 type DeployResponse struct {
 	// DeployID は、deploy の ID。
 	DeployID string `json:"deployId"`
+
+	// ProjectID は、deploy が属するプロジェクトの ID(画面が、プロジェクトの volume などを引くために使う)。
+	ProjectID string `json:"projectId"`
 
 	// Status は、deploy の状態。
 	Status string `json:"status"`
@@ -91,11 +94,25 @@ type DeployResponse struct {
 // 戻り値:
 //   - レスポンスのボディ。
 func newDeployResponse(deploy model.Deploy) DeployResponse {
+	// 現在のマウント。無ければ、null ではなく、空の配列にする。
+	mounts := mountResponses(deploy.Mounts)
+	if mounts == nil {
+		mounts = []MountResponse{}
+	}
+	// 適用前のマウント。変更が無ければ null、空の配列は「全て外す変更」として、そのまま出す。
+	var pendingMounts []MountResponse
+	if deploy.HasPendingMounts() {
+		pendingMounts = mountResponses(deploy.PendingMounts)
+		if pendingMounts == nil {
+			pendingMounts = []MountResponse{}
+		}
+	}
 	return DeployResponse{
-		DeployID: deploy.ID,
-		Status:   deploy.Status,
-		Spec:     deploy.Spec,
-		Replicas: deploy.Replicas,
+		DeployID:  deploy.ID,
+		ProjectID: deploy.ProjectID,
+		Status:    deploy.Status,
+		Spec:      deploy.Spec,
+		Replicas:  deploy.Replicas,
 		// Pod の一覧は、呼び出し側が設定する(config だけを返す API では使わない)。ここでは、空の配列(null にしない)。
 		Pods:      []PodResponse{},
 		LogPods:   []LogPodResponse{},
@@ -109,7 +126,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 			Args:           jsonOrNull(deploy.Args),
 			PendingArgs:    jsonOrNull(deploy.PendingArgs),
 		},
-		Volumes: DeployVolumesResponse{Mounts: []any{}, PendingMounts: nil},
+		Volumes: DeployVolumesResponse{Mounts: mounts, PendingMounts: pendingMounts},
 		Service: nil,
 	}
 }

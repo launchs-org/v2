@@ -65,6 +65,13 @@ export function appServer(state: ServerState, overrides: Record<string, Handler>
     if (/^GET \/api\/v1\/projects\/[^/]+\/deploys$/.test(key)) {
       return jsonResponse(200, { deploys: [], nextCursor: null });
     }
+    // ingress と volume の一覧も、既定では空(それぞれの画面のテストは、上書きする)。
+    if (/^GET \/api\/v1\/projects\/[^/]+\/ingresses$/.test(key)) {
+      return jsonResponse(200, { ingresses: [], nextCursor: null });
+    }
+    if (/^GET \/api\/v1\/projects\/[^/]+\/volumes$/.test(key)) {
+      return jsonResponse(200, { volumes: [], nextCursor: null });
+    }
     const single = /^(GET|PATCH|DELETE) \/api\/v1\/projects\/([^/]+)$/.exec(key);
     if (single !== null) {
       const project = state.projects.find((candidate) => candidate.projectId === decodeURIComponent(single[2] ?? ""));
