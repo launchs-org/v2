@@ -6,10 +6,11 @@ import { appServer, renderApp } from "../test/render_app";
 
 /** deploy の API を持つ、偽のサーバーの、上書きを作る。 */
 function deployOverrides(options: { status?: string; replicas?: number; logs?: string[] } = {}) {
-  const state = { status: options.status ?? "active", replicas: options.replicas ?? 1, deploys: [] as unknown[] };
+  const state = { status: options.status ?? "active", replicas: options.replicas ?? 1, deploys: [] as unknown[], config: { env: {}, pending_env: null, command: null, pending_command: null, args: null, pending_args: null } as Record<string, unknown>, volumes: { mounts: [], pending_mounts: null } as Record<string, unknown>, service: null as Record<string, unknown> | null };
   const logs = [...(options.logs ?? [])];
   const detail = () => ({
     deployId: "deploy-1",
+    projectId: "project-a",
     status: state.status,
     spec: "small",
     replicas: state.replicas,
@@ -17,6 +18,9 @@ function deployOverrides(options: { status?: string; replicas?: number; logs?: s
     logPods: [{ podId: "pod-aaa", running: false, startedAt: "2026-09-16T09:00:00+09:00", endedAt: "2026-09-16T09:30:00+09:00" }],
     imageRef: "registry.example/app:1.0",
     createdAt: "2026-09-16T09:00:00+09:00",
+    config: state.config,
+    volumes: state.volumes,
+    service: state.service,
   });
   const overrides = {
     "GET /api/v1/projects/project-a/deploys": () => jsonResponse(200, { deploys: state.deploys, nextCursor: null }),
@@ -116,4 +120,109 @@ describe("deploy の画面", () => {
     expect(await screen.findByText(/deploy が見つかりません/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "プロジェクトの一覧へ" })).toBeInTheDocument();
   });
+
+  it("起動設定: 環境変数を足して保存すると、全件を送り、適用前の変更として、適用と破棄が出る", async () => {
+    const user = userEvent.setup();
+    const { overrides, state } = deployOverrides();
+    const { requests } = renderApp(
+      appServer({ projects: PROJECTS }, {
+        ...overrides,
+        "PUT /api/v1/deploy/deploy-1/config": (request: RecordedRequest) => {
+          const body = request.body as { env: Record<string, string>; command: string | null; args: string[] | null };
+          state.config = { env: {}, pending_env: body.env, command: null, pending_command: body.command, args: null, pending_args: body.args };
+          return jsonResponse(200, {});
+        },
+        "POST /api/v1/deploy/deploy-1/config/apply": () => jsonResponse(200, {}),
+      }),
+      { loggedIn: true, path: "/deploys/deploy-1" },
+    );
+    await user.click(await screen.findByRole("button", { name: "環境変数を足す" }));
+    await user.type(screen.getByLabelText("環境変数のキー 1"), "PORT");
+    await user.type(screen.getByLabelText("環境変数の値 1"), "8080");
+    await user.type(screen.getByLabelText("起動コマンド"), "/app/server");
+    await user.type(screen.getByLabelText(/引数/), "--verbose");
+    await user.click(screen.getAllByRole("button", { name: "保存(適用前の変更にする)" })[0] as HTMLElement);
+    await waitFor(() => expect(requests.find((request) => request.method === "PUT" && request.path.endsWith("/config"))?.body).toEqual({ env: { PORT: "8080" }, command: "/app/server", args: ["--verbose"] }));
+    // 保存のあと、適用と破棄が出る。適用すると、サーバーに頼む。
+    await user.click(await screen.findByRole("button", { name: "適用" }));
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith("/config/apply"))).toBe(true));
+    expect(screen.getByRole("button", { name: "破棄" })).toBeInTheDocument();
+  });
+
+  it("起動設定: 環境変数のキーが重複していたら、送らずに、理由を出す", async () => {
+    const user = userEvent.setup();
+    const { overrides } = deployOverrides();
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    const add = await screen.findByRole("button", { name: "環境変数を足す" });
+    await user.click(add);
+    await user.click(add);
+    await user.type(screen.getByLabelText("環境変数のキー 1"), "A");
+    await user.type(screen.getByLabelText("環境変数のキー 2"), "A");
+    await user.click(screen.getAllByRole("button", { name: "保存(適用前の変更にする)" })[0] as HTMLElement);
+    expect(await screen.findByRole("alert")).toHaveTextContent("重複");
+    expect(requests.some((request) => request.method === "PUT")).toBe(false);
+  });
+
+  it("反映中は、設定の編集も、保存もできない", async () => {
+    const { overrides } = deployOverrides({ status: "applying" });
+    renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    expect(await screen.findByLabelText("起動コマンド")).toBeDisabled();
+    for (const button of screen.getAllByRole("button", { name: "保存(適用前の変更にする)" })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it("サービス: 無ければ作成フォームが出て、ポートを送って作る。作ったあとは、DNS 名などが出る", async () => {
+    const user = userEvent.setup();
+    const { overrides, state } = deployOverrides();
+    const { requests } = renderApp(
+      appServer({ projects: PROJECTS }, {
+        ...overrides,
+        "POST /api/v1/deploy/deploy-1/service": () => {
+          state.service = { serviceId: "service-1", ports: [{ name: "web", port: 8080, protocol: "tcp" }], pending_ports: null, status: "active", dnsName: "service-1.project-a.svc.local", clusterIP: "10.0.0.1" };
+          return jsonResponse(200, state.service);
+        },
+      }),
+      { loggedIn: true, path: "/deploys/deploy-1" },
+    );
+    await user.click(await screen.findByRole("button", { name: "サービスを作る" }));
+    await waitFor(() => expect(requests.find((request) => request.method === "POST" && request.path.endsWith("/service"))?.body).toEqual({ ports: [{ name: "web", port: 8080, protocol: "tcp" }] }));
+    expect(await screen.findByText("service-1.project-a.svc.local")).toBeInTheDocument();
+  });
+
+  it("サービス: ポートの名前が規則に合わなければ、送らない。pending があれば、適用と破棄が出る", async () => {
+    const user = userEvent.setup();
+    const { overrides, state } = deployOverrides();
+    state.service = { serviceId: "service-1", ports: [{ name: "web", port: 8080, protocol: "tcp" }], pending_ports: [{ name: "web", port: 9090, protocol: "tcp" }], status: "active", dnsName: "d", clusterIP: "1.1.1.1" };
+    const { requests } = renderApp(appServer({ projects: PROJECTS }, overrides), { loggedIn: true, path: "/deploys/deploy-1" });
+    // pending の内容(9090)が、編集欄の初期値になる。
+    expect(await screen.findByDisplayValue("9090")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "適用" }).length).toBeGreaterThan(0);
+    const name = screen.getByLabelText("ポートの名前 1");
+    await user.clear(name);
+    await user.type(name, "Bad_Name");
+    await user.click(screen.getAllByRole("button", { name: "保存(適用前の変更にする)" }).at(-1) as HTMLElement);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Bad_Name");
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("マウント: volume を選んでパスを入れて保存すると、全件を送る", async () => {
+    const user = userEvent.setup();
+    const { overrides } = deployOverrides();
+    const { requests } = renderApp(
+      appServer({ projects: PROJECTS }, {
+        ...overrides,
+        "GET /api/v1/projects/project-a/volumes": () => jsonResponse(200, { volumes: [{ volumeId: "volume-1", name: "db-data", status: "active", sizeMB: 1024, pending_sizeMB: null }], nextCursor: null }),
+        "PUT /api/v1/deploy/deploy-1/mounts": () => jsonResponse(200, {}),
+      }),
+      { loggedIn: true, path: "/deploys/deploy-1" },
+    );
+    await user.click(await screen.findByRole("button", { name: "マウントを足す" }));
+    await user.selectOptions(screen.getByLabelText("マウントする volume 1"), "volume-1");
+    await user.type(screen.getByLabelText("マウント先のパス 1"), "/data");
+    const saves = screen.getAllByRole("button", { name: "保存(適用前の変更にする)" });
+    await user.click(saves[1] as HTMLElement);
+    await waitFor(() => expect(requests.find((request) => request.method === "PUT" && request.path.endsWith("/mounts"))?.body).toEqual({ mounts: [{ volumeId: "volume-1", mountPath: "/data" }] }));
+  });
 });
+

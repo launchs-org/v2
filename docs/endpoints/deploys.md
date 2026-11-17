@@ -40,6 +40,7 @@
 ```json
 {
   "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "status": "active",
   "spec": "small",
   "replicas": 1,
@@ -109,6 +110,7 @@
   }
 }
 ```
+- Note: projectId は、deploy が属するプロジェクトの ID(画面が、そのプロジェクトの volume の一覧などを引くために使う)
 - Note: status は "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" のいずれか。"停止"という状態はなく、replicas を 0 にスケールすることで表現する
 - Note: "active" の deploy でも、Pod が異常な状態(CrashLoopBackOff など)のまま、安定して動かない状態が上限(10分)を超えて続くと、自動で止まる。k8s のレプリカが 0 になり、status は "failed" になる(replicas の値は、希望する数のまま変わらない)。同じ数でスケールし直すか、設定を直して適用すると、やり直せる。他に安定して動いている Pod がある間は、止めない
 - Note: "起動指示が完了したか"はこの status で確認する(別途ヘルスチェック専用endpointは用意しない)
