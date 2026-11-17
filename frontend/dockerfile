@@ -20,7 +20,7 @@ ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable
 
 # 依存だけを先に入れる(ソースが変わっても、依存の層を使い回すため)
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ソースを入れて、ビルドする
