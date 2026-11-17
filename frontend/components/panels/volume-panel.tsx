@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import useSWR from "swr"
 import { api, authenticatedFetcher } from "@/lib/api"
+import { revalidateProject } from "@/lib/revalidate"
 import type { ProjectViewProps } from "@/lib/nav"
 import type { QuotaResponse, Volume } from "@/lib/types"
 import { ApplyBar, Badge, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
@@ -67,9 +68,9 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
     try { await action(); await mutate() } catch (caught) { notify(caught instanceof Error ? caught.message : "操作に失敗しました", true) } finally { setBusy(false) }
   }
 
-  // 削除が終わって、ボリュームが無くなったら(取れなくなったら)、パネルを閉じる。
+  // 削除が終わって(404 になって)、ボリュームが無くなったら(取れなくなったら)、パネルを閉じる。
   // 取れなくなったら(削除が終わった、など)、パネルを閉じる(描画の途中ではなく、描画の後に閉じる)。
-  useEffect(() => { if (error && !volume) onClose() }, [error, volume, onClose])
+  useEffect(() => { if (error && (!volume || (error as { status?: number }).status === 404)) onClose() }, [error, volume, onClose])
   if (!volume) return <PanelFrame kind="volume" title={volumeId} onClose={onClose}><LoadingState /></PanelFrame>
   const mounted = volume.mountedBy ?? []
   const locked = isBusyStatus(volume.status)
@@ -112,7 +113,7 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
         <button className="btn danger" type="button" disabled={locked || busy || mounted.length > 0} onClick={() => setConfirming(true)}>{mounted.length > 0 ? "マウント中は削除できません" : "削除"}</button>
       </PanelFrame>
       {confirming && (
-        <Modal title="ボリュームを削除しますか?" description={volume.name} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を開始しました"); onClose() })}>削除</button></>}>
+        <Modal title="ボリュームを削除しますか?" description={volume.name} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>
           <div className="mut">データも削除されます。元に戻せません。</div>
         </Modal>
       )}
