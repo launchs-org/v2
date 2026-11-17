@@ -54,6 +54,18 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
   const project: Project | undefined = projects.find((candidate) => candidate.projectId === projectId)
   const inProject = project !== undefined && PROJECT_TABS.includes(view)
 
+  // ユーザーメニューは、外を押したとき、または Esc で閉じる。
+  useEffect(() => {
+    if (!userMenu) return
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) { if (event.key === "Escape") setUserMenu(false); return }
+      if (!(event.target instanceof Element) || !event.target.closest("[data-user-menu]")) setUserMenu(false)
+    }
+    document.addEventListener("mousedown", close)
+    document.addEventListener("keydown", close)
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close) }
+  }, [userMenu])
+
   // 最後に開いたプロジェクトを、読み込みが終わったとき、一度だけ開く(再読み込みしても、続きから)。
   useEffect(() => {
     if (!data || projectId) return
@@ -83,6 +95,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
           <button className="btn ghost" type="button" style={{ padding: "0 4px", gap: 8 }} onClick={() => nav.go("projects")} aria-label="プロジェクト一覧へ"><Logo /><span className="disp" style={{ fontSize: 18, fontWeight: 500, color: "var(--text)" }}>Launchs</span></button>
           {project && (
             <>
+              <button className="topnav-link" type="button" onClick={() => nav.go("projects")}>プロジェクト一覧</button>
               <span className="faint" aria-hidden="true">/</span>
               <select className="inp" style={{ width: "auto", minWidth: 160, maxWidth: 260, minHeight: 36, fontWeight: 500 }} value={project.projectId} onChange={(event) => { const next = projects.find((candidate) => candidate.projectId === event.target.value); if (next) nav.openProject(next) }} aria-label="プロジェクトを切り替え">
                 {projects.map((candidate) => <option key={candidate.projectId} value={candidate.projectId}>{candidate.name}</option>)}
@@ -98,7 +111,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
           {project && <TopPending project={project} refreshInterval={refreshInterval} nav={nav} />}
           {view === "projects" && <><label className="srch" style={{ width: 240 }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="検索" aria-label="検索" /></label><button className="btn primary" type="button" onClick={() => setCreateTick((tick) => tick + 1)}>+ プロジェクトを作成</button></>}
           <button className="btn sm ghost" type="button" onClick={() => setPolling((current) => !current)} title="自動更新の切り替え"><span className={`badge ${polling ? "b-ok live" : "b-dim"}`}><i />{polling ? "自動更新" : "更新停止"}</span></button>
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative" }} data-user-menu>
             <button className="btn ico ghost" type="button" onClick={() => setUserMenu((current) => !current)} aria-label="ユーザーメニュー" aria-expanded={userMenu}><span style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--accent)", color: "var(--ink)", display: "grid", placeItems: "center", fontWeight: 500 }}>{user.userName.slice(0, 1).toUpperCase()}</span></button>
             {userMenu && (
               <div className="addmenu" style={{ width: 220 }} role="menu" onClick={() => setUserMenu(false)}>
