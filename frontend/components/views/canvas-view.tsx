@@ -50,6 +50,8 @@ export function CanvasView(props: CanvasViewProps) {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
   const model = useMemo(() => buildCanvas({ deploys: pending.deployDetails, ingresses: pending.ingressDetails, volumes: pending.volumes }), [pending.deployDetails, pending.ingressDetails, pending.volumes])
+  // 「読み込み中」の表示は、まだ何も出ていない最初のときだけ。取り直している間は、前のカードを出し続ける(ボリュームを作ったときなどに、図が消えないように)。
+  const firstLoad = pending.loading && model.nodes.length === 0
   const empty = !pending.loading && model.nodes.length === 0
 
   /** Ingress を作る(ホスト名は自動。作ったら、そのパネルを開く)。 */
@@ -78,8 +80,8 @@ export function CanvasView(props: CanvasViewProps) {
   return (
     <div className="stage">
       <div className="canvas-wrap">
-        {pending.loading && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><LoadingState label="構成を読み込んでいます" /></div>}
-        {!pending.loading && !empty && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} />}
+        {firstLoad && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><LoadingState label="構成を読み込んでいます" /></div>}
+        {!firstLoad && !empty && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} />}
         {empty && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 24 }}>
             <div className="card pad" style={{ maxWidth: 460, textAlign: "center", display: "flex", flexDirection: "column", gap: 14, alignItems: "center", boxShadow: "0 10px 30px rgba(32,33,36,.08)" }}>
