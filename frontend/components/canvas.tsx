@@ -11,6 +11,11 @@ import type { Selection } from "@/lib/nav"
 /** ノードに持たせるデータ(React Flow の型の制約で、index signature を付ける)。 */
 type NodeData = NodeInfo & { selected: boolean; [key: string]: unknown }
 
+/** 点が、線の端から端まで流れる時間(秒)。 */
+const FLOW_SECONDS = 3
+/** 3 つの点の、開始のずれ(秒)。流れる時間を、3 等分する。 */
+const FLOW_OFFSETS = [0, FLOW_SECONDS / 3, (FLOW_SECONDS * 2) / 3]
+
 /** 動きを減らす設定か(その場合、線の点は流さない)。 */
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -27,7 +32,7 @@ function ResourceNode({ data }: NodeProps<Node<NodeData>>) {
       <Handle type="target" position={Position.Left} isConnectable={false} />
       {data.pending && <span className="pend" title="反映待ちの変更があります" />}
       <div className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
-        <KindIcon kind={data.kind} size={36} />
+        <KindIcon kind={data.kind === "internet" ? "ingress" : data.kind} size={36} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="nm" title={data.title}>{data.title}</div>
           <div className="sub">{data.subtitle}</div>
@@ -53,7 +58,13 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   return (
     <>
       <BaseEdge id={id} path={path} />
-      {animate && <circle r="3.5" className="flow-dot"><animateMotion dur="2.6s" repeatCount="indefinite" path={path} /></circle>}
+      {/* 流れる点: 3 つを、等間隔にずらして流す(1 つが端で消えても、次が続く)。端では、フェードイン・アウトして、急に戻って見えないようにする。 */}
+      {animate && FLOW_OFFSETS.map((offset) => (
+        <circle key={offset} r="3.5" className="flow-dot" opacity="0">
+          <animateMotion dur={`${FLOW_SECONDS}s`} begin={`${offset}s`} repeatCount="indefinite" path={path} keyPoints="0;1" keyTimes="0;1" calcMode="linear" />
+          <animate attributeName="opacity" dur={`${FLOW_SECONDS}s`} begin={`${offset}s`} repeatCount="indefinite" values="0;1;1;0" keyTimes="0;0.15;0.85;1" />
+        </circle>
+      ))}
       {data?.label && (
         <EdgeLabelRenderer>
           <span className="mono" style={{ position: "absolute", transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, padding: "1px 6px", borderRadius: 6, background: "#fff", border: "1px solid var(--line)", fontSize: 11, color: "var(--mut)", pointerEvents: "none" }}>{data.label}</span>
@@ -63,7 +74,29 @@ function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   )
 }
 
-const nodeTypes = { resource: ResourceNode }
+/**
+ * 「インターネット」のカード(地球のマーク)。リソースではないので、押しても何も開かない。ingress へ、線がつながる。
+ *
+ * @param props React Flow が渡す、ノードのデータ。
+ */
+function InternetNode({ data }: NodeProps<Node<NodeData>>) {
+  return (
+    <div className="rf-node rf-internet" aria-label="インターネット(外からのアクセスの入口)">
+      <div className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
+        <span className="internet-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" /></svg>
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="nm">{data.title}</div>
+          <div className="sub">{data.subtitle}</div>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Right} isConnectable={false} />
+    </div>
+  )
+}
+
+const nodeTypes = { resource: ResourceNode, internet: InternetNode }
 const edgeTypes = { flow: FlowEdge }
 
 /**
@@ -78,7 +111,7 @@ export function Canvas({ model, selection, onSelect, onBackgroundClick }: { mode
   // deploy のパネルを「service」のタブで開いているときは、service のカードを強調し、それ以外は deploy のカードを強調する。
   const selectedKey = selection?.kind === "deploy" && selection.tab === "service" ? `service:${model.nodes.find((node) => node.kind === "service" && node.deployId === selection.id)?.id ?? ""}` : selectionKey(selection)
   // モデルから、React Flow のノードと線を作る(選択の変化でも、作り直す)。
-  const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey } })), [model.nodes, selectedKey])
+  const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: node.kind === "internet" ? "internet" : "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey } })), [model.nodes, selectedKey])
   const edges = useMemo<Edge[]>(() => model.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "flow", className: edge.pending ? "pending" : edge.live ? "live" : "", data: { label: edge.label, live: edge.live } })), [model.edges])
   return (
     <ReactFlow
@@ -94,7 +127,7 @@ export function Canvas({ model, selection, onSelect, onBackgroundClick }: { mode
       nodesConnectable={false}
       elementsSelectable={false}
       proOptions={{ hideAttribution: true }}
-      onNodeClick={(_event, node) => { const data = node.data as NodeData; onSelect(data.kind === "deploy" ? { kind: "deploy", id: data.id } : data.kind === "service" ? { kind: "deploy", id: data.deployId ?? "", tab: "service" } : data.kind === "ingress" ? { kind: "ingress", id: data.id } : { kind: "volume", id: data.id }) }}
+      onNodeClick={(_event, node) => { const data = node.data as NodeData; if (data.kind === "internet") return; onSelect(data.kind === "deploy" ? { kind: "deploy", id: data.id } : data.kind === "service" ? { kind: "deploy", id: data.deployId ?? "", tab: "service" } : data.kind === "ingress" ? { kind: "ingress", id: data.id } : { kind: "volume", id: data.id }) }}
       onPaneClick={onBackgroundClick}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="#D5D7E0" />

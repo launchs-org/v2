@@ -252,3 +252,8 @@ body:has(.panel-resize.on) { cursor: col-resize; user-select: none; }
 .topnav .addmenu, .topnav .popover { z-index: 50; }
 .topnav-link { display: inline-flex; align-items: center; min-height: 36px; padding: 0 10px; border-radius: 6px; color: var(--mut); text-decoration: none; font-weight: 500; background: none; border: 0; cursor: pointer; }
 .topnav-link:hover { background: var(--panel2); color: var(--text); }
+
+/* 「インターネット」のカード: リソースではないので、押せない見た目(点線の枠、地球のマーク)にする */
+.rf-internet { width: 220px; cursor: default; border-style: dashed; background: color-mix(in srgb, var(--panel) 70%, var(--panel2)); box-shadow: none; }
+.rf-internet:hover { transform: none; box-shadow: none; }
+.internet-mark { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: #E8EAF2; color: #4A4F66; }
