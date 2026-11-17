@@ -7,7 +7,7 @@
 launchs-org 用に、Kubernetes 上でのデプロイ管理を行うバックエンド/フロントエンドを作成するプロジェクト。詳細は [readme.md](readme.md) を参照。
 
 - バックエンド: Golang + Echo + Gorm(PostgreSQL)
-- フロントエンド: React + Vite + TypeScript(SPA。`frontend/`。[docs/frontend.md](docs/frontend.md))
+- フロントエンド: Next.js + React + TypeScript(`frontend/`。[docs/frontend.md](docs/frontend.md))
 - インフラ: 開発環境 Podman(Docker)、本番環境 Kubernetes(オンプレ)
 
 ## ディレクトリ構成
@@ -57,7 +57,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - **認証は、別のコンテナ(`auth/`)**。URL は `/auth/...`(パスを書き換えずに渡す)。access token は EdDSA で、backend が JWKS の公開鍵で検証する(`shared/jwtverify`。環境変数 `AUTH_JWKS_URL`。本番は `AUTH_REQUIRE_JWKS=true` で、開発用の `DEV_USER_ID` を拒否する)。アカウント管理(管理者・BAN・招待)は `/auth/admin/...`(管理者かどうかは、毎回 DB で確かめる。最初の管理者は `task admin:create -- <userName>`。[docs/endpoints/auth_admin.md](docs/endpoints/auth_admin.md))。クォータ(アカウントごとの上限)は、アプリの DB の `quota_defaults` / `account_quotas`。作成・拡張のトランザクションの中で、ユーザーの行をロックして判定し、超えたら 409([docs/auth.md](docs/auth.md) §8・§13、[docs/endpoints/quota.md](docs/endpoints/quota.md))。
 - **コンテナの出力ログは、別コンテナ `logcollector/` が Pod のログを購読して DB に保存する**(書き手は logcollector だけ。リーダー選出は advisory lock。設計と実装メモは [docs/logs.md](docs/logs.md)。収集と API(`GET /deploy/:deployId/logs`、deploy の詳細の `logPods`)まで実装済み。Talos の実機で確認済みだが、大量出力時の取り込みの停止(原因は未特定)などの注意点が、§14 にある)。
 - **ログインとサインアップの、人間であることの確認は、Cloudflare Turnstile**(`.env` の `TURNSTILE_SITE_KEY` と `TURNSTILE_SECRET_KEY` を、両方書いたときだけ有効。既定は無効。本番の frontend には `CSP_TURNSTILE=https://challenges.cloudflare.com` も要る。[docs/auth.md](docs/auth.md) §16)。
-- **フロントエンドは、`frontend/`(React + Vite + TypeScript の SPA)**。同じホストの `/` に置き、`/api/` と `/auth/` を、backend と auth へ振り分ける(CORS は要らない)。デザインは Tailwind CSS v4 + shadcn/ui(パソコン前提、サイドバーつき)。access token はメモリ、refresh token は localStorage(本番の静的配信に、厳しい CSP を付ける)。ビルドとテストは、コンテナの中で(`task frontend:test`、`task frontend:build`)。コードの書き方は、Go の規約を、TypeScript に合わせて使う(全ての関数にコメント、一文字の変数名は禁止)。詳細は [docs/frontend.md](docs/frontend.md)。
+- **フロントエンドは、`frontend/`(Next.js + React + TypeScript。v0 で作った画面を土台にしている)**。同じホストの `/` に置き、`/api/` と `/auth/` を、backend と auth へ振り分ける(CORS は要らない)。開発は `next dev`(ポート 3000、nginx が `/` を向ける)、本番は standalone 出力を Node で動かす。`NEXT_PUBLIC_LAUNCHS_API_MODE=live` のとき本物の API、未指定だと、見せかけのデータ(`lib/mock-api.ts`)で動く(compose と dockerfile は live にしてある)。開発サーバーに別ホスト名(例: 172.30.1.1)でつなぐときは、`DEV_ALLOWED_ORIGINS`(compose が `HTTPS_BIND_ADDRESS` から作る)。型の検査は `task frontend:test`、本番イメージは `task frontend:build`。**以前の Vite 版にあった、テスト(vitest)と、厳しい CSP は、まだ無い**。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 ## docs/endpoints/ — エンドポイント仕様
