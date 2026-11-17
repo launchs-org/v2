@@ -1,6 +1,6 @@
 
-body{margin:0;background:#F8F9FA}
-.app{--bg:#F8F9FA;--panel:#FFFFFF;--panel2:#F1F3F4;--line:#E3E5E8;--line2:#DADCE0;--text:#202124;--mut:#5F6368;--faint:#6B7076;--warn:#B83C0A;--bad:#C5221F;--info:#1967D2;--ink:#FFFFFF;
+body{margin:0;background:#F6F6FA}
+.app{--bg:#F6F6FA;--panel:#FFFFFF;--panel2:#F1F3F4;--line:#E3E5E8;--line2:#DADCE0;--text:#202124;--mut:#5F6368;--faint:#6B7076;--warn:#B83C0A;--bad:#C5221F;--info:#5B3DE0;--ink:#FFFFFF;
  display:flex;flex-wrap:wrap;height:100vh;min-height:720px;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.6 'Roboto','Noto Sans JP',system-ui,sans-serif;line-break:strict;overflow-wrap:break-word;text-wrap:pretty}
 .app *{box-sizing:border-box}
 .app button,.app input,.app select{font:inherit;color:inherit}
@@ -55,7 +55,7 @@ body{margin:0;background:#F8F9FA}
 .badge{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:4px;font:500 12px/1.8 'Roboto','Noto Sans JP',sans-serif;border:1px solid transparent;white-space:nowrap}
 .badge i{width:7px;height:7px;border-radius:50%;background:currentColor}
 .b-ok{color:#137333;background:#E6F4EA;border-color:#CEEAD6}
-.b-info{color:#1967D2;background:#E8F0FE;border-color:#D2E3FC}
+.b-info{color:#5B3DE0;background:#EFEBFF;border-color:#DCD3FF}
 .b-warn{color:#B83C0A;background:#FFF1E6;border-color:#FDCFAE}
 .b-bad{color:#C5221F;background:#FCE8E6;border-color:#FAD2CF}
 .b-dim{color:#5F6368;background:#F1F3F4;border-color:#DADCE0}
@@ -120,7 +120,7 @@ body{margin:0;background:#F8F9FA}
 /* ===== Next.js 用の追加 ===== */
 html { min-width: 320px; }
 body { margin: 0; background: #F8F9FA; }
-.app { --accent: #1A73E8; }
+.app { --accent: #6D4AFF; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .app-loading { display: grid; place-items: center; height: 100vh; }
 .loader { width: 22px; height: 22px; border: 3px solid #DADCE0; border-top-color: var(--accent, #1A73E8); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
@@ -132,3 +132,123 @@ body { margin: 0; background: #F8F9FA; }
 .app .tr.clickable { cursor: pointer; }
 .app .tr.clickable:hover { background: var(--panel2); }
 @media (prefers-reduced-motion: reduce) { .loader { animation: none; } }
+
+
+/* ===== Railway 風: 色つきのリソースのアイコン、キャンバス、右のパネル、動き ===== */
+.app { --k-deploy: #6D4AFF; --k-volume: #E8920C; --k-ingress: #0E8FD6; --k-service: #12A36B; }
+.kind-icon { display: inline-grid; place-items: center; flex: none; border-radius: 10px; color: #fff; }
+.kind-icon.k-deploy { background: var(--k-deploy); }
+.kind-icon.k-volume { background: var(--k-volume); }
+.kind-icon.k-ingress { background: var(--k-ingress); }
+.kind-icon.k-service { background: var(--k-service); }
+
+/* 画面の枠: 上のバー + 中身(キャンバスは、残りの高さ全部) */
+.shell { display: flex; flex-direction: column; height: 100vh; min-height: 640px; width: 100%; }
+.topnav { display: flex; align-items: center; gap: 14px; padding: 0 20px; height: 56px; flex: none; background: var(--panel); border-bottom: 1px solid var(--line); }
+.topnav .tabs { border-bottom: 0; align-self: stretch; gap: 2px; }
+.topnav .tab { min-height: 56px; }
+.stage { position: relative; flex: 1; min-height: 0; display: flex; }
+.stage > .page { flex: 1; }
+
+/* キャンバス */
+.canvas-wrap { position: relative; flex: 1; min-width: 0; background: #F6F6FA; }
+.react-flow { --xy-background-color: transparent; }
+.canvas-wrap .react-flow__attribution { display: none; }
+.canvas-hint { position: absolute; left: 16px; bottom: 16px; z-index: 5; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,.92); border: 1px solid var(--line); color: var(--mut); font-size: 12.5px; backdrop-filter: blur(6px); }
+.canvas-add { position: absolute; right: 16px; top: 16px; z-index: 6; }
+.addmenu { position: absolute; right: 0; top: 46px; width: 260px; padding: 6px; border-radius: 10px; background: #fff; border: 1px solid var(--line2); box-shadow: 0 10px 30px rgba(32,33,36,.16); animation: pop .14s ease-out; }
+.addmenu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; }
+.addmenu button:hover { background: var(--panel2); }
+.addmenu .t { font-weight: 500; }
+.addmenu .d { font-size: 12px; color: var(--mut); }
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* カード(ノード) */
+.rf-node { width: 264px; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line2); box-shadow: 0 1px 2px rgba(32,33,36,.05); cursor: pointer; transition: box-shadow .16s ease, border-color .16s ease, transform .16s ease; }
+.rf-node:hover { box-shadow: 0 8px 24px rgba(32,33,36,.10); transform: translateY(-1px); }
+.rf-node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 24px rgba(32,33,36,.10); }
+.rf-node .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .sub { font-size: 12px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.rf-node .url { font-size: 11.5px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-node .pend { position: absolute; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: #F76707; box-shadow: 0 0 0 3px #FFF1E6; }
+.react-flow__handle { opacity: 0; pointer-events: none; }
+.react-flow__edge-path { stroke: #C3C7D0; stroke-width: 2; }
+.react-flow__edge.live .react-flow__edge-path { stroke: color-mix(in srgb, var(--accent) 55%, #fff); }
+.react-flow__edge.pending .react-flow__edge-path { stroke-dasharray: 6 5; stroke: #F76707; }
+.flow-dot { fill: var(--accent); }
+
+/* 右のパネル(キャンバスの上に、右からスライドして重なる) */
+.panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; width: min(780px, 100%); background: var(--panel); border-left: 1px solid var(--line2); box-shadow: -12px 0 32px rgba(32,33,36,.10); display: flex; flex-direction: column; animation: slidein .2s ease-out; }
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.panel-frame { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.panel-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.panel-title { flex: 1; min-width: 0; }
+.panel-title h2 { margin: 0; font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 反映待ちのポップオーバー */
+.popover { position: absolute; right: 0; top: 44px; width: 420px; max-height: 70vh; overflow: auto; z-index: 30; padding: 6px; border-radius: 12px; background: #fff; border: 1px solid var(--line2); box-shadow: 0 12px 32px rgba(32,33,36,.18); animation: pop .14s ease-out; }
+
+/* 状態のアニメーション: 動きを減らす設定では、止める */
+.badge.live i { animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .panel, .addmenu, .popover { animation: none; }
+  .rf-node { transition: none; }
+  .flow-dot animateMotion { display: none; }
+}
+
+
+/* ===== ログ: 暗い端末風(大きな文字、はっきりしたレベルの色)。パネルの小さなログ(.term)も同じ見た目 ===== */
+.app .logs-card, .app .term { background: #14161F; border-color: #262A38; }
+.app .term { color: #D8DBE6; font-size: 13.5px; line-height: 1.75; border-radius: 10px; }
+.app .log-scroll { background: #14161F; color: #D8DBE6; font-size: 14px; line-height: 1.75; }
+.app .log-line:hover { background: rgba(255,255,255,.05); }
+.app .log-line.lv-error { border-left-color: #FF6B6B; background: rgba(255,107,107,.10); }
+.app .log-line.lv-warn { border-left-color: #FFB454; background: rgba(255,180,84,.07); }
+.app .log-time { flex: none; color: #8A90A6; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.app .log-pod { font-size: 11.5px; line-height: 20px; }
+.app .log-hit { background: #FFD95A; color: #14161F; border-radius: 3px; padding: 0 1px; }
+.app .log-empty { color: #8A90A6; }
+.app .log-msg.l-info, .app .term .l-info { color: #D8DBE6; }
+.app .log-msg.l-warn, .app .term .l-warn { color: #FFC978; }
+.app .log-msg.l-err, .app .term .l-err { color: #FF9A9A; }
+.app .log-msg.l-dbg, .app .term .l-dbg { color: #8A90A6; }
+.app .logs-foot { background: #1B1E2A; border-top-color: #262A38; color: #B7BBCC; }
+.app .logs-foot .faint, .app .logs-foot .sw { color: #B7BBCC; }
+.app .logs-foot .btn { background: #232736; border-color: #343A4F; color: #E6E8F0; }
+.app .logs-foot .btn:hover { background: #2C3144; }
+.app .log-scroll::-webkit-scrollbar, .app .term::-webkit-scrollbar { width: 10px; height: 10px; }
+.app .log-scroll::-webkit-scrollbar-thumb, .app .term::-webkit-scrollbar-thumb { background: #3A4054; border-radius: 6px; }
+
+/* パネルの幅を変えるつまみ(左端。細い線は見えにくいので、当たり判定を広げる) */
+.panel-resize { position: absolute; left: -5px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 9; touch-action: none; }
+.panel-resize::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .15s ease; }
+.panel-resize:hover::after, .panel-resize:focus-visible::after, .panel-resize.on::after { background: var(--accent); }
+.panel-resize:focus-visible { outline: none; }
+body:has(.panel-resize.on) { cursor: col-resize; user-select: none; }
+
+
+/* ログの画面: 余白を詰めて、ログを、下まで伸ばす */
+.app .page.fill { padding: 12px 20px 14px; overflow: hidden; }
+
+/* パネルのログタブ: パネルの高さいっぱいに、ログを伸ばす */
+.panel-body:has(.logtail) { padding-bottom: 12px; }
+.logtail { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.logtail .term { flex: 1; min-height: 240px; height: auto; }
+.panel-body .card:has(.logtail) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* 選択欄(select)のそろえ方: 見た目を統一し、矢印と文字のズレを無くす。高さは、他の入力欄と同じ。 */
+.app select.inp { appearance: none; -webkit-appearance: none; padding: 0 34px 0 12px; line-height: 1.2; text-overflow: ellipsis;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center; }
+.app select.inp:disabled { background-color: var(--panel2); }
+.app .logs-bar { align-items: center; gap: 10px; }
+.app .logs-bar .inp, .app .logs-bar .srch { min-height: 38px; height: 38px; box-sizing: border-box; }
+.app .logs-bar .sw { height: 38px; display: inline-flex; align-items: center; }
+
+
+/* 上のバーとそのメニューは、キャンバス(React Flow)やパネルより手前に出す(メニューが、キャンバスの下に隠れていた) */
+.topnav { position: relative; z-index: 40; }
+.topnav .addmenu, .topnav .popover { z-index: 50; }
+.topnav-link { display: inline-flex; align-items: center; min-height: 36px; padding: 0 10px; border-radius: 6px; color: var(--mut); text-decoration: none; font-weight: 500; background: none; border: 0; cursor: pointer; }
+.topnav-link:hover { background: var(--panel2); color: var(--text); }

@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react"
 import useSWR from "swr"
+import { revalidateProject } from "@/lib/revalidate"
 import { api, authenticatedFetcher } from "@/lib/api"
 import type { DeployTab, ProjectViewProps } from "@/lib/nav"
-import type { DeployDetail, DeployListResponse, ServicePort, VolumeListResponse } from "@/lib/types"
+import type { DeployDetail, ServicePort, VolumeListResponse } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, isBusyStatus, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import { LogTail } from "@/components/log-tail"
+import { PanelFrame } from "@/components/panels/panel-frame"
 
-type DeploysViewProps = ProjectViewProps & { deployId: string; tab: DeployTab; onTabChange: (tab: DeployTab) => void }
+/** 差分の 1 行。 */
 type DiffLine = { cls: "d-add" | "d-chg" | "d-del"; text: string }
 
 const TABS: { key: DeployTab; label: string }[] = [
@@ -75,125 +77,50 @@ function diffByKey(before: Map<string, string>, after: Map<string, string>): Dif
 }
 
 /**
- * デプロイの画面。deployId が空なら一覧、あれば詳細(タブつき)。上のバーの「作成」で、作成のダイアログを開く。
+ * deploy の右パネル(見出し、タブ、各タブの中身)。キャンバスのカードを押すと開く。
  *
- * @param props 共通の引数と、開いている deploy、タブ。
+ * 処理の流れ:
+ *  1. deploy の詳細を取る(自動更新の間隔で取り直す)。
+ *  2. 取れなかった(削除が終わった、など)ら、パネルを閉じる。
+ *  3. 見出しと、5 つのタブ(概要・起動設定・マウント・Service・ログ)を出す。
+ *
+ * @param props.deployId 開いている deploy の ID。
+ * @param props.tab 開いているタブ。
+ * @param props.onTabChange タブを切り替えるとき。
+ * @param props.onClose パネルを閉じるとき。
  */
-export function DeploysView(props: DeploysViewProps) {
-  const { project, refreshInterval, nav, search, createTick } = props
+export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: DeployTab; onTabChange: (tab: DeployTab) => void; onClose: () => void }) {
+  const { deployId, tab, onTabChange, onClose, project, refreshInterval } = props
+  const path = `/api/v1/deploy/${encodeURIComponent(deployId)}`
+  const { data, error, mutate } = useSWR<DeployDetail>(path, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
+  const [busy, setBusy] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null)
-  const [creating, setCreating] = useState(false)
-  const [lastTick, setLastTick] = useState(createTick)
-
-  // 上のバーの「作成」が押されたら(回数が増えたら)、ダイアログを開く。
-  useEffect(() => {
-    if (createTick !== lastTick) {
-      setLastTick(createTick)
-      if (!props.deployId) setCreating(true)
-    }
-  }, [createTick, lastTick, props.deployId])
 
   /**
    * 通知を出す。
    *
    * @param message 文。
-   * @param error 失敗なら true。
+   * @param isError 失敗なら true。
    */
-  function notify(message: string, error = false) { setToast({ message, error }) }
-
-  return (
-    <>
-      {props.deployId ? <DeployDetailView {...props} notify={notify} /> : <DeployList project={project} refreshInterval={refreshInterval} nav={nav} search={search} />}
-      {creating && <CreateDeployModal projectId={project.projectId} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); nav.openDeploy(id) }} notify={notify} />}
-      {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
-    </>
-  )
-}
-
-/** デプロイの一覧(表)。 */
-function DeployList({ project, refreshInterval, nav, search }: Pick<ProjectViewProps, "project" | "refreshInterval" | "nav" | "search">) {
-  const { data, error, mutate } = useSWR<DeployListResponse>(`/api/v1/projects/${encodeURIComponent(project.projectId)}/deploys?limit=100`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const query = search.trim().toLowerCase()
-  const rows = (data?.deploys ?? []).filter((deploy) => !query || deploy.deployId.toLowerCase().includes(query) || deploy.imageRef.toLowerCase().includes(query))
-  const cols = "120px 2fr 90px 90px 140px 150px"
-  return (
-    <>
-      <div><h1 className="h1 disp">デプロイ</h1></div>
-      {error && <ErrorState message="デプロイ一覧を取得できませんでした。" onRetry={() => void mutate()} />}
-      {!data && !error && <LoadingState />}
-      {data && (
-        <div className="card tscroll"><div className="tinner" style={{ minWidth: 860 }}>
-          <div className="tr th" style={{ "--cols": cols } as React.CSSProperties}><span>デプロイ</span><span>イメージ</span><span>スペック</span><span>レプリカ</span><span>状態</span><span>作成日時</span></div>
-          {rows.map((deploy) => (
-            <button key={deploy.deployId} type="button" className="tr rowb" style={{ "--cols": cols } as React.CSSProperties} onClick={() => nav.openDeploy(deploy.deployId)}>
-              <span className="mono" style={{ fontWeight: 500, color: "var(--accent)" }} title={deploy.deployId}>{deploy.deployId.replace("deploy-", "").slice(0, 8)}</span>
-              <span className="mono mut" style={{ wordBreak: "break-all" }}>{deploy.imageRef}</span>
-              <span className="mono">{deploy.spec}</span>
-              <span className="mono">{deploy.replicas}</span>
-              <span><Badge status={deploy.status} /></span>
-              <span className="faint mono">{formatAt(deploy.createdAt)}</span>
-            </button>
-          ))}
-          {rows.length === 0 && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>{data.deploys.length ? "一致するデプロイがありません。" : "デプロイはまだありません。上の「+ デプロイを作成」から作れます。"}</div>}
-        </div></div>
-      )}
-    </>
-  )
-}
-
-/** デプロイの作成ダイアログ。 */
-function CreateDeployModal({ projectId, onClose, onCreated, notify }: { projectId: string; onClose: () => void; onCreated: (deployId: string) => void; notify: (message: string, error?: boolean) => void }) {
-  const [imageRef, setImageRef] = useState("")
-  const [spec, setSpec] = useState("small")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
-
-  /** 作成を頼む。成功したら、その deploy の詳細を開く。 */
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    // 手元で検査してから送る。
-    const trimmed = imageRef.trim()
-    if (!trimmed || /\s/.test(trimmed)) { setError("イメージを、空白なしで入力してください。"); return }
-    setBusy(true)
-    setError("")
-    try {
-      const result = await api.post<{ deployId: string }>("/api/v1/deploy", { projectId, imageRef: trimmed, spec })
-      notify("デプロイを作成しました")
-      onCreated(result.deployId)
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "作成できませんでした") } finally { setBusy(false) }
-  }
-
-  return (
-    <Modal title="デプロイを作成" onClose={onClose} footer={<><button className="btn" type="button" onClick={onClose}>キャンセル</button><button className="btn primary" type="submit" form="deploy-create" disabled={busy}>{busy ? "作成中…" : "作成"}</button></>}>
-      <form id="deploy-create" style={{ display: "flex", flexDirection: "column", gap: 14 }} onSubmit={submit}>
-        <label className="lbl">イメージ<input className="inp mono" value={imageRef} onChange={(event) => setImageRef(event.target.value)} placeholder="nginx:alpine" autoFocus /></label>
-        <label className="lbl">スペック<select className="inp" value={spec} onChange={(event) => setSpec(event.target.value)}><option value="small">small</option><option value="medium">medium</option><option value="large">large</option></select></label>
-        {error && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal" }}>{error}</div>}
-      </form>
-    </Modal>
-  )
-}
-
-/** デプロイの詳細(見出し、タブ、各タブの中身)。 */
-function DeployDetailView({ deployId, tab, onTabChange, project, refreshInterval, nav, notify }: DeploysViewProps & { notify: (message: string, error?: boolean) => void }) {
-  const path = `/api/v1/deploy/${encodeURIComponent(deployId)}`
-  const { data, error, mutate } = useSWR<DeployDetail>(path, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  const [busy, setBusy] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  function notify(message: string, isError = false) { setToast({ message, error: isError }) }
 
   /**
-   * 操作を1つ実行して、結果を通知し、取り直す。
+   * 操作を 1 つ実行して、結果を通知し、取り直す。
    *
    * @param action 実行する非同期処理。
    * @param done 成功の通知。
    */
   async function run(action: () => Promise<unknown>, done: string) {
+    // 実行中の印を付け、成功なら通知して取り直し、失敗なら、エラーとして通知する。
     setBusy(true)
     try { await action(); notify(done); await mutate() } catch (caught) { notify(caught instanceof Error ? caught.message : "操作を完了できませんでした", true) } finally { setBusy(false) }
   }
 
-  if (error && !data) return <><button className="btn" type="button" onClick={nav.closeDeploy}>一覧へ</button><ErrorState message="デプロイを取得できませんでした(削除されたかもしれません)。" onRetry={() => void mutate()} /></>
-  if (!data) return <LoadingState />
+  // 削除が終わって(404 になって)、deploy が無くなったら(取れなくなったら)、パネルを閉じる。
+  useEffect(() => { if (error && (!data || (error as { status?: number }).status === 404)) onClose() }, [error, data, onClose])
+
+  if (!data) return <PanelFrame kind="deploy" title={deployId} onClose={onClose}><LoadingState /></PanelFrame>
   // 反映中・起動中・削除中は、編集も削除もできない。
   const locked = isBusyStatus(data.status)
   const config = data.config
@@ -206,26 +133,30 @@ function DeployDetailView({ deployId, tab, onTabChange, project, refreshInterval
 
   return (
     <>
-      <div className="row" style={{ alignItems: "flex-start" }}>
-        <div className="grow">
-          <div className="row"><h1 className="h1 disp mono" style={{ fontSize: 24 }}>{data.deployId}</h1><Badge status={data.status} /><span className="badge b-dim">{data.spec}</span></div>
-          <div className="mono mut" style={{ marginTop: 6, wordBreak: "break-all" }}>{data.imageRef}</div>
+      <PanelFrame
+        kind="deploy"
+        title={data.deployId}
+        subtitle={data.imageRef}
+        badge={<><Badge status={data.status} /><span className="badge b-dim">{data.spec}</span></>}
+        actions={<button className="btn sm danger" type="button" onClick={() => setConfirmDelete(true)} disabled={locked || busy}>削除</button>}
+        onClose={onClose}
+      >
+        {lockedMessage && <div className="badge b-warn" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>{lockedMessage}</div>}
+        {/* タブ。 */}
+        <div className="tabs" role="tablist">
+          {TABS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={`tab ${tab === item.key ? "on" : ""}`} onClick={() => onTabChange(item.key)}>{item.label}{pendingTabs[item.key] && <span className="pdot" />}</button>)}
         </div>
-        <button className="btn" type="button" onClick={nav.closeDeploy}>一覧へ</button>
-        <button className="btn danger" type="button" onClick={() => setConfirmDelete(true)} disabled={locked || busy}>削除</button>
-      </div>
-      {lockedMessage && <div className="badge b-warn" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>{lockedMessage}</div>}
-      <div className="tabs" role="tablist">
-        {TABS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={`tab ${tab === item.key ? "on" : ""}`} onClick={() => onTabChange(item.key)}>{item.label}{pendingTabs[item.key] && <span className="pdot" />}</button>)}
-      </div>
-      {tab === "overview" && <OverviewTab data={data} locked={locked} busy={busy} hasPending={hasPending} run={run} onTabChange={onTabChange} />}
-      {tab === "config" && <ConfigTab data={data} locked={locked} busy={busy} run={run} />}
-      {tab === "mounts" && <MountsTab data={data} projectId={project.projectId} locked={locked} busy={busy} run={run} />}
-      {tab === "service" && <ServiceTab data={data} locked={locked} busy={busy} run={run} />}
-      {tab === "logs" && <LogsTab data={data} refreshInterval={refreshInterval} />}
+        {/* 開いているタブの中身。 */}
+        {tab === "overview" && <OverviewTab data={data} locked={locked} busy={busy} hasPending={hasPending} run={run} onTabChange={onTabChange} />}
+        {tab === "config" && <ConfigTab data={data} locked={locked} busy={busy} run={run} />}
+        {tab === "mounts" && <MountsTab data={data} projectId={project.projectId} locked={locked} busy={busy} run={run} />}
+        {tab === "service" && <ServiceTab data={data} locked={locked} busy={busy} run={run} />}
+        {tab === "logs" && <LogsTab data={data} refreshInterval={refreshInterval} />}
+      </PanelFrame>
       {confirmDelete && (
-        <Modal title="デプロイを削除しますか?" description="デプロイとログ、Service を削除します。ボリュームは残ります。元に戻せません。" onClose={() => setConfirmDelete(false)} footer={<><button className="btn" type="button" onClick={() => setConfirmDelete(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirmDelete(false); nav.closeDeploy() }, "削除を受け付けました")}>削除する</button></>}><div className="mono">{data.deployId}</div></Modal>
+        <Modal title="デプロイを削除しますか?" description="デプロイとログ、Service を削除します。ボリュームは残ります。元に戻せません。" onClose={() => setConfirmDelete(false)} footer={<><button className="btn" type="button" onClick={() => setConfirmDelete(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirmDelete(false); await revalidateProject(project.projectId) }, "削除を始めました")}>削除する</button></>}><div className="mono">{data.deployId}</div></Modal>
       )}
+      {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
     </>
   )
 }
@@ -243,7 +174,7 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
   const mountCount = (data.volumes.pending_mounts ?? data.volumes.mounts).length
   return (
     <>
-      <div className="grid g2">
+      <div className="col">
         <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <h2 className="h2">スケール</h2>
           <div className="row" style={{ gap: 18 }}>
@@ -314,7 +245,7 @@ function ConfigTab({ data, locked, busy, run }: TabProps) {
   if (hasPending && JSON.stringify(config.pending_args) !== JSON.stringify(config.args)) diff.push({ cls: "d-chg", text: `~ args: ${(config.args ?? []).join(" ") || "(none)"}   →   ${(config.pending_args ?? []).join(" ") || "(none)"}` })
 
   return (
-    <div className="split">
+    <div className="col">
       <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="row"><h2 className="h2 grow">環境変数</h2><button className="btn sm" type="button" onClick={() => setRows([...rows, ["", ""]])} disabled={locked}>+ 追加</button></div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -378,7 +309,7 @@ function MountsTab({ data, projectId, locked, busy, run }: TabProps & { projectI
   const diff = pending ? diffByKey(before, after) : []
 
   return (
-    <div className="split">
+    <div className="col">
       <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="row"><h2 className="h2 grow">ボリュームマウント</h2><button className="btn sm" type="button" onClick={() => setRows([...rows, { volumeId: "", mountPath: "" }])} disabled={locked}>+ 追加</button></div>
         {rows.length === 0 && <div className="mut">マウントはありません。</div>}
@@ -453,10 +384,10 @@ function ServiceTab({ data, locked, busy, run }: TabProps) {
     </div>
   )
 
-  if (!service) return <div className="split"><div className="col"><div className="card pad"><h2 className="h2">Service が未作成です</h2><div className="mut">ポートを公開すると、クラスタ内 DNS 名と ClusterIP が払い出されます。</div></div>{editor}</div></div>
+  if (!service) return <div className="col"><div className="col"><div className="card pad"><h2 className="h2">Service が未作成です</h2><div className="mut">ポートを公開すると、クラスタ内 DNS 名と ClusterIP が払い出されます。</div></div>{editor}</div></div>
   return (
     <>
-      <div className="split">
+      <div className="col">
         <div className="col">
           <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="row"><h2 className="h2 grow mono">{service.serviceId}</h2><Badge status={service.status} /></div>
