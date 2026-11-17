@@ -11,7 +11,7 @@ import { Badge, EmptyState, Modal, ToastNotice } from "@/components/ui-kit"
 /** 表の列幅(モックと同じ)。 */
 const COLS = { "--cols": "1.4fr 1fr 90px 100px 130px 190px" } as React.CSSProperties
 
-type ProjectsViewProps = Pick<ProjectViewProps, "nav" | "search" | "createTick" | "refreshInterval"> & { projects: Project[]; onRefresh: () => Promise<unknown> }
+type ProjectsViewProps = Pick<ProjectViewProps, "nav" | "refreshInterval"> & { search: string; createTick: number; projects: Project[]; onRefresh: () => Promise<unknown> }
 
 /**
  * プロジェクト1行(デプロイ数とボリューム数は、行ごとに取る)。
