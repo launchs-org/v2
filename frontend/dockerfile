@@ -5,9 +5,11 @@ WORKDIR /app/frontend
 
 # 本物の API につなぐ(未指定だと、画面は、見せかけのデータ(mock)で動く)。
 ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
+# pnpm を使う(ロックファイルが pnpm-lock.yaml のため)。
+RUN corepack enable
 
 # 開発サーバーを動かす(nginx が、/ をここ(3000)へ、/api と /auth を backend と auth へ振り分ける)
-CMD [ "sh", "-c", "npm install --no-audit --no-fund && npm run dev -- --port 3000" ]
+CMD [ "sh", "-c", "pnpm install --no-frozen-lockfile && pnpm exec next dev --hostname 0.0.0.0 --port 3000" ]
 
 # ビルド: Next.js を、単独で動かせる形(standalone)で、ビルドする。
 FROM node:24-slim AS Build
@@ -15,14 +17,15 @@ FROM node:24-slim AS Build
 WORKDIR /app
 
 ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
+RUN corepack enable
 
 # 依存だけを先に入れる(ソースが変わっても、依存の層を使い回すため)
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # ソースを入れて、ビルドする
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 # 本番用: standalone の出力を、Node で動かす(/api と /auth は、Traefik が backend と auth へ振り分けるので、ここには来ない)。
 FROM node:24-slim AS Production

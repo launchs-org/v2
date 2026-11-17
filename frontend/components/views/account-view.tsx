@@ -1,21 +1,50 @@
 "use client"
 
 import useSWR from "swr"
-import { Clock3, Fingerprint, KeyRound, LogOut, ShieldCheck, UserRound } from "lucide-react"
 import { authenticatedFetcher } from "@/lib/api"
-import type { LoginHistoryResponse, User } from "@/lib/types"
-import { ErrorState, formattedDate, LoadingState, PageHeading, StatusPill } from "@/components/ui-kit"
+import { shortDateTime } from "@/lib/format-date"
+import type { LoginEventsResponse, User } from "@/lib/types"
+import { Badge, ErrorState, LoadingState } from "@/components/ui-kit"
 
+/** 失敗の理由を、画面に出す言葉にする。 */
+const REASON_LABEL: Record<string, string> = { wrong_password: "パスワードの誤り", locked: "ロック中", banned: "停止中" }
+
+/**
+ * アカウント設定の画面(ユーザー情報、ログイン履歴、ログアウト)。
+ *
+ * @param props.user ログインしているユーザー。
+ * @param props.refreshInterval 自動更新の間隔(ミリ秒)。
+ * @param props.onLogout ログアウトするとき。
+ */
 export function AccountView({ user, refreshInterval, onLogout }: { user: User; refreshInterval: number; onLogout: () => Promise<void> }) {
-  const { data, error, mutate } = useSWR<LoginHistoryResponse>("/auth/login-history?limit=20", authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
-  return <section>
-    <PageHeading eyebrow="ACCOUNT & SECURITY" title="アカウント設定" description="ログイン中のユーザー情報と最近の認証アクティビティを確認します。" />
-    <div className="account-grid">
-      <div className="account-main-column">
-        <div className="card account-profile-card"><div className="account-profile-head"><span className="account-avatar-large"><UserRound size={22} /></span><div><span className="small-label">SIGNED IN AS</span><h2>{user.userName}</h2><div className="account-profile-badges"><StatusPill status={user.role} /><StatusPill status={user.status} /></div></div></div><div className="account-fields"><div className="account-field"><span>ユーザー ID</span><code>{user.userId}</code></div><div className="account-field"><span>アカウント作成日</span><strong>{formattedDate(user.createdAt)}</strong></div><div className="account-field"><span>権限</span><strong>{user.role === "admin" ? "Administrator" : "Workspace member"}</strong></div><div className="account-field"><span>アカウント状態</span><strong>{user.status === "active" ? "有効" : "停止中"}</strong></div></div></div>
-        <div className="card login-history-card"><div className="card-head"><div><h2 className="card-title">最近のログイン</h2><p className="card-subtitle">アカウントの認証履歴 · 最大20件</p></div><button className="icon-button" type="button" onClick={() => void mutate()} title="履歴を更新" aria-label="ログイン履歴を更新"><Clock3 size={15} /></button></div>{error && <ErrorState message="ログイン履歴を取得できませんでした。" onRetry={() => void mutate()} />}{!data ? <div className="card-body"><LoadingState label="ログイン履歴を取得しています" /></div> : data.history.length === 0 ? <div className="empty-state"><div className="empty-icon"><Clock3 size={17} /></div><strong>ログイン履歴はありません</strong><p>新しい認証履歴がここに表示されます。</p></div> : <div className="login-history-list">{data.history.map((entry, index) => <div className="login-history-row" key={entry.historyId}><span className={`history-marker ${index === 0 ? "current" : ""}`}><ShieldCheck size={14} /></span><div className="history-info"><strong>{index === 0 ? "現在のセッション" : "ログイン"}</strong><span>{entry.ip} · {entry.userAgent}</span></div><time dateTime={entry.createdAt}>{formattedDate(entry.createdAt)}</time></div>)}</div>}</div>
+  const { data, error, mutate } = useSWR<LoginEventsResponse>("/auth/login-history?limit=20", authenticatedFetcher, { refreshInterval, revalidateOnFocus: true })
+  return (
+    <div className="ws" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <h1 className="h1 disp">アカウント設定</h1>
+      <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="row"><h2 className="h2 grow">プロフィール</h2><button className="btn" type="button" onClick={() => void onLogout()}>ログアウト</button></div>
+        <dl className="kv" style={{ margin: 0 }}>
+          <div><dt>ユーザー名</dt><dd>{user.userName}</dd></div>
+          <div><dt>役割</dt><dd><Badge status={user.role} /></dd></div>
+          <div><dt>ユーザー ID</dt><dd className="mono">{user.userId}</dd></div>
+        </dl>
       </div>
-      <aside className="account-side-column"><div className="card security-card"><div className="security-icon"><ShieldCheck size={18} /></div><h3>デモモードで動作中</h3><p>この画面はモックデータを使用しています。変更内容はブラウザーのメモリ上だけに保持され、再読み込みで初期状態に戻ります。</p><div className="security-row"><KeyRound size={14} /><span>ローカル認証</span><span className="security-ok">デモ</span></div><div className="security-row"><Fingerprint size={14} /><span>ログイン履歴</span><span className="security-ok">サンプル</span></div></div><div className="card session-card"><div><h3>このデバイスからログアウト</h3><p>このブラウザーの認証セッションを終了します。</p></div><button className="btn btn-danger" type="button" onClick={() => void onLogout()}><LogOut size={14} />ログアウト</button></div><div className="info-banner account-api-note">アカウント情報とログイン履歴は UI 確認用のサンプルです。実際の認証サーバーには接続していません。</div></aside>
+      <div className="card tscroll"><div className="tinner">
+        <div className="pad" style={{ paddingBottom: 8 }}><h2 className="h2">最近のログイン</h2></div>
+        <div className="tr th" style={{ "--cols": "170px 110px 110px 1fr 1.6fr" } as React.CSSProperties}><span>日時</span><span>種類</span><span>結果</span><span>IP</span><span>ブラウザ</span></div>
+        {!data && !error && <LoadingState />}
+        {error && !data && <div className="pad"><ErrorState message="履歴を取得できませんでした。" onRetry={() => void mutate()} /></div>}
+        {data?.events.map((event, index) => (
+          <div key={`${event.at}-${index}`} className="tr" style={{ "--cols": "170px 110px 110px 1fr 1.6fr" } as React.CSSProperties}>
+            <span className="mono faint">{shortDateTime(event.at)}</span>
+            <span>{event.kind === "signup" ? "サインアップ" : "ログイン"}</span>
+            <span><span className={`badge ${event.result === "success" ? "b-ok" : "b-bad"}`}><i />{event.result === "success" ? "成功" : REASON_LABEL[event.reason ?? ""] ?? "失敗"}</span></span>
+            <span className="mono">{event.ip}</span>
+            <span className="mono mut" style={{ fontSize: 11.5, wordBreak: "break-all" }}>{event.userAgent}</span>
+          </div>
+        ))}
+        {data && !data.events.length && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>履歴はありません。</div>}
+      </div></div>
     </div>
-  </section>
+  )
 }
