@@ -245,3 +245,10 @@ body:has(.panel-resize.on) { cursor: col-resize; user-select: none; }
 .app .logs-bar { align-items: center; gap: 10px; }
 .app .logs-bar .inp, .app .logs-bar .srch { min-height: 38px; height: 38px; box-sizing: border-box; }
 .app .logs-bar .sw { height: 38px; display: inline-flex; align-items: center; }
+
+
+/* 上のバーとそのメニューは、キャンバス(React Flow)やパネルより手前に出す(メニューが、キャンバスの下に隠れていた) */
+.topnav { position: relative; z-index: 40; }
+.topnav .addmenu, .topnav .popover { z-index: 50; }
+.topnav-link { display: inline-flex; align-items: center; min-height: 36px; padding: 0 10px; border-radius: 6px; color: var(--mut); text-decoration: none; font-weight: 500; background: none; border: 0; cursor: pointer; }
+.topnav-link:hover { background: var(--panel2); color: var(--text); }
