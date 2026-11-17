@@ -142,3 +142,24 @@ func (starter *TemporalDeployWorkflowStarter) StartMountsApply(requestContext co
 	}
 	return nil
 }
+
+// StartFilesApply は、ファイルの反映の Workflow を開始する(開始だけを行い、完了は待たない)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - deployID: 反映する deploy の ID。
+//
+// 戻り値:
+//   - Workflow を開始できなかったときのエラー。
+func (starter *TemporalDeployWorkflowStarter) StartFilesApply(requestContext context.Context, deployID string) error {
+	// 実行ごとに別の ID で、期限つきで開始する。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewApplyDeployFilesWorkflowID(deployID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.ApplyDeployFilesWorkflowTimeout,
+	}, sharedworkflow.ApplyDeployFilesWorkflowName, sharedworkflow.ApplyDeployFilesInput{DeployID: deployID})
+	if executeError != nil {
+		return fmt.Errorf("ファイルの反映の Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}
