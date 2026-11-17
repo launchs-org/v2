@@ -8,6 +8,8 @@ import { deleteProject, getProject, renameProject } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DeploysSection } from "../components/DeploysSection";
+import { IngressesSection } from "../components/IngressesSection";
+import { VolumesSection } from "../components/VolumesSection";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageHeader } from "../components/PageHeader";
 import { Alert } from "../components/ui/alert";
@@ -116,6 +118,10 @@ export function ProjectPage() {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-6">
           <DeploysSection projectId={data.projectId} projectName={data.name} canCreate={editable} />
+
+          <IngressesSection projectId={data.projectId} projectName={data.name} canCreate={editable} />
+
+          <VolumesSection projectId={data.projectId} projectName={data.name} canCreate={editable} />
 
           <Card>
             <CardHeader>
