@@ -6,16 +6,21 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/api_error";
 import { deleteDeploy, getDeploy, scaleDeploy } from "../api/endpoints";
 import { useSession } from "../auth/AuthProvider";
+import { ConfigSection } from "../components/ConfigSection";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { LogViewer } from "../components/LogViewer";
-import { PageHeader, type Crumb } from "../components/PageHeader";
+import { MountsSection } from "../components/MountsSection";
+import { PageHeader } from "../components/PageHeader";
+import { useProjectCrumbs } from "../components/useProjectCrumbs";
+import type { DeployDetail } from "../api/types";
 import { Alert } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Label } from "../components/ui/label";
 import { Skeleton } from "../components/ui/skeleton";
+import { ServiceSection } from "../components/ServiceSection";
 import { Spinner } from "../components/ui/spinner";
 import { DEFAULT_MAX_REPLICAS, deployStatusLabel, deployStatusTone, formatDateTime, isDeployTransitioning } from "../lib/deploy";
 
@@ -60,7 +65,7 @@ export function DeployPage() {
   const deploy = useQuery({
     queryKey: ["deploy", deployId],
     queryFn: ({ signal }) => getDeploy(session.http, deployId, signal),
-    refetchInterval: (query) => (query.state.data !== undefined && isDeployTransitioning(query.state.data.status) ? POLL_INTERVAL_MS : false),
+    refetchInterval: (query) => (query.state.data !== undefined && (isDeployTransitioning(query.state.data.status) || query.state.data.service?.status === "pending" || query.state.data.service?.status === "deleting") ? POLL_INTERVAL_MS : false),
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 2,
   });
 
@@ -84,7 +89,6 @@ export function DeployPage() {
   });
 
   // 元のプロジェクトが分かれば、そこへ戻る道を作る。分からなければ、一覧へ。
-  const crumbs: Crumb[] = from === null ? [{ label: "プロジェクト", to: "/projects" }] : [{ label: "プロジェクト", to: "/projects" }, { label: from.projectName, to: `/projects/${from.projectId}` }];
   const backTo = from === null ? "/projects" : `/projects/${from.projectId}`;
   const backLabel = from === null ? "プロジェクトの一覧へ" : "プロジェクトへ戻る";
 
@@ -116,14 +120,12 @@ export function DeployPage() {
   const canScale = data.status === "active" || data.status === "failed" || data.status === "scaled_zero";
   // 削除は、反映中・起動中・削除中の間は、できない(削除失敗は、やり直せる)。
   const canDelete = data.status !== "applying" && data.status !== "pending" && data.status !== "deleting";
+  // 設定の変更は、反映中と削除中の間は、サーバーが 409 を返す。
+  const locked = data.status === "applying" || data.status === "deleting";
   const wanted = replicas ?? data.replicas;
   return (
     <>
-      <PageHeader
-        crumbs={[...crumbs, { label: "deploy" }]}
-        title={<span className="flex flex-wrap items-center gap-3"><span>deploy</span><Badge variant={deployStatusTone(data.status)}>{deployStatusLabel(data.status)}</Badge></span>}
-        description={<>ID: <code className="break-all font-mono text-xs">{data.deployId}</code></>}
-      />
+      <DeployHeader data={data} />
       {isDeployTransitioning(data.status) && <Alert variant="info">{data.status === "deleting" ? "削除しています。終わると、この画面は無くなります…" : "状態が変わるのを待っています…"}</Alert>}
       {data.status === "failed" && <Alert>起動に失敗したか、安定して動かなかったため、止まっています。同じ台数でスケールし直すと、やり直せます。</Alert>}
       {data.status === "delete_failed" && <Alert>削除に失敗して、止まっています。もう一度、削除を試せます。</Alert>}
@@ -139,6 +141,10 @@ export function DeployPage() {
               <LogViewer deployId={data.deployId} pods={data.logPods} />
             </CardContent>
           </Card>
+
+          <ConfigSection deploy={data} locked={locked} />
+          <MountsSection deploy={data} locked={locked} />
+          <ServiceSection deploy={data} locked={locked} />
 
           <Card>
             <CardHeader>
@@ -217,5 +223,21 @@ export function DeployPage() {
         <p>この deploy と、そのログを削除します。元に戻せません。</p>
       </ConfirmDialog>
     </>
+  );
+}
+
+/**
+ * deploy の画面の見出し。パンくずに、属するプロジェクトを出す(名前は、遷移で渡されたか、取りに行く)。
+ *
+ * @param props.data deploy の詳細。
+ */
+function DeployHeader({ data }: { data: DeployDetail }) {
+  const crumbs = useProjectCrumbs(data.projectId);
+  return (
+    <PageHeader
+      crumbs={[...crumbs, { label: "deploy" }]}
+      title={<span className="flex flex-wrap items-center gap-3"><span>deploy</span><Badge variant={deployStatusTone(data.status)}>{deployStatusLabel(data.status)}</Badge></span>}
+      description={<>ID: <code className="break-all font-mono text-xs">{data.deployId}</code></>}
+    />
   );
 }

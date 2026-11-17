@@ -50,6 +50,9 @@ type DeployResponse struct {
 	// DeployID は、deploy の ID。
 	DeployID string `json:"deployId"`
 
+	// ProjectID は、deploy が属するプロジェクトの ID(画面が、プロジェクトの volume などを引くために使う)。
+	ProjectID string `json:"projectId"`
+
 	// Status は、deploy の状態。
 	Status string `json:"status"`
 
@@ -105,10 +108,11 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		}
 	}
 	return DeployResponse{
-		DeployID: deploy.ID,
-		Status:   deploy.Status,
-		Spec:     deploy.Spec,
-		Replicas: deploy.Replicas,
+		DeployID:  deploy.ID,
+		ProjectID: deploy.ProjectID,
+		Status:    deploy.Status,
+		Spec:      deploy.Spec,
+		Replicas:  deploy.Replicas,
 		// Pod の一覧は、呼び出し側が設定する(config だけを返す API では使わない)。ここでは、空の配列(null にしない)。
 		Pods:      []PodResponse{},
 		LogPods:   []LogPodResponse{},
