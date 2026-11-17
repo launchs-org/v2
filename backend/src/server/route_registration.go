@@ -50,6 +50,9 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService, service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy", deployController.Create)
 	apiGroup.GET("/projects/:projectId/deploys", deployController.ListByProject)
+	// プロジェクトの namespace の k8s の Event の一覧(watcher が、DB に保存したものを読む)。
+	eventController := controller.NewProjectEventController(service.NewProjectEventService(repository.NewProjectEventRepository(dependencies.Database)))
+	apiGroup.GET("/projects/:projectId/events", eventController.List)
 	apiGroup.GET("/deploy/:deployId", deployController.Get)
 	apiGroup.GET("/deploy/:deployId/logs", deployController.GetLogs)
 	apiGroup.DELETE("/deploy/:deployId", deployController.Delete)
