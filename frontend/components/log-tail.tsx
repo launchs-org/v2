@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { api } from "@/lib/api"
+import { detectLevel, highlight } from "@/lib/log-parse"
 import type { DeployLogsResponse, LogPodInfo } from "@/lib/types"
 
 /** 画面に持つ、ログの最大の行数。超えたら、古い行から捨てる。 */
@@ -32,6 +33,9 @@ export function LogTail({ deployId, pods, podId, refreshInterval }: LogTailProps
   const [lines, setLines] = useState<string[]>([])
   const [live, setLive] = useState(true)
   const [error, setError] = useState("")
+  // この Pod のログの中での、検索(一致を強調。「一致する行だけ」で絞る)。
+  const [query, setQuery] = useState("")
+  const [onlyMatches, setOnlyMatches] = useState(false)
   const outputRef = useRef<HTMLDivElement>(null)
   const running = pods.find((pod) => pod.podId === podId)?.running ?? false
   const polling = live && refreshInterval > 0
@@ -80,19 +84,34 @@ export function LogTail({ deployId, pods, podId, refreshInterval }: LogTailProps
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight
   }, [lines])
 
+  // 検索の文字に合う行だけにする(絞り込みがオンのとき)。大文字小文字は、区別しない。
+  const needle = query.trim()
+  const shown = onlyMatches && needle ? lines.filter((line) => line.toLowerCase().includes(needle.toLowerCase())) : lines
   return (
-    <>
-      <div className="term" role="log" aria-label="デプロイログ" ref={outputRef} style={{ height: "calc(100vh - 430px)", minHeight: 240 }}>
-        {lines.length === 0 ? <div className="l-dbg">{podId ? "ログを待機しています…" : "ログのある Pod がありません"}</div> : lines.map((line, index) => <div key={index} className="l-info">{line}</div>)}
+    <div className="logtail">
+      <div className="row" style={{ gap: 8 }}>
+        <label className="srch" style={{ flex: 1, width: "auto", height: 38 }}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="この Pod のログを検索" aria-label="この Pod のログを検索" />
+        </label>
+        <label className="row" style={{ gap: 6, fontSize: 13, color: "var(--mut)", cursor: "pointer", whiteSpace: "nowrap" }}><input type="checkbox" checked={onlyMatches} onChange={(event) => setOnlyMatches(event.target.checked)} />一致する行だけ</label>
+      </div>
+      <div className="term" role="log" aria-label="デプロイログ" ref={outputRef}>
+        {lines.length === 0 ? <div className="l-dbg">{podId ? "ログを待機しています…" : "ログのある Pod がありません"}</div> : shown.length === 0 ? <div className="l-dbg">「{needle}」に合う行がありません</div> : shown.map((line, index) => {
+          // 行のレベルで、色を決める(ERROR は赤、WARN は橙)。検索に合う部分は、黄色で強調する。
+          const level = detectLevel(line)
+          const levelClass = level === "error" ? "l-err" : level === "warn" ? "l-warn" : level === "debug" ? "l-dbg" : "l-info"
+          return <div key={index} className={levelClass}>{highlight(line, needle).map((part, partIndex) => part.hit ? <mark key={partIndex} className="log-hit">{part.text}</mark> : <span key={partIndex}>{part.text}</span>)}</div>
+        })}
       </div>
       {error && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal" }}>{error}</div>}
       <div className="row">
         <span className={`badge ${polling && running ? "b-ok live" : "b-dim"}`}><i />{polling && running ? "LIVE" : "PAUSED"}</span>
-        <span className="faint mono" style={{ fontSize: 12 }}>{lines.length.toLocaleString()} 行</span>
+        <span className="faint mono" style={{ fontSize: 12 }}>{needle && onlyMatches ? `${shown.length.toLocaleString()} / ${lines.length.toLocaleString()}` : lines.length.toLocaleString()} 行</span>
         <div className="grow" />
         <button className="btn sm" type="button" onClick={() => setLive((current) => !current)}>{live ? "一時停止" : "再開"}</button>
         <button className="btn sm" type="button" onClick={() => setLines([])}>クリア</button>
       </div>
-    </>
+    </div>
   )
 }

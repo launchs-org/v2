@@ -227,3 +227,21 @@ body { margin: 0; background: #F8F9FA; }
 .panel-resize:hover::after, .panel-resize:focus-visible::after, .panel-resize.on::after { background: var(--accent); }
 .panel-resize:focus-visible { outline: none; }
 body:has(.panel-resize.on) { cursor: col-resize; user-select: none; }
+
+
+/* ログの画面: 余白を詰めて、ログを、下まで伸ばす */
+.app .page.fill { padding: 12px 20px 14px; overflow: hidden; }
+
+/* パネルのログタブ: パネルの高さいっぱいに、ログを伸ばす */
+.panel-body:has(.logtail) { padding-bottom: 12px; }
+.logtail { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.logtail .term { flex: 1; min-height: 240px; height: auto; }
+.panel-body .card:has(.logtail) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* 選択欄(select)のそろえ方: 見た目を統一し、矢印と文字のズレを無くす。高さは、他の入力欄と同じ。 */
+.app select.inp { appearance: none; -webkit-appearance: none; padding: 0 34px 0 12px; line-height: 1.2; text-overflow: ellipsis;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center; }
+.app select.inp:disabled { background-color: var(--panel2); }
+.app .logs-bar { align-items: center; gap: 10px; }
+.app .logs-bar .inp, .app .logs-bar .srch { min-height: 38px; height: 38px; box-sizing: border-box; }
+.app .logs-bar .sw { height: 38px; display: inline-flex; align-items: center; }
