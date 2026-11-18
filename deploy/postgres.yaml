@@ -48,6 +48,10 @@ spec:
       containers:
         - name: postgres
           image: postgres:17
+          # 接続の上限。各サービス 3 つずつ(アプリは、1 プロセスあたり最大 10 接続)と、Temporal(3 つ × 約 30 接続)で、約 250 になるので、余裕を見て 300。
+          args:
+            - "-c"
+            - "max_connections=300"
           ports:
             - containerPort: 5432
           env:
@@ -74,7 +78,7 @@ spec:
             failureThreshold: 6
           resources:
             requests: {cpu: 100m, memory: 256Mi}
-            limits: {memory: 1Gi}
+            limits: {memory: 2Gi}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

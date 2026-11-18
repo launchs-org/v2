@@ -13,6 +13,18 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+const (
+	// maxOpenConnections は、1 つのプロセスが、同時に開く接続の上限。
+	// 本番は、各サービスを 3 つずつ動かすので、上限が無いと、PostgreSQL の max_connections を使い切る(deploy/postgres.yaml)。
+	maxOpenConnections = 10
+
+	// maxIdleConnections は、使っていない接続を、残しておく数。
+	maxIdleConnections = 5
+
+	// connectionMaxLifetime は、1 つの接続を使い続ける最長の時間(PostgreSQL の再起動や、フェイルオーバーのあとに、古い接続が残らないようにする)。
+	connectionMaxLifetime = 30 * time.Minute
+)
+
 // connectionCheckTimeout は、接続できるかの確認(Ping)を待つ最長の時間。
 const connectionCheckTimeout = 5 * time.Second
 
@@ -45,6 +57,11 @@ func Open(databaseURL string) (*gorm.DB, error) {
 	if sqlError != nil {
 		return nil, fmt.Errorf("データベースの接続を取り出せませんでした: %w", sqlError)
 	}
+
+	// 接続の数と寿命に、上限を付ける。
+	sqlDatabase.SetMaxOpenConns(maxOpenConnections)
+	sqlDatabase.SetMaxIdleConns(maxIdleConnections)
+	sqlDatabase.SetConnMaxLifetime(connectionMaxLifetime)
 
 	// 確認が長引いてプログラムが止まらないよう、時間切れのある context を作る。
 	checkContext, cancelCheck := context.WithTimeout(context.Background(), connectionCheckTimeout)
