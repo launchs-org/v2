@@ -37,6 +37,9 @@ var kinds = map[string]string{
 	workflow.DeleteProjectWorkflowName:              "project_delete",
 }
 
+// KindProjectCreate は、プロジェクトの作成の種類。Workflow ではなく、作成のときに、backend が、成功として記録する。
+const KindProjectCreate = "project_create"
+
 // KindOf は、Workflow の型の名前から、タスクの種類を返す。
 //
 // 引数:
@@ -56,7 +59,8 @@ func KindOf(workflowType string) (string, bool) {
 //   - 種類の集合。
 func Kinds() map[string]bool {
 	// 表の値を集める。
-	result := make(map[string]bool, len(kinds))
+	result := make(map[string]bool, len(kinds)+1)
+	result[KindProjectCreate] = true
 	for _, kind := range kinds {
 		result[kind] = true
 	}

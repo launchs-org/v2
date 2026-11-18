@@ -33,6 +33,12 @@ type ProjectTask struct {
 	// ProjectID は、属するプロジェクトの ID。
 	ProjectID string `gorm:"column:project_id"`
 
+	// UserID は、持ち主のユーザー ID(プロジェクトが削除されても、削除のタスクを、持ち主が見られるように、控える)。
+	UserID string `gorm:"column:user_id"`
+
+	// ProjectName は、記録したときのプロジェクトの名前(プロジェクトが削除されたあとも、画面に出すため)。
+	ProjectName string `gorm:"column:project_name"`
+
 	// Kind は、種類(shared/projecttask の Kinds のどれか)。
 	Kind string `gorm:"column:kind"`
 

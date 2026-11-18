@@ -16,6 +16,7 @@ import (
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	"launchs/shared/model"
+	"launchs/shared/repository"
 	sharedworkflow "launchs/shared/workflow"
 )
 
@@ -28,9 +29,9 @@ type fakeStore struct {
 }
 
 // ResolveProject は、入力の DeployID から、決まったプロジェクトを返す(missing なら、見つからない)。
-func (store *fakeStore) ResolveProject(_ context.Context, input map[string]any) (string, string, bool, error) {
+func (store *fakeStore) ResolveProject(_ context.Context, input map[string]any) (repository.TaskTarget, bool, error) {
 	deployID, _ := input["DeployID"].(string)
-	return "project-1", deployID, !store.missing && deployID != "", nil
+	return repository.TaskTarget{ProjectID: "project-1", UserID: "user-1", ProjectName: "my-app", ResourceID: deployID}, !store.missing && deployID != "", nil
 }
 
 // Start は、タスクを覚える。
@@ -74,7 +75,7 @@ func TestTaskInterceptor(testingT *testing.T) {
 		if err := runWorkflow(subTest, store, testInput{DeployID: "deploy-1"}, nil); err != nil {
 			subTest.Fatal(err)
 		}
-		if len(store.started) != 1 || store.started[0].ProjectID != "project-1" || store.started[0].Kind != "deploy_create" || store.started[0].ResourceID != "deploy-1" || store.started[0].WorkflowType != sharedworkflow.CreateDeployWorkflowName {
+		if len(store.started) != 1 || store.started[0].ProjectID != "project-1" || store.started[0].UserID != "user-1" || store.started[0].ProjectName != "my-app" || store.started[0].Kind != "deploy_create" || store.started[0].ResourceID != "deploy-1" || store.started[0].WorkflowType != sharedworkflow.CreateDeployWorkflowName {
 			subTest.Fatalf("開始が記録されるはず: %+v", store.started)
 		}
 		if len(store.finished) != 1 || store.finished[0].Status != model.TaskStatusSucceeded || store.finished[0].Reason != "" || store.finished[0].WorkflowID != store.started[0].WorkflowID {

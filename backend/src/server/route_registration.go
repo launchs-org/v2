@@ -38,7 +38,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)
 	// リポジトリ、サービス、コントローラーの順につなぐ。
-	projectController := controller.NewProjectController(service.NewProjectService(projectRepository, dependencies.ProjectDeletionStarter))
+	projectController := controller.NewProjectController(service.NewProjectService(projectRepository, dependencies.ProjectDeletionStarter).WithTaskRecorder(repository.NewProjectTaskRepository(dependencies.Database)))
 	// プロジェクトの作成、一覧、取得、名前の変更のルートを登録する。
 	apiGroup.POST("/projects", projectController.Create)
 	apiGroup.GET("/projects", projectController.List)
@@ -121,6 +121,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 
 	// プロジェクトのタスク(Workflow の履歴。worker が記録する)。
 	projectTaskController := controller.NewProjectTaskController(service.NewProjectTaskService(repository.NewProjectTaskRepository(dependencies.Database)))
+	apiGroup.GET("/tasks", projectTaskController.ListAll)
 	apiGroup.GET("/projects/:projectId/tasks", projectTaskController.List)
 	apiGroup.GET("/projects/:projectId/tasks/:taskId", projectTaskController.Get)
 

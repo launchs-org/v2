@@ -17,6 +17,7 @@ import (
 
 	"launchs/shared/model"
 	"launchs/shared/projecttask"
+	"launchs/shared/repository"
 )
 
 const (
@@ -29,8 +30,8 @@ const (
 
 // TaskStore は、タスクの保存先。実体は repository.ProjectTaskRepository。
 type TaskStore interface {
-	// ResolveProject は、Workflow の入力から、対象のプロジェクトと、リソースの ID を決める。
-	ResolveProject(requestContext context.Context, input map[string]any) (string, string, bool, error)
+	// ResolveProject は、Workflow の入力から、対象のプロジェクト(持ち主と名前を含む)と、リソースの ID を決める。
+	ResolveProject(requestContext context.Context, input map[string]any) (repository.TaskTarget, bool, error)
 
 	// Start は、タスクを実行中として保存する(同じ実行は二重にならない)。
 	Start(requestContext context.Context, task model.ProjectTask) error
@@ -186,7 +187,7 @@ func inputAsMap(args []interface{}) map[string]any {
 //   - 保存したか(対象のリソースが無ければ false)と、保存のエラー。
 func (taskInterceptor *TaskInterceptor) recordStart(requestContext context.Context, record startRecord) (bool, error) {
 	// 対象のプロジェクトを決める。無ければ、記録しない。
-	projectID, resourceID, found, resolveError := taskInterceptor.store.ResolveProject(requestContext, record.Input)
+	target, found, resolveError := taskInterceptor.store.ResolveProject(requestContext, record.Input)
 	if resolveError != nil {
 		taskInterceptor.appLogger.Warn("タスクの対象のプロジェクトを決められませんでした", "workflow_id", record.WorkflowID, "error", resolveError)
 		return false, resolveError
@@ -196,7 +197,7 @@ func (taskInterceptor *TaskInterceptor) recordStart(requestContext context.Conte
 	}
 	// タスクを、実行中として保存する。
 	saveError := taskInterceptor.store.Start(requestContext, model.ProjectTask{
-		ID: model.ProjectTaskIDPrefix + uuid.NewString(), ProjectID: projectID, Kind: record.Kind, WorkflowType: record.WorkflowType, ResourceID: resourceID,
+		ID: model.ProjectTaskIDPrefix + uuid.NewString(), ProjectID: target.ProjectID, UserID: target.UserID, ProjectName: target.ProjectName, Kind: record.Kind, WorkflowType: record.WorkflowType, ResourceID: target.ResourceID,
 		WorkflowID: record.WorkflowID, RunID: record.RunID, ParentWorkflowID: record.ParentWorkflowID, StartedAt: record.StartedAt,
 	})
 	if saveError != nil {

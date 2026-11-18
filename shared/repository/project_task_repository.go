@@ -57,6 +57,21 @@ func NewProjectTaskRepository(database *gorm.DB) *ProjectTaskRepository {
 	return &ProjectTaskRepository{database: database}
 }
 
+// TaskTarget は、タスクの対象(Workflow の入力から決めたもの)。
+type TaskTarget struct {
+	// ProjectID は、対象のプロジェクトの ID。
+	ProjectID string
+
+	// UserID は、プロジェクトの持ち主のユーザー ID。
+	UserID string
+
+	// ProjectName は、プロジェクトの名前。
+	ProjectName string
+
+	// ResourceID は、対象のリソースの ID(プロジェクト自身のときは、プロジェクトの ID)。
+	ResourceID string
+}
+
 // ResolveProject は、Workflow の入力(項目名 → 値)から、対象のプロジェクトと、対象のリソースの ID を決める。
 //
 // 引数:
@@ -64,8 +79,26 @@ func NewProjectTaskRepository(database *gorm.DB) *ProjectTaskRepository {
 //   - input: Workflow の入力を、項目名 → 値にしたもの(JSON にして読み直したもの)。
 //
 // 戻り値:
-//   - プロジェクトの ID、対象のリソースの ID、見つかったか(リソースがもう無いときは、見つからない)。
-func (projectTaskRepository *ProjectTaskRepository) ResolveProject(requestContext context.Context, input map[string]any) (string, string, bool, error) {
+//   - 対象、見つかったか(リソースやプロジェクトがもう無いときは、見つからない)。
+func (projectTaskRepository *ProjectTaskRepository) ResolveProject(requestContext context.Context, input map[string]any) (TaskTarget, bool, error) {
+	// 対象のプロジェクトの ID と、リソースの ID を決める(プロジェクトの ID が入力にあれば、それ。無ければ、リソースのテーブルの project_id)。
+	projectID, resourceID, found, resolveError := projectTaskRepository.resolveIDs(requestContext, input)
+	if resolveError != nil || !found {
+		return TaskTarget{}, false, resolveError
+	}
+	// プロジェクトの持ち主と名前を引く(プロジェクトが無ければ、記録しない)。
+	var projects []model.Project
+	if findError := projectTaskRepository.database.WithContext(requestContext).Where("id = ?", projectID).Limit(1).Find(&projects).Error; findError != nil {
+		return TaskTarget{}, false, apperror.Wrap(apperror.KindInternal, "タスクの対象のプロジェクトを取得できませんでした", findError)
+	}
+	if len(projects) == 0 {
+		return TaskTarget{}, false, nil
+	}
+	return TaskTarget{ProjectID: projectID, UserID: projects[0].UserID, ProjectName: projects[0].Name, ResourceID: resourceID}, true, nil
+}
+
+// resolveIDs は、Workflow の入力から、プロジェクトの ID と、リソースの ID を決める。
+func (projectTaskRepository *ProjectTaskRepository) resolveIDs(requestContext context.Context, input map[string]any) (string, string, bool, error) {
 	// プロジェクトの ID が入力にあれば、それが対象。
 	if projectID, _ := input["ProjectID"].(string); projectID != "" {
 		return projectID, projectID, true, nil
@@ -99,9 +132,29 @@ func (projectTaskRepository *ProjectTaskRepository) ResolveProject(requestContex
 func (projectTaskRepository *ProjectTaskRepository) Start(requestContext context.Context, task model.ProjectTask) error {
 	// 同じ (workflow_id, run_id) があれば、何もしない。
 	insertError := projectTaskRepository.database.WithContext(requestContext).Exec(
-		`INSERT INTO project_tasks (id, project_id, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?) ON CONFLICT (workflow_id, run_id) DO NOTHING`,
-		task.ID, task.ProjectID, task.Kind, task.WorkflowType, task.ResourceID, task.WorkflowID, task.RunID, task.ParentWorkflowID, model.TaskStatusRunning, task.StartedAt).Error
+		`INSERT INTO project_tasks (id, project_id, user_id, project_name, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?) ON CONFLICT (workflow_id, run_id) DO NOTHING`,
+		task.ID, task.ProjectID, task.UserID, task.ProjectName, task.Kind, task.WorkflowType, task.ResourceID, task.WorkflowID, task.RunID, task.ParentWorkflowID, model.TaskStatusRunning, task.StartedAt).Error
+	if insertError != nil {
+		return apperror.Wrap(apperror.KindInternal, "タスクを保存できませんでした", insertError)
+	}
+	return nil
+}
+
+// RecordFinished は、すぐに終わる出来事(プロジェクトの作成など)を、終わったタスクとして、1 回で保存する。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - task: 保存するタスク(ID、持ち主、種類、対象、状態、開始と終了の日時を含む)。
+//
+// 戻り値:
+//   - データベースのエラー。
+func (projectTaskRepository *ProjectTaskRepository) RecordFinished(requestContext context.Context, task model.ProjectTask) error {
+	// 同じ (workflow_id, run_id) があれば、何もしない。
+	insertError := projectTaskRepository.database.WithContext(requestContext).Exec(
+		`INSERT INTO project_tasks (id, project_id, user_id, project_name, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at, finished_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?) ON CONFLICT (workflow_id, run_id) DO NOTHING`,
+		task.ID, task.ProjectID, task.UserID, task.ProjectName, task.Kind, task.WorkflowType, task.ResourceID, task.WorkflowID, task.RunID, task.Status, task.Error, task.StartedAt, task.FinishedAt).Error
 	if insertError != nil {
 		return apperror.Wrap(apperror.KindInternal, "タスクを保存できませんでした", insertError)
 	}
@@ -155,6 +208,55 @@ func (projectTaskRepository *ProjectTaskRepository) ensureProjectOwned(requestCo
 	return nil
 }
 
+// applyListFilter は、一覧の検索に、絞り込みと、ページの位置を足す。
+//
+// 引数:
+//   - query: トップのタスクを、新しい順に並べた検索。
+//   - filter: 絞り込み。
+//   - after: 前のページの最後の位置。最初は nil。
+//   - now: 現在の日時(lost の判定に使う)。
+//
+// 戻り値:
+//   - 足した検索。絞り込みが不正なら invalid_request。
+func applyListFilter(query *gorm.DB, filter TaskFilter, after *pagination.Position, now time.Time) (*gorm.DB, error) {
+	// ページの位置、種類、状態の順に足す。
+	if after != nil {
+		query = query.Where("(started_at, id) < (?, ?)", after.CreatedAt, after.ID)
+	}
+	if filter.Kind != "" {
+		query = query.Where("kind = ?", filter.Kind)
+	}
+	staleBefore := now.Add(-model.TaskStaleAfter)
+	switch filter.Status {
+	case "":
+	case model.TaskStatusRunning:
+		query = query.Where("status = ? AND started_at >= ?", model.TaskStatusRunning, staleBefore)
+	case model.TaskStatusLost:
+		query = query.Where("status = ? AND started_at < ?", model.TaskStatusRunning, staleBefore)
+	case model.TaskStatusSucceeded, model.TaskStatusFailed, model.TaskStatusCanceled:
+		query = query.Where("status = ?", filter.Status)
+	default:
+		return nil, apperror.New(apperror.KindInvalidRequest, "status は running、succeeded、failed、canceled、lost のどれかにしてください")
+	}
+	return query, nil
+}
+
+// listPage は、検索を実行し、limit 件までと、次のページの位置を返す。
+func listPage(query *gorm.DB, limit int) ([]model.ProjectTask, *pagination.Position, error) {
+	// 次のページがあるかを知るため、1 件多く読む。
+	var tasks []model.ProjectTask
+	if findError := query.Order("started_at DESC, id DESC").Limit(limit + 1).Find(&tasks).Error; findError != nil {
+		return nil, nil, apperror.Wrap(apperror.KindInternal, "タスクの一覧を取得できませんでした", findError)
+	}
+	// limit 件以下なら、次のページは無い。
+	if len(tasks) <= limit {
+		return tasks, nil, nil
+	}
+	tasks = tasks[:limit]
+	last := tasks[limit-1]
+	return tasks, &pagination.Position{CreatedAt: last.StartedAt, ID: last.ID}, nil
+}
+
 // List は、プロジェクトのトップのタスク(子の Workflow を除く)を、新しい順に返す。
 //
 // 引数:
@@ -173,38 +275,35 @@ func (projectTaskRepository *ProjectTaskRepository) List(requestContext context.
 	if ownedError := projectTaskRepository.ensureProjectOwned(requestContext, userID, projectID); ownedError != nil {
 		return nil, nil, ownedError
 	}
-	// トップのタスクを、新しい順に(次のページがあるかを知るため、1 件多く読む)。
-	query := projectTaskRepository.database.WithContext(requestContext).Where("project_id = ? AND parent_workflow_id = ''", projectID).
-		Order("started_at DESC, id DESC").Limit(limit + 1)
-	if after != nil {
-		query = query.Where("(started_at, id) < (?, ?)", after.CreatedAt, after.ID)
+	query, filterError := applyListFilter(projectTaskRepository.database.WithContext(requestContext).Where("project_id = ? AND parent_workflow_id = ''", projectID), filter, after, now)
+	if filterError != nil {
+		return nil, nil, filterError
 	}
-	if filter.Kind != "" {
-		query = query.Where("kind = ?", filter.Kind)
+	return listPage(query, limit)
+}
+
+// ListByUser は、ユーザーの全てのプロジェクトの、トップのタスクを、新しい順に返す(削除されたプロジェクトのタスクも含む)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - filter: 絞り込み。
+//   - limit: 1 ページの件数。
+//   - after: 前のページの最後の位置。最初は nil。
+//   - now: 現在の日時(lost の判定に使う)。
+//
+// 戻り値:
+//   - タスクと、次のページの位置(最後のページなら nil)。絞り込みが不正なら invalid_request。
+func (projectTaskRepository *ProjectTaskRepository) ListByUser(requestContext context.Context, userID string, filter TaskFilter, limit int, after *pagination.Position, now time.Time) ([]model.ProjectTask, *pagination.Position, error) {
+	// 条件の値が空だと、Gorm が条件を無視して他のユーザーの行が対象になるので、先に拒否する。
+	if hasEmpty(userID) {
+		return nil, nil, apperror.New(apperror.KindNotFound, "ユーザーが見つかりません")
 	}
-	staleBefore := now.Add(-model.TaskStaleAfter)
-	switch filter.Status {
-	case "":
-	case model.TaskStatusRunning:
-		query = query.Where("status = ? AND started_at >= ?", model.TaskStatusRunning, staleBefore)
-	case model.TaskStatusLost:
-		query = query.Where("status = ? AND started_at < ?", model.TaskStatusRunning, staleBefore)
-	case model.TaskStatusSucceeded, model.TaskStatusFailed, model.TaskStatusCanceled:
-		query = query.Where("status = ?", filter.Status)
-	default:
-		return nil, nil, apperror.New(apperror.KindInvalidRequest, "status は running、succeeded、failed、canceled、lost のどれかにしてください")
+	query, filterError := applyListFilter(projectTaskRepository.database.WithContext(requestContext).Where("user_id = ? AND parent_workflow_id = ''", userID), filter, after, now)
+	if filterError != nil {
+		return nil, nil, filterError
 	}
-	var tasks []model.ProjectTask
-	if findError := query.Find(&tasks).Error; findError != nil {
-		return nil, nil, apperror.Wrap(apperror.KindInternal, "タスクの一覧を取得できませんでした", findError)
-	}
-	// limit 件以下なら、次のページは無い。
-	if len(tasks) <= limit {
-		return tasks, nil, nil
-	}
-	tasks = tasks[:limit]
-	last := tasks[limit-1]
-	return tasks, &pagination.Position{CreatedAt: last.StartedAt, ID: last.ID}, nil
+	return listPage(query, limit)
 }
 
 // Get は、タスク 1 件と、その子のタスク(開始の昇順)を返す。
@@ -266,7 +365,32 @@ func (projectTaskRepository *ProjectTaskRepository) Counts(requestContext contex
 	return counts, nil
 }
 
-// Prune は、保存期間を過ぎたタスクと、プロジェクトごとの件数の上限を超えた古いタスクと、プロジェクトが無くなったタスクを削除する。
+// CountsByUser は、ユーザーの全てのプロジェクトの、実行中のタスクの数と、直近 24 時間に失敗したタスクの数を返す(トップのタスクだけ)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - now: 現在の日時。
+//
+// 戻り値:
+//   - 数。
+func (projectTaskRepository *ProjectTaskRepository) CountsByUser(requestContext context.Context, userID string, now time.Time) (TaskCounts, error) {
+	// 条件の値が空だと、Gorm が条件を無視するので、先に拒否する。
+	if hasEmpty(userID) {
+		return TaskCounts{}, apperror.New(apperror.KindNotFound, "ユーザーが見つかりません")
+	}
+	var counts TaskCounts
+	row := projectTaskRepository.database.WithContext(requestContext).Raw(
+		`SELECT count(*) FILTER (WHERE status = 'running' AND started_at >= ?),
+		        count(*) FILTER (WHERE status = 'failed' AND started_at >= ?)
+		   FROM project_tasks WHERE user_id = ? AND parent_workflow_id = ''`, now.Add(-model.TaskStaleAfter), now.Add(-24*time.Hour), userID).Row()
+	if scanError := row.Scan(&counts.Running, &counts.FailedRecent); scanError != nil {
+		return TaskCounts{}, apperror.Wrap(apperror.KindInternal, "タスクの数を取得できませんでした", scanError)
+	}
+	return counts, nil
+}
+
+// Prune は、保存期間を過ぎたタスクと、プロジェクトごとの件数の上限を超えた古いタスクを削除する(プロジェクトが削除されたあとのタスクは、残す。削除の履歴を見るため)。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -276,13 +400,12 @@ func (projectTaskRepository *ProjectTaskRepository) Counts(requestContext contex
 // 戻り値:
 //   - データベースのエラー。
 func (projectTaskRepository *ProjectTaskRepository) Prune(requestContext context.Context, cutoff time.Time, maxPerProject int) error {
-	// 期間、プロジェクトの有無、件数の順に消す。
+	// 期間、件数の順に消す。
 	statements := []struct {
 		sql       string
 		arguments []any
 	}{
 		{"DELETE FROM project_tasks WHERE started_at < ?", []any{cutoff}},
-		{"DELETE FROM project_tasks WHERE project_id NOT IN (SELECT id FROM projects)", nil},
 		{`DELETE FROM project_tasks WHERE id IN (
 		    SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY project_id ORDER BY started_at DESC, id DESC) AS position FROM project_tasks) ranked
 		    WHERE position > ?)`, []any{maxPerProject}},

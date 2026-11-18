@@ -13,7 +13,7 @@ import (
 // newTestTask は、試験用のタスクを作る。
 func newTestTask(projectID string, index int, workflowID string, parentWorkflowID string, startedAt time.Time) model.ProjectTask {
 	// 区別できる ID を付ける。
-	return model.ProjectTask{ID: model.ProjectTaskIDPrefix + string(rune('a'+index)), ProjectID: projectID, Kind: "deploy_create", WorkflowType: "CreateDeployWorkflow",
+	return model.ProjectTask{ID: model.ProjectTaskIDPrefix + string(rune('a'+index)), ProjectID: projectID, UserID: "user-a", ProjectName: "my-app", Kind: "deploy_create", WorkflowType: "CreateDeployWorkflow",
 		ResourceID: "deploy-1", WorkflowID: workflowID, RunID: "run-1", ParentWorkflowID: parentWorkflowID, StartedAt: startedAt}
 }
 
@@ -29,17 +29,20 @@ func TestProjectTaskRepository(testingT *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	testingT.Run("入力から、プロジェクトを決める", func(subTest *testing.T) {
-		projectID, resourceID, found, err := repo.ResolveProject(ctx, map[string]any{"DeployID": deploy.ID})
-		if err != nil || !found || projectID != project.ID || resourceID != deploy.ID {
-			subTest.Errorf("deploy から決まるはず: %v %v %v %v", projectID, resourceID, found, err)
+		target, found, err := repo.ResolveProject(ctx, map[string]any{"DeployID": deploy.ID})
+		if err != nil || !found || target.ProjectID != project.ID || target.ResourceID != deploy.ID || target.UserID != "user-a" || target.ProjectName != "my-app" {
+			subTest.Errorf("deploy から、持ち主と名前まで決まるはず: %+v %v %v", target, found, err)
 		}
-		if projectID, _, found, _ := repo.ResolveProject(ctx, map[string]any{"ProjectID": "project-x"}); !found || projectID != "project-x" {
-			subTest.Error("ProjectID は、そのまま使うはず")
+		if target, found, _ := repo.ResolveProject(ctx, map[string]any{"ProjectID": project.ID}); !found || target.ResourceID != project.ID {
+			subTest.Error("ProjectID は、そのプロジェクト自身が対象のはず")
 		}
-		if _, _, found, _ := repo.ResolveProject(ctx, map[string]any{"DeployID": "deploy-none"}); found {
+		if _, found, _ := repo.ResolveProject(ctx, map[string]any{"ProjectID": "project-none"}); found {
+			subTest.Error("プロジェクトが無ければ、見つからないはず")
+		}
+		if _, found, _ := repo.ResolveProject(ctx, map[string]any{"DeployID": "deploy-none"}); found {
 			subTest.Error("リソースが無ければ、見つからないはず")
 		}
-		if _, _, found, _ := repo.ResolveProject(ctx, map[string]any{"Other": "x"}); found {
+		if _, found, _ := repo.ResolveProject(ctx, map[string]any{"Other": "x"}); found {
 			subTest.Error("知らない項目だけなら、見つからないはず")
 		}
 	})
@@ -118,24 +121,44 @@ func TestProjectTaskRepository(testingT *testing.T) {
 			subTest.Errorf("存在しないタスクは not_found のはず: %v", err)
 		}
 	})
-	testingT.Run("削除: 期間、件数の上限、プロジェクトが無いもの", func(subTest *testing.T) {
-		database.Create(&model.Project{ID: "project-00000002", UserID: "user-a", Name: "gone", Status: model.ProjectStatusActive})
-		_ = repo.Start(ctx, newTestTask("project-00000002", 5, "wf-other", "", now))
-		database.Exec("DELETE FROM projects WHERE id = 'project-00000002'")
+	testingT.Run("ユーザーの全てのプロジェクトのタスク(削除されたプロジェクトも含む)", func(subTest *testing.T) {
+		database.Create(&model.Project{ID: "project-00000003", UserID: "user-a", Name: "second", Status: model.ProjectStatusActive})
+		_ = repo.Start(ctx, model.ProjectTask{ID: "task-z1", ProjectID: "project-00000003", UserID: "user-a", ProjectName: "second", Kind: "deploy_create", WorkflowType: "CreateDeployWorkflow", ResourceID: "deploy-9", WorkflowID: "wf-second", RunID: "run-1", StartedAt: now})
+		// 別のユーザーのタスクは、混ざらない。
+		_ = repo.Start(ctx, model.ProjectTask{ID: "task-z2", ProjectID: "project-x", UserID: "user-b", ProjectName: "x", Kind: "deploy_create", WorkflowType: "CreateDeployWorkflow", ResourceID: "deploy-8", WorkflowID: "wf-b", RunID: "run-1", StartedAt: now})
+		// プロジェクトが削除されても、削除のタスクと名前は残る。
+		database.Exec("DELETE FROM projects WHERE id = 'project-00000003'")
+		tasks, _, err := repo.ListByUser(ctx, "user-a", TaskFilter{}, 20, nil, now)
+		if err != nil || len(tasks) != 5 || tasks[0].ID != "task-z1" || tasks[0].ProjectName != "second" {
+			subTest.Fatalf("user-a のタスク 5 件で、削除済みのプロジェクトのものも先頭に出るはず: %v %d", err, len(tasks))
+		}
+		counts, _ := repo.CountsByUser(ctx, "user-a", now)
+		if counts.Running != 2 || counts.FailedRecent != 1 {
+			subTest.Errorf("実行中 2(wf-running と wf-second)、失敗 1 のはず: %+v", counts)
+		}
+		if _, _, err := repo.ListByUser(ctx, "", TaskFilter{}, 20, nil, now); apperror.KindOf(err) != apperror.KindNotFound {
+			subTest.Errorf("ユーザーが空なら not_found のはず: %v", err)
+		}
+		if err := repo.RecordFinished(ctx, model.ProjectTask{ID: "task-z3", ProjectID: "project-00000001", UserID: "user-a", ProjectName: "my-app", Kind: "project_create", WorkflowType: "", ResourceID: project.ID, WorkflowID: "project-create-1", RunID: "-", Status: model.TaskStatusSucceeded, StartedAt: now, FinishedAt: &now}); err != nil {
+			subTest.Fatal(err)
+		}
+		if again := repo.RecordFinished(ctx, model.ProjectTask{ID: "task-z4", ProjectID: "project-00000001", UserID: "user-a", Kind: "project_create", WorkflowID: "project-create-1", RunID: "-", Status: model.TaskStatusSucceeded, StartedAt: now, FinishedAt: &now}); again != nil {
+			subTest.Errorf("同じ記録を、もう一度保存しても、エラーにならないはず: %v", again)
+		}
+	})
+	testingT.Run("削除: 期間と、件数の上限(プロジェクトが無いタスクは残す)", func(subTest *testing.T) {
 		if err := repo.Prune(ctx, now.Add(-2*time.Hour), 3); err != nil {
 			subTest.Fatal(err)
 		}
-		tasks, _, _ := repo.List(ctx, "user-a", project.ID, TaskFilter{}, 10, nil, now)
-		// 期間(2 時間)で stale が、件数の上限(3)で最も古い 1 件が、消える。子は、親とは別に数える。
-		var count int64
-		database.Model(&model.ProjectTask{}).Where("workflow_id = 'wf-other'").Count(&count)
-		if count != 0 {
-			subTest.Error("プロジェクトが無いタスクは消えるはず")
-		}
 		var total int64
 		database.Model(&model.ProjectTask{}).Where("project_id = ?", project.ID).Count(&total)
-		if total != 3 || len(tasks) > 3 {
-			subTest.Errorf("3 件に絞られるはず: %d", total)
+		if total != 3 {
+			subTest.Errorf("プロジェクトごとに 3 件に絞られるはず: %d", total)
+		}
+		var deletedProject int64
+		database.Model(&model.ProjectTask{}).Where("project_id = ?", "project-00000003").Count(&deletedProject)
+		if deletedProject != 1 {
+			subTest.Errorf("削除されたプロジェクトのタスクは、残るはず: %d", deletedProject)
 		}
 	})
 }

@@ -624,8 +624,8 @@ func TestProjectTasksAPI(testingT *testing.T) {
 	environment := newIngressTestEnvironment(testingT)
 	now := time.Now().UTC()
 	insert := func(id string, workflowID string, parent string, status string, reason string, started time.Time) {
-		environment.database.Exec(`INSERT INTO project_tasks (id, project_id, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at, finished_at)
-			VALUES (?, ?, 'deploy_create', 'CreateDeployWorkflow', 'deploy-1', ?, 'run-1', ?, ?, ?, ?, ?)`, id, environment.projectID, workflowID, parent, status, reason, started, now)
+		environment.database.Exec(`INSERT INTO project_tasks (id, project_id, user_id, project_name, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at, finished_at)
+			VALUES (?, ?, 'user-a', 'my-app', 'deploy_create', 'CreateDeployWorkflow', 'deploy-1', ?, 'run-1', ?, ?, ?, ?, ?)`, id, environment.projectID, workflowID, parent, status, reason, started, now)
 	}
 	insert("task-1", "wf-1", "", "succeeded", "", now.Add(-10*time.Minute))
 	insert("task-2", "wf-2", "wf-1", "succeeded", "", now.Add(-9*time.Minute))
@@ -638,13 +638,13 @@ func TestProjectTasksAPI(testingT *testing.T) {
 		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
 		tasks, _ := body["tasks"].([]any)
 		counts, _ := body["counts"].(map[string]any)
-		if statusCode != 200 || len(tasks) != 4 || tasks[0].(map[string]any)["taskId"] != "task-4" || tasks[3].(map[string]any)["status"] != "lost" {
-			subTest.Fatalf("子を除く 4 件が新しい順で、最後は lost のはず: %d %v", statusCode, body)
+		if statusCode != 200 || len(tasks) != 5 || tasks[0].(map[string]any)["kind"] != "project_create" || tasks[1].(map[string]any)["taskId"] != "task-4" || tasks[4].(map[string]any)["status"] != "lost" {
+			subTest.Fatalf("プロジェクトの作成(自動で記録)と、子を除く 4 件が新しい順で、最後は lost のはず: %d %v", statusCode, body)
 		}
 		if counts["running"] != float64(1) || counts["failedRecent"] != float64(1) {
 			subTest.Errorf("実行中 1、失敗 1 のはず: %v", counts)
 		}
-		failed := tasks[1].(map[string]any)
+		failed := tasks[2].(map[string]any)
 		if failed["status"] != "failed" || failed["error"] != "イメージを取得できません" || failed["workflowId"] != "wf-3" {
 			subTest.Errorf("失敗の理由が入るはず: %v", failed)
 		}
@@ -659,6 +659,9 @@ func TestProjectTasksAPI(testingT *testing.T) {
 		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?kind=bad", ""); statusCode != 400 {
 			subTest.Errorf("400 のはず: %d", statusCode)
 		}
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?kind=project_create", ""); len(body["tasks"].([]any)) != 1 {
+			subTest.Errorf("プロジェクトの作成が、種類で絞れるはず: %v", body)
+		}
 		if _, page := environment.ownerClient.call(http.MethodGet, path+"?limit=2", ""); len(page["tasks"].([]any)) != 2 || page["nextCursor"] == nil {
 			subTest.Errorf("2 件と次のカーソルのはず: %v", page)
 		}
@@ -668,6 +671,29 @@ func TestProjectTasksAPI(testingT *testing.T) {
 		children, _ := body["children"].([]any)
 		if statusCode != 200 || len(children) != 1 || children[0].(map[string]any)["taskId"] != "task-2" {
 			subTest.Errorf("子が 1 つのはず: %d %v", statusCode, body)
+		}
+	})
+	testingT.Run("全てのプロジェクトのタスク(GET /tasks)は、削除されたプロジェクトのものを含み、他のユーザーのものを含まない", func(subTest *testing.T) {
+		environment.database.Exec(`INSERT INTO project_tasks (id, project_id, user_id, project_name, kind, workflow_type, resource_id, workflow_id, run_id, status, started_at, finished_at)
+			VALUES ('task-gone', 'project-deleted', 'user-a', 'old-app', 'project_delete', 'DeleteProjectWorkflow', 'project-deleted', 'wf-gone', 'run-1', 'succeeded', ?, ?)`, now, now)
+		environment.database.Exec(`INSERT INTO project_tasks (id, project_id, user_id, project_name, kind, workflow_type, resource_id, workflow_id, run_id, status, started_at, finished_at)
+			VALUES ('task-other', 'project-b', 'user-b', 'b-app', 'deploy_create', 'CreateDeployWorkflow', 'deploy-b', 'wf-other', 'run-1', 'succeeded', ?, ?)`, now, now)
+		statusCode, body := environment.ownerClient.call(http.MethodGet, "/tasks", "")
+		tasks, _ := body["tasks"].([]any)
+		if statusCode != 200 || len(tasks) != 6 {
+			subTest.Fatalf("user-a の 6 件のはず: %d %v", statusCode, body)
+		}
+		first := tasks[0].(map[string]any)
+		if first["taskId"] != "task-gone" || first["projectName"] != "old-app" || first["kind"] != "project_delete" {
+			subTest.Errorf("削除されたプロジェクトのタスクが、名前つきで先頭に出るはず: %v", first)
+		}
+		for _, task := range tasks {
+			if task.(map[string]any)["taskId"] == "task-other" {
+				subTest.Error("他のユーザーのタスクは混ざらないはず")
+			}
+		}
+		if _, other := environment.otherClient.call(http.MethodGet, "/tasks", ""); len(other["tasks"].([]any)) != 1 {
+			subTest.Errorf("user-b は自分の 1 件だけのはず: %v", other)
 		}
 	})
 	testingT.Run("他人は 404", func(subTest *testing.T) {

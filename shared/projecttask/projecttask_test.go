@@ -28,8 +28,8 @@ func TestKindOf(testingT *testing.T) {
 	if _, found := KindOf("UnknownWorkflow"); found {
 		testingT.Error("知らない Workflow は、対象外のはず")
 	}
-	if len(Kinds()) != 18 {
-		testingT.Errorf("種類は 18 個のはず: %d", len(Kinds()))
+	if len(Kinds()) != 19 {
+		testingT.Errorf("種類は 19 個のはず: %d", len(Kinds()))
 	}
 }
 

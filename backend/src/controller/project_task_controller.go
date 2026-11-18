@@ -16,6 +16,7 @@ import (
 // ProjectTaskUseCase は、ProjectTaskController が使う、タスクのユースケース。
 type ProjectTaskUseCase interface {
 	List(requestContext context.Context, userID string, projectID string, filter repository.TaskFilter, limit int, after *pagination.Position) ([]model.ProjectTask, *pagination.Position, repository.TaskCounts, time.Time, error)
+	ListAll(requestContext context.Context, userID string, filter repository.TaskFilter, limit int, after *pagination.Position) ([]model.ProjectTask, *pagination.Position, repository.TaskCounts, time.Time, error)
 	Get(requestContext context.Context, userID string, projectID string, taskID string) (model.ProjectTask, []model.ProjectTask, time.Time, error)
 }
 
@@ -23,6 +24,10 @@ type ProjectTaskUseCase interface {
 type ProjectTaskResponse struct {
 	// TaskID は、タスクの ID。
 	TaskID string `json:"taskId"`
+
+	// ProjectID と ProjectName は、属するプロジェクトの ID と、記録したときの名前(プロジェクトが削除されたあとも、削除のタスクに出る)。
+	ProjectID   string `json:"projectId"`
+	ProjectName string `json:"projectName"`
 
 	// Kind は、種類(deploy_create、ingress_apply など)。
 	Kind string `json:"kind"`
@@ -102,11 +107,49 @@ func newProjectTaskResponse(task model.ProjectTask, now time.Time) ProjectTaskRe
 	if task.FinishedAt != nil {
 		end = *task.FinishedAt
 	}
-	return ProjectTaskResponse{TaskID: task.ID, Kind: task.Kind, ResourceID: task.ResourceID, Status: task.EffectiveStatus(now), Error: task.Error,
+	return ProjectTaskResponse{TaskID: task.ID, ProjectID: task.ProjectID, ProjectName: task.ProjectName, Kind: task.Kind, ResourceID: task.ResourceID, Status: task.EffectiveStatus(now), Error: task.Error,
 		StartedAt: task.StartedAt, FinishedAt: task.FinishedAt, DurationMs: end.Sub(task.StartedAt).Milliseconds(), WorkflowID: task.WorkflowID}
 }
 
-// List は、GET /projects/:projectId/tasks のハンドラー。タスクを、新しい順に返す。
+// readListQuery は、一覧のクエリ(limit、cursor、status、kind)を読む。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - 件数、次のページの位置、絞り込み。クエリが不正なら 400。
+func readListQuery(echoContext *echo.Context) (int, *pagination.Position, repository.TaskFilter, error) {
+	// limit と cursor を読む。
+	limit, limitError := pagination.ParseLimit(echoContext.QueryParam("limit"))
+	if limitError != nil {
+		return 0, nil, repository.TaskFilter{}, limitError
+	}
+	var after *pagination.Position
+	if cursorText := echoContext.QueryParam("cursor"); cursorText != "" {
+		position, cursorError := pagination.DecodeCursor(cursorText)
+		if cursorError != nil {
+			return 0, nil, repository.TaskFilter{}, cursorError
+		}
+		after = &position
+	}
+	return limit, after, repository.TaskFilter{Status: echoContext.QueryParam("status"), Kind: echoContext.QueryParam("kind")}, nil
+}
+
+// listResponse は、タスクの一覧を、レスポンスの形にする。
+func listResponse(tasks []model.ProjectTask, nextPosition *pagination.Position, counts repository.TaskCounts, now time.Time) ListProjectTasksResponse {
+	// 1 件ずつ、レスポンスにする(空でも、配列にする)。
+	response := ListProjectTasksResponse{Tasks: make([]ProjectTaskResponse, 0, len(tasks)), Counts: TaskCountsResponse{Running: counts.Running, FailedRecent: counts.FailedRecent}}
+	for _, task := range tasks {
+		response.Tasks = append(response.Tasks, newProjectTaskResponse(task, now))
+	}
+	if nextPosition != nil {
+		nextCursor := pagination.EncodeCursor(*nextPosition)
+		response.NextCursor = &nextCursor
+	}
+	return response
+}
+
+// List は、GET /projects/:projectId/tasks のハンドラー。プロジェクトのタスクを、新しい順に返す。
 //
 // 引数:
 //   - echoContext: Echo のリクエストの context。クエリ limit、cursor、status、kind を読む。
@@ -119,34 +162,41 @@ func (projectTaskController *ProjectTaskController) List(echoContext *echo.Conte
 	if userIDError != nil {
 		return userIDError
 	}
-	// limit と cursor を読む。
-	limit, limitError := pagination.ParseLimit(echoContext.QueryParam("limit"))
-	if limitError != nil {
-		return limitError
-	}
-	var after *pagination.Position
-	if cursorText := echoContext.QueryParam("cursor"); cursorText != "" {
-		position, cursorError := pagination.DecodeCursor(cursorText)
-		if cursorError != nil {
-			return cursorError
-		}
-		after = &position
+	limit, after, filter, queryError := readListQuery(echoContext)
+	if queryError != nil {
+		return queryError
 	}
 	// 取得して、レスポンスにする。
-	filter := repository.TaskFilter{Status: echoContext.QueryParam("status"), Kind: echoContext.QueryParam("kind")}
 	tasks, nextPosition, counts, now, listError := projectTaskController.projectTaskUseCase.List(echoContext.Request().Context(), userID, echoContext.Param("projectId"), filter, limit, after)
 	if listError != nil {
 		return listError
 	}
-	response := ListProjectTasksResponse{Tasks: make([]ProjectTaskResponse, 0, len(tasks)), Counts: TaskCountsResponse{Running: counts.Running, FailedRecent: counts.FailedRecent}}
-	for _, task := range tasks {
-		response.Tasks = append(response.Tasks, newProjectTaskResponse(task, now))
+	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now))
+}
+
+// ListAll は、GET /tasks のハンドラー。ユーザーの全てのプロジェクトのタスクを、新しい順に返す(削除されたプロジェクトのタスクも含む)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。クエリ limit、cursor、status、kind を読む。
+//
+// 戻り値:
+//   - 一覧のレスポンス(200)。クエリが不正なら 400。
+func (projectTaskController *ProjectTaskController) ListAll(echoContext *echo.Context) error {
+	// 認証されたユーザーを取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
 	}
-	if nextPosition != nil {
-		nextCursor := pagination.EncodeCursor(*nextPosition)
-		response.NextCursor = &nextCursor
+	limit, after, filter, queryError := readListQuery(echoContext)
+	if queryError != nil {
+		return queryError
 	}
-	return echoContext.JSON(http.StatusOK, response)
+	// 取得して、レスポンスにする。
+	tasks, nextPosition, counts, now, listError := projectTaskController.projectTaskUseCase.ListAll(echoContext.Request().Context(), userID, filter, limit, after)
+	if listError != nil {
+		return listError
+	}
+	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now))
 }
 
 // Get は、GET /projects/:projectId/tasks/:taskId のハンドラー。タスクと、その子のタスクを返す。
