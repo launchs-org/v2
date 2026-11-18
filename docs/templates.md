@@ -1,6 +1,6 @@
 # テンプレート(設計)
 
-**状態: 設計(未実装)。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
+**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)、B3(フォルダ形式と `from:`)は実装済み。C(テンプレートから作る。API、Workflow、起動前の準備)、D(画面)も実装済み(実機確認済み)。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
 
 利用者が、「PostgreSQL」「WordPress」のような、**よく使う構成**を、入力欄を埋めるだけで作れるようにする。構成は、YAML のファイルで定義する。初期設定の**設定ファイル**も、コンテナに渡せる。
 
@@ -9,7 +9,7 @@
 | 項目 | 決定 | 理由 |
 |---|---|---|
 | 設定ファイルの渡し方 | **deploy に「ファイル」を持たせる**(新しい機能)。k8s の ConfigMap として、コンテナにマウントする | 初期設定だけでなく、あとから編集(pending → 適用)もできる。テンプレートは、この機能の上に乗る |
-| テンプレートの定義の置き場 | **リポジトリの `templates/*.yaml`**。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
+| テンプレートの定義の置き場 | **リポジトリの `templates/<id>/`**(フォルダ形式。B3)。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
 | 作れる人 | 管理者が、リポジトリに追加する。利用者は、選んで使うだけ | 安全(利用者が、任意の構成を、流し込まない) |
 | 範囲 | **複数の部品**(deploy、volume、service、ingress、ファイル)を、1 つのテンプレートで | WordPress = web + DB(ボリューム付き)+ ingress、が書ける |
 | 変数 | **ある**。YAML の中に `${名前}` と書き、画面に入力欄を出す。パスワードは、**自動生成**の型を用意する | 初心者が、弱いパスワードを使わない |
@@ -22,8 +22,10 @@
 |---|---|---|
 | **A. deploy のファイル** | deploy に、ファイル(パス + 内容)を持たせ、ConfigMap としてマウントする。API(`/deploy/:id/files`)、pending → 適用、画面のタブ | なし(単独で役に立つ) |
 | **B. テンプレートの定義と検証** | `templates/*.yaml` の形(スキーマ)、読み込み、検証、変数の展開(純粋関数)。`GET /templates`、`GET /templates/:id` | なし |
-| **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認 | A、B |
-| **D. 画面** | ウィザードに「テンプレートから」を足す。入力欄、自動生成のパスワード、進み具合 | C |
+| **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認。起動前の準備(PVC、ファイルの ConfigMap)を、`CreateDeployWorkflow` に足す | A、B、B2 |
+| **D. 画面**(実装済み。[frontend.md](frontend.md)) | ウィザードに「テンプレートから」を足す。入力欄、自動生成のパスワード、進み具合 | C |
+| **B3. フォルダ形式と `from:`**(実装済み) | テンプレートを、1 つにつき 1 つのフォルダ(`<id>/template.yaml` と `files/`)にする。YAML から、フォルダのファイルを読み込む(`from:`)。テキスト・バイナリを自動判定 | B |
+| **B2. ConfigMap の部品**(実装済み) | テンプレートに、共有の ConfigMap([configmap.md](configmap.md))を足す。`kind: configmap` と、deploy の `configmaps`。テキストと、base64 のバイナリ、権限(mode)に対応する | B |
 | **E. 同梱のテンプレート** | nginx、PostgreSQL、Redis、MariaDB、WordPress など、数個 | B |
 
 A と B は、独立しているので、並行して作れる。
@@ -124,6 +126,79 @@ resources:
         port: 80
 ```
 
+## フォルダ形式(段階 B3)
+
+テンプレートは、**1 つにつき 1 つのフォルダ**。git で管理でき、エディタ、CI、他のツールが、そのまま扱える。
+
+```
+templates/
+  nginx/
+    template.yaml        # 本体(必須)。フォルダ名は、metadata.id と同じ
+    files/               # from: で読み込むファイル(任意。置き場所は自由)
+      default.conf
+      index.html
+      favicon.gif        # バイナリも、そのまま置ける
+```
+
+- 読み込み(`template.Load`)は、`templates/` の直下のフォルダを、名前の順に、全て読む。フォルダでないもの(README など)は、無視する。`template.yaml` の無いフォルダは、エラー。**直下の `*.yaml`(単一ファイル形式)は、読まない。**
+- ファイルの内容は、`content:` に直接書くか、`from:` で、フォルダのファイルを指す(同時には書けない)。
+
+```yaml
+- kind: configmap
+  name: site
+  files:
+    - key: default.conf
+      from: files/default.conf    # テキスト: ${変数} を展開する
+    - key: favicon.gif
+      from: files/favicon.gif     # バイナリ: 自動で判定して、base64 にする
+    - key: note.txt
+      encoding: base64            # テキストでも、バイナリとして扱いたいとき(変数は展開しない)
+      from: files/note.txt
+- kind: deploy
+  name: db
+  files:
+    - path: /docker-entrypoint-initdb.d/init.sql
+      from: files/init.sql        # deploy の files は、テキストだけ
+```
+
+- `from` は、そのテンプレートのフォルダの中の、**相対パス**だけ(`/` で始まる、`..` を含むものは、エラー。フォルダの外は、読めない)。
+- 自動判定: UTF-8 で、NUL 文字を含まなければ、**テキスト**。それ以外は、**バイナリ**(base64)。`encoding: text` を指定したのに、バイナリなら、エラー。
+- 1 ファイルは、1 MiB まで(ConfigMap の上限)。
+- 読み込んだあと、`from` は、内容(`content` と `encoding`)に置き換わる。検証と展開は、`content` だけを見るので、**今までの規則(変数、参照、大きさ)が、そのまま、同じように働く**。
+- ファイルが、そのままでは、正しい形式でないことがある(例: JSON の数に、`${font_size}` を書く)。変数を展開したあとに、正しくなればよい。
+
+### ConfigMap の部品(`kind: configmap`)
+
+共有の設定ファイルの組。**複数の deploy が、同じファイルを使える**。バイナリ(base64)も、ファイルごとの権限(mode)も扱える(deploy 自身の `files` は、1 つの deploy だけの、テキストのファイル)。
+
+```yaml
+resources:
+  - kind: configmap
+    name: conf                # 他の部品と同じ name の規則。volume、deploy とも、重複できない
+    files:
+      - key: nginx.conf       # ConfigMap の中のファイル名(`/` は使えない)
+        content: |
+          server { listen 80; server_name ${project.name}; }
+      - key: logo.png
+        encoding: base64      # バイナリ。省略は text
+        content: iVBORw0KGgo...
+  - kind: deploy
+    name: web
+    image: nginx:alpine
+    spec: small
+    configmaps:               # どのファイルを、どこに置くか(ファイル名は、変えられる)
+      - configmap: conf
+        key: nginx.conf
+        path: /etc/nginx/conf.d/default.conf
+        mode: "0644"          # 省略は 0644
+```
+
+- 保存する大きさは、1 つの configmap で 1 MiB まで、ファイルは 50 個まで([configmap.md](configmap.md) §4)。
+- `text` の内容には、変数と `${project.name}` を書ける。`${service.X.dns}` は、**書けない**(configmap は、deploy より先に作るため)。`base64` の内容には、`${...}` を書けない(展開で、壊れるため)。
+- 展開した**あと**の内容も、改めて検査する(変数の値で、1 MiB を超える、NUL 文字が入る、は断る)。
+- deploy の `configmaps` の path は、その deploy の `files` と、`mounts` のマウント先と、**まったく同じにならない**(下は、よい)。`configmaps` と `files` を合わせて、40 個まで。
+- 作るとき(段階 C)は、**版 1** の ConfigMap を作り、deploy は、その版を固定してマウントする。
+
 ### 変数の型
 
 | type | 入力欄 | 検査 |
@@ -153,15 +228,34 @@ resources:
 - クォータ: 作る前に、テンプレート全体で、上限(deploy の数、volume の数と合計の大きさ)を超えないか、**まとめて**確かめる(途中で足りなくなって、半端に残さない)。
 - 変数の値: `pattern`、`min`/`max` などを、サーバーで、必ず検査する(画面の検査は、補助)。
 
-## 作る流れ(段階 C)
+## 作る流れ(段階 C。設計の確定: 2026-11-18)
 
-`POST /projects/:projectId/templates/:id/apply`(Body: `{ "values": { "database": "app", "password": "…" } }`)
+### API
 
-1. テンプレートと変数を検査し、**クォータを、全体で確認**する(失敗なら、何も作らない。409 か 400)。
-2. Temporal の Workflow を開始し、`applyId` を返す(非同期)。
-3. Workflow は、`resources` を、**依存の順**(volume → deploy → service → ingress)に作る。deploy の作成、ファイル、マウント、service、ingress は、既存の仕組み(API と同じ処理)を使う。`${service.X.dns}` は、service が `active` になってから、展開する。
-4. 進み具合を、`GET /projects/:projectId/template-applies/:applyId` で返す(部品ごとに、待機中/作成中/完了/失敗)。
-5. **途中で失敗したら**: 作れたものは、**そのまま残す**(自動では消さない)。失敗した部品と理由を返す。利用者は、画面で、残りを手で直すか、消す。(自動のロールバックは、別の部品を、利用者の知らないうちに消すので、しない。)
+- `POST /projects/:projectId/templates/:templateId/apply`(Body: `{"values": {"database": "app"}}`)→ 200 `{"applyId": "...", "values": {...}}`。`values` は、自動生成を含む、**全ての変数の値**(画面が、パスワードを見せるため)。非同期。
+- `GET /projects/:projectId/template-applies/:applyId` → 進み具合。`{"applyId", "templateId", "status": "running|succeeded|failed", "values", "steps": [{"kind", "name", "status": "waiting|creating|done|failed", "resourceId", "error"}], "error", "createdAt", "updatedAt"}`。
+- 400: 変数の値が不正、404: プロジェクトかテンプレートが無い(他人のプロジェクトも)、409: プロジェクトが active でない、**クォータを超える**(作る前に、全体で確かめる)。
+
+### 流れ
+
+1. **受け付ける(API。同期)**: 変数の値を検査・補完(自動生成)→ テンプレート全体を**展開**(`${service.X.dns}` だけは、まだ決まらないので、**この実行だけの、ランダムな目印**に置き換えておく)→ クォータを、全体で確認 → **作るもの全ての ID を、先に決めて**、「計画」(展開済みの部品の一覧)として、`template_applies` に保存 → Workflow を開始 → `applyId` を返す。
+2. **作る(Workflow `ApplyTemplateWorkflow`)**: 計画の**ステップ**を、順に実行する。順番は、volume → configmap → deploy と、その service(`${service.X.dns}` の参照に従って、参照される側が先)→ ingress。
+   - **volume、configmap**: 行を作る(クォータは、既存の repository が、作るときにも確かめる)。
+   - **deploy**: 行を、**最初から、マウント(volume、configmap)とファイルを持った形**で作る → 既存の `CreateDeployWorkflow` を、子として実行して、起動(active)を待つ。起動の前に、PVC と、ファイルの ConfigMap を用意する(下の「起動前の準備」)。`PostgreSQL` の `/docker-entrypoint-initdb.d/init.sql` のように、**最初の起動から、ファイルが要る**ため、「作ってから、あとでマウント」にはしない。
+   - **service**: 行を作る → 既存の `CreateServiceWorkflow` を子として実行して active を待つ → DNS 名を読む。以降の deploy の、目印を、DNS 名に置き換える(置き換えるのは、**この実行の目印だけ**。利用者の入力に、同じ文字列があっても、置き換わらない)。
+   - **ingress**: 行を作り(ホスト名は、受け付けるときに、複数の候補を計画に入れてある。重なったら、次の候補)、ルールを pending に保存して、既存の `ApplyIngressRulesWorkflow` を子として実行する。
+3. **進み具合**: 各ステップの前後で、`template_applies.steps` を更新する(待機中 → 作成中 → 完了 / 失敗)。`status` は、全て完了で `succeeded`、1 つでも失敗で `failed`。
+4. **途中で失敗したら**: そこで止め、作れたものは、**そのまま残す**(自動では消さない)。失敗したステップと理由を返す。利用者は、残りを手で直すか、消す。
+5. **やり直しに強い**: ステップの ID は計画で決まっているので、Activity が、再実行されても、同じ行を、二重に作らない(あれば、完了として扱う)。
+
+### 起動前の準備(既存の `CreateDeployWorkflow` の拡張)
+
+deploy の起動の前に、**現在のマウント・ファイルに必要なものを、k8s に用意する**手順(`PrepareDeployDependencies`)を足す: マウントする volume の PVC、deploy のファイルの ConfigMap、configmap のマウントが使う版の ConfigMap。マウントもファイルも無い、普通の deploy では、何もしない。
+
+### 保存と秘密
+
+- 計画には、展開済みの値(env のパスワードなど)が、**平文**で入る(env と同じ扱い。`docs/templates.md` の「未決」の 1)。ログには出さない。
+- 展開は、受け付けるときに 1 回だけ。Workflow は、目印を、DNS 名に置き換えるだけ(式の評価は、無い)。
 
 ## deploy のファイル(段階 A)
 
@@ -210,3 +304,24 @@ nginx(静的な公開)、PostgreSQL、MariaDB、Redis、WordPress(web + DB)、No
 
 - 段階 B の、YAML の読み込みに使う、Go のライブラリ(`gopkg.in/yaml.v3` か、`sigs.k8s.io/yaml`)と、展開の実装(YAML を読んだ**あとの値**に、再帰で、置き換える)。
 - 段階 C の、クォータの「まとめての確認」を、既存のクォータの仕組み(ユーザーの行をロックして、数える)に、どう、組み込むか。deploy を、1 つずつ作る既存の処理の前に、全体の数を、確認する、別のメソッドが要る。
+
+## 実機での確認(段階 C。Talos。2026-11-18)
+
+実際のスタックと Talos で、API から、同梱のテンプレートを作って確認した。確認のあと、プロジェクトを API から削除し、namespace と PV が消えたことも確認した。
+
+- **nginx**(ConfigMap 3 ファイル + ingress): 数秒で `succeeded`。設定、ページ(変数が展開されている)、バイナリの `favicon.gif`(GIF として配信される)、`gzip on`、ingress のホスト名、deploy の `configmapMounts`(版 1)が、期待どおり。
+- **PostgreSQL**(volume + ConfigMap + deploy のファイル): 約 110 秒(PVC の用意)。`max_connections` と `log_statement` が、渡した値になり、`config_file` が、マウントした ConfigMap を指す。**`init.sql` が、最初の起動で実行された**(ログに `CREATE EXTENSION` が出て、`pgcrypto` がある)。Pod の再作成は 0 回。
+- **WordPress**(2 つの deploy + 2 つの volume + ingress): 約 4 分。順序は、db → db の service → web → web の service → ingress(web を YAML の先に書いても、参照される db が先)。web の `WORDPRESS_DB_HOST` が、db の service の DNS 名に置き換わり、**WordPress が DB につながって、インストール画面が出る**。
+- **code-server**(ConfigMap の `settings.json` を、ボリュームの下に置く): `succeeded`。テーマと文字の大きさが、渡した値で設定ファイルに入り、サーバーが応答する。**制約**: `.vscode` ディレクトリは root 所有になるため、利用者は、`.vscode` の中に、新しいファイルを作れない(`settings.json` 自体は、読めて、設定は効く)。ボリュームの他の場所には、書ける。
+
+### 分かったこと
+- deploy が「完了」になるのは、Deployment が Ready になったとき。**readiness probe を持たないイメージ**(PostgreSQL など)は、データベースが、接続を受け付ける前でも「完了」になる(PostgreSQL は、ボリュームの接続が遅く、`initdb` が終わるまで、さらに約 1 分かかった)。テンプレートに、起動の確認(probe)を足す機能は、まだ無い。
+- **code-server のテンプレートの不具合**(修正済み): イメージの `ENTRYPOINT` が `--bind-addr 0.0.0.0:8080 .` を含むため、`args` だけに同じ引数を書くと、引数が重複して起動していた(動きはしていた)。`command: /usr/bin/entrypoint.sh` で `ENTRYPOINT` を置き換えて、開くフォルダを 1 つだけ渡す形に直し、Pod の起動引数と応答を、実機で確認した。
+- code-server は、**Cloudflare などで HTTPS を手前で終端すると、WebSocket が切れる**([ingress.md](ingress.md) の「既知の問題」。原因は特定済みで、別の修正として実装する)。
+- 開発環境の `air` の監視に、`templates/` を足した(テンプレートを編集しても、backend が再ビルドされなかったため)。
+
+## 画面の確認(段階 D。実際のスタックとブラウザ。2026-11-18)
+- 入口の 2 択、テンプレートの一覧(6 つ)、カテゴリでの絞り込み(データベース → MariaDB と PostgreSQL)。
+- 入力の検査: 範囲外の数(最小未満)と、形式に合わない文字列は、次へ進めず、理由が出る。password は、「自動で作る」を外して、手で入れられ、「表示」で見える。確認では、password は伏せ字、選択肢はラベルで出る。
+- nginx を作成: 部品ごとの進み具合が出て、全て「完了」になり、公開 URL のリンクと、「作成した値」が出る。構成図にデプロイが現れる。Pod の中で、入力した題と、gzip 無効が反映されている。
+- クォータ超過: 確認の画面に警告が出る。「作成する」を押すと、サーバーが 409 で断り、理由が出て、確認の画面に留まる(何も作られない)。

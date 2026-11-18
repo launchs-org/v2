@@ -39,6 +39,15 @@ type CreateDeployInput struct {
 	DeployID string
 }
 
+// PrepareDeployDependenciesActivityName は、起動の前に、マウントとファイルに必要なもの(PVC、ConfigMap)を用意する Activity の名前。
+const PrepareDeployDependenciesActivityName = "PrepareDeployDependencies"
+
+// PrepareDeployDependenciesInput は、PrepareDeployDependencies Activity の入力。
+type PrepareDeployDependenciesInput struct {
+	// DeployID は、起動する deploy の ID。
+	DeployID string
+}
+
 // EnsureProjectNamespaceInput は、EnsureProjectNamespace Activity の入力。
 type EnsureProjectNamespaceInput struct {
 	// DeployID は、これから起動する deploy の ID。属するプロジェクトの namespace を用意する。

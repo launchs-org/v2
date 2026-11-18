@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sort"
 
 	"launchs/shared/apperror"
 )
@@ -252,6 +253,57 @@ func (limits QuotaLimits) CheckVolumeGrow(usage QuotaUsage, addedMB int) error {
 	// 合計が上限を超えるなら、増やせない。
 	if usage.VolumeTotalMB+addedMB > limits.MaxVolumeTotalMB {
 		return exceededTotal("volume の大きさ", "MB", limits.MaxVolumeTotalMB, usage.VolumeTotalMB, addedMB)
+	}
+	return nil
+}
+
+// BatchNeeds は、まとめて作るもの(テンプレートなど)が、必要とする量。
+type BatchNeeds struct {
+	// DeploysBySpec は、スペックの名前ごとの、作る deploy の数。
+	DeploysBySpec map[string]int
+
+	// Volumes は、作る volume の数。
+	Volumes int
+
+	// VolumeTotalMB は、作る volume の大きさの合計(MB)。
+	VolumeTotalMB int
+}
+
+// CheckBatch は、まとめて作るものが、全体で、上限に収まるかを確かめる(途中で足りなくなって、半端に残さないための、先の確認)。
+// 作るときの、各 repository の確認とは別で、競合までは防げない(競合したときは、作るときの確認が、止める)。
+//
+// 引数:
+//   - usage: いまの使用量。
+//   - needs: まとめて作る量。
+//
+// 戻り値:
+//   - 超えるなら conflict(最初に見つけた項目)。
+func (limits QuotaLimits) CheckBatch(usage QuotaUsage, needs BatchNeeds) error {
+	// deploy の合計の数。
+	deployCount := 0
+	for _, count := range needs.DeploysBySpec {
+		deployCount += count
+	}
+	if deployCount > 0 && usage.Deploys+deployCount > limits.MaxDeploys {
+		return apperror.New(apperror.KindConflict, fmt.Sprintf("deploy の数が上限(%d)を超えます(使用中 %d、作る数 %d)", limits.MaxDeploys, usage.Deploys, deployCount))
+	}
+	// スペックごとの数(名前の順に調べて、エラーを毎回同じにする)。
+	specNames := make([]string, 0, len(needs.DeploysBySpec))
+	for specName := range needs.DeploysBySpec {
+		specNames = append(specNames, specName)
+	}
+	sort.Strings(specNames)
+	for _, specName := range specNames {
+		if usage.DeploysBySpec[specName]+needs.DeploysBySpec[specName] > limits.MaxDeploysBySpec[specName] {
+			return apperror.New(apperror.KindConflict, fmt.Sprintf("%s の deploy の数が上限(%d)を超えます(使用中 %d、作る数 %d)", specName, limits.MaxDeploysBySpec[specName], usage.DeploysBySpec[specName], needs.DeploysBySpec[specName]))
+		}
+	}
+	// volume の数と、大きさの合計。
+	if needs.Volumes > 0 && usage.Volumes+needs.Volumes > limits.MaxVolumes {
+		return apperror.New(apperror.KindConflict, fmt.Sprintf("volume の数が上限(%d)を超えます(使用中 %d、作る数 %d)", limits.MaxVolumes, usage.Volumes, needs.Volumes))
+	}
+	if usage.VolumeTotalMB+needs.VolumeTotalMB > limits.MaxVolumeTotalMB {
+		return exceededTotal("volume の大きさ", "MB", limits.MaxVolumeTotalMB, usage.VolumeTotalMB, needs.VolumeTotalMB)
 	}
 	return nil
 }

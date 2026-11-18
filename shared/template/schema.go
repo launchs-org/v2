@@ -23,9 +23,10 @@ const (
 
 // 部品(resources)の種類。
 const (
-	ResourceVolume  = "volume"
-	ResourceDeploy  = "deploy"
-	ResourceIngress = "ingress"
+	ResourceVolume    = "volume"
+	ResourceDeploy    = "deploy"
+	ResourceIngress   = "ingress"
+	ResourceConfigMap = "configmap"
 )
 
 // Template は、テンプレート1つ(YAML のファイル1つ)。
@@ -110,7 +111,7 @@ type Option struct {
 
 // Resource は、作る部品1つ。Kind によって、使う項目が違う(使わない項目は、書けない)。
 type Resource struct {
-	// Kind は、volume、deploy、ingress のどれか。
+	// Kind は、volume、deploy、configmap、ingress のどれか。
 	Kind string `yaml:"kind"`
 
 	// Name は、テンプレートの中で、部品を指す名前(他の部品が参照する)。ingress は、名前を持たない(1つだけ)。
@@ -142,8 +143,11 @@ type Resource struct {
 	// Mounts は、volume のマウント。
 	Mounts []Mount `yaml:"mounts"`
 
-	// Files は、設定ファイル。
+	// Files は、設定ファイル。deploy だけが持つファイル(path と content)か、configmap のファイル(key、encoding、content)。
 	Files []File `yaml:"files"`
+
+	// ConfigMaps は、deploy が、テンプレートの中の configmap のファイルを、マウントする指定。
+	ConfigMaps []ConfigMapMount `yaml:"configmaps"`
 
 	// Service は、ポートの公開。無ければ、service を作らない。
 	Service *Service `yaml:"service"`
@@ -163,13 +167,40 @@ type Mount struct {
 	Path string `yaml:"path"`
 }
 
-// File は、deploy が、コンテナに置くファイル。
+// File は、ファイル1つ。deploy の files では、path と content(deploy だけが持つ、テキストのファイル)。
+// configmap の files では、key、encoding、content(共有の ConfigMap のファイル)。どちらの項目を使うかは、部品の種類で決まる。
 type File struct {
+	// Path は、コンテナの中の path(deploy の files だけ)。
+	Path string `yaml:"path"`
+
+	// Key は、ConfigMap の中のファイル名(configmap の files だけ)。
+	Key string `yaml:"key"`
+
+	// Encoding は、content の持ち方。text(既定)か base64(configmap の files だけ。バイナリを、base64 で書く)。
+	Encoding string `yaml:"encoding"`
+
+	// Content は、内容。text なら、${変数} を含められる。base64 では、${変数} は使えない。
+	Content string `yaml:"content"`
+
+	// From は、テンプレートのフォルダの中の、ファイルの path(例: files/default.conf)。content の代わりに、フォルダのファイルを読み込む。
+	// 読み込みのとき(Load)に、Content と Encoding に置き換わり、空になる。text は、content と同じに、${変数} を含められる。
+	// configmap の files では、バイナリも読める(自動で判定して、base64 にする)。deploy の files は、テキストだけ。
+	From string `yaml:"from"`
+}
+
+// ConfigMapMount は、deploy が、テンプレートの中の configmap の 1 ファイルを、コンテナの 1 つの path に置く指定。
+type ConfigMapMount struct {
+	// ConfigMap は、configmap の name。
+	ConfigMap string `yaml:"configmap"`
+
+	// Key は、その configmap の中の、ファイル名(key)。
+	Key string `yaml:"key"`
+
 	// Path は、コンテナの中の path。
 	Path string `yaml:"path"`
 
-	// Content は、内容(テキスト)。${変数} を含められる。
-	Content string `yaml:"content"`
+	// Mode は、ファイルの権限(8進数の4桁の文字列。省略は 0644)。
+	Mode string `yaml:"mode"`
 }
 
 // Service は、deploy のポートの公開。
@@ -215,6 +246,9 @@ type Summary struct {
 
 	// Files は、deploy に置くファイルの、合計の数。
 	Files int `json:"files"`
+
+	// ConfigMaps は、共有の ConfigMap の数。
+	ConfigMaps int `json:"configmaps"`
 }
 
 // Summarize は、テンプレートが、何を作るかを、数える。
@@ -233,6 +267,8 @@ func (template Template) Summarize() Summary {
 			summary.Volumes++
 		case ResourceIngress:
 			summary.Ingress = true
+		case ResourceConfigMap:
+			summary.ConfigMaps++
 		}
 	}
 	return summary

@@ -191,20 +191,24 @@ func validateResources(resources []Resource, variables map[string]Variable) erro
 	// 名前の重複と、種類ごとの表を作る(参照の確認に使う)。
 	volumes := map[string]bool{}
 	deploys := map[string]*Resource{}
+	configMaps := map[string]*Resource{}
 	ingressCount := 0
 	for index := range resources {
 		resource := &resources[index]
 		switch resource.Kind {
-		case ResourceVolume, ResourceDeploy:
+		case ResourceVolume, ResourceDeploy, ResourceConfigMap:
 			if !resourceNamePattern.MatchString(resource.Name) {
 				return fmt.Errorf("resources[%d]: name は、小文字の英字で始まる、小文字の英数字とハイフンの、32文字までです(%q)", index, resource.Name)
 			}
-			if volumes[resource.Name] || deploys[resource.Name] != nil {
-				return fmt.Errorf("resources[%d]: name %q が重複しています(volume と deploy の間でも、重複できません)", index, resource.Name)
+			if volumes[resource.Name] || deploys[resource.Name] != nil || configMaps[resource.Name] != nil {
+				return fmt.Errorf("resources[%d]: name %q が重複しています(volume、deploy、configmap の間でも、重複できません)", index, resource.Name)
 			}
-			if resource.Kind == ResourceVolume {
+			switch resource.Kind {
+			case ResourceVolume:
 				volumes[resource.Name] = true
-			} else {
+			case ResourceConfigMap:
+				configMaps[resource.Name] = resource
+			default:
 				deploys[resource.Name] = resource
 			}
 		case ResourceIngress:
@@ -216,7 +220,7 @@ func validateResources(resources []Resource, variables map[string]Variable) erro
 				return fmt.Errorf("resources[%d]: ingress には、name を付けられません", index)
 			}
 		default:
-			return fmt.Errorf("resources[%d]: kind は、volume、deploy、ingress のどれかです(%q)", index, resource.Kind)
+			return fmt.Errorf("resources[%d]: kind は、volume、deploy、configmap、ingress のどれかです(%q)", index, resource.Kind)
 		}
 	}
 	// 部品ごとに、中身を確かめる。
@@ -228,7 +232,9 @@ func validateResources(resources []Resource, variables map[string]Variable) erro
 		case ResourceVolume:
 			resourceError = validateVolume(where, resource, variables)
 		case ResourceDeploy:
-			resourceError = validateDeploy(where, resource, volumes, variables, deploys)
+			resourceError = validateDeploy(where, resource, volumes, configMaps, variables, deploys)
+		case ResourceConfigMap:
+			resourceError = validateConfigMap(where, resource, variables)
 		case ResourceIngress:
 			resourceError = validateIngress(where, resource, deploys)
 		}
@@ -254,11 +260,73 @@ func checkUnusedFields(where string, resource Resource) error {
 	if resource.Kind != ResourceVolume && resource.SizeMB != "" {
 		return fmt.Errorf("%s: sizeMB は、volume だけに使えます", where)
 	}
-	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.Files) > 0 || resource.Service != nil) {
-		return fmt.Errorf("%s: image、spec、replicas、env、command、args、mounts、files、service は、deploy だけに使えます", where)
+	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.ConfigMaps) > 0 || resource.Service != nil) {
+		return fmt.Errorf("%s: image、spec、replicas、env、command、args、mounts、configmaps、service は、deploy だけに使えます", where)
+	}
+	if !isDeploy && resource.Kind != ResourceConfigMap && len(resource.Files) > 0 {
+		return fmt.Errorf("%s: files は、deploy と configmap だけに使えます", where)
 	}
 	if resource.Kind != ResourceIngress && len(resource.Rules) > 0 {
 		return fmt.Errorf("%s: rules は、ingress だけに使えます", where)
+	}
+	return nil
+}
+
+// validateConfigMap は、configmap(共有の設定ファイルの組)の定義を確かめる。
+//
+// 確かめること: ファイルが 1 つ以上あること、key があり path が無いこと、encoding(text か base64)、
+// base64 が正しい形で変数を含まないこと、text の ${...} が、変数と project.name だけを指すこと(service の DNS 名は、作る順序が循環するので不可)、
+// ファイルの個数・key の規則・大きさ(model.ValidateConfigMapFiles。展開の前の大きさ)。
+//
+// 引数:
+//   - where: エラーに添える場所。
+//   - resource: configmap。
+//   - variables: 変数の表。
+//
+// 戻り値:
+//   - 最初に見つけた問題。
+func validateConfigMap(where string, resource Resource, variables map[string]Variable) error {
+	if unusedError := checkUnusedFields(where, resource); unusedError != nil {
+		return unusedError
+	}
+	if len(resource.Files) == 0 {
+		return fmt.Errorf("%s: files が空です(ファイルの無い configmap は、作れません)", where)
+	}
+	files := make([]model.ConfigMapFile, 0, len(resource.Files))
+	for _, file := range resource.Files {
+		if file.From != "" {
+			return fmt.Errorf("%s: files の from(%s)が、読み込まれていません(フォルダから Load してください)", where, file.From)
+		}
+		if file.Path != "" {
+			return fmt.Errorf("%s: configmap の files には、path ではなく、key を書きます(%q)", where, file.Path)
+		}
+		encoding := file.Encoding
+		if encoding == "" {
+			encoding = model.ConfigMapEncodingText
+		}
+		switch encoding {
+		case model.ConfigMapEncodingBase64:
+			// バイナリは、変数を含められない(展開で、壊れるため)。
+			if strings.Contains(file.Content, "${") {
+				return fmt.Errorf("%s: base64 の内容(%s)に、${...} は使えません", where, file.Key)
+			}
+		case model.ConfigMapEncodingText:
+			// 参照できるのは、変数と project.name だけ。
+			for _, reference := range referencesIn(file.Content) {
+				if strings.HasPrefix(reference, "service.") {
+					return fmt.Errorf("%s: configmap の内容(%s)で、${%s} は参照できません(configmap は、deploy より先に作るため)", where, file.Key, reference)
+				}
+			}
+			if referenceError := validateReferences(where, file.Content, variables, nil, ""); referenceError != nil {
+				return referenceError
+			}
+		default:
+			return fmt.Errorf("%s: files の encoding は、text か base64 です(%s: %q)", where, file.Key, file.Encoding)
+		}
+		files = append(files, model.ConfigMapFile{Key: file.Key, Encoding: encoding, Content: file.Content})
+	}
+	if _, filesError := model.ValidateConfigMapFiles(files); filesError != nil {
+		return fmt.Errorf("%s: files: %v", where, filesError)
 	}
 	return nil
 }
@@ -313,12 +381,13 @@ func validateVolume(where string, resource Resource, variables map[string]Variab
 //   - where: エラーに添える場所。
 //   - resource: deploy。
 //   - volumes: テンプレートの中の volume の name の表。
+//   - configMaps: テンプレートの中の configmap の表。
 //   - variables: 変数の表。
 //   - deploys: テンプレートの中の deploy の表。
 //
 // 戻り値:
 //   - 最初に見つけた問題。
-func validateDeploy(where string, resource Resource, volumes map[string]bool, variables map[string]Variable, deploys map[string]*Resource) error {
+func validateDeploy(where string, resource Resource, volumes map[string]bool, configMaps map[string]*Resource, variables map[string]Variable, deploys map[string]*Resource) error {
 	if unusedError := checkUnusedFields(where, resource); unusedError != nil {
 		return unusedError
 	}
@@ -356,10 +425,37 @@ func validateDeploy(where string, resource Resource, volumes map[string]bool, va
 	// ファイル: path と内容の規則(マウント先と、まったく同じ path は不可)。
 	fileSpecs := make([]model.FileSpec, 0, len(resource.Files))
 	for _, file := range resource.Files {
+		if file.From != "" {
+			return fmt.Errorf("%s: files の from(%s)が、読み込まれていません(フォルダから Load してください)", where, file.From)
+		}
 		fileSpecs = append(fileSpecs, model.FileSpec{Path: file.Path, Content: file.Content})
 	}
 	if fileError := model.ValidateFiles(fileSpecs, mountSpecs); fileError != nil {
 		return fmt.Errorf("%s: files: %v", where, fileError)
+	}
+	// configmaps: configmap と key が、テンプレートの中に存在し、path と mode が正しく、他のファイルやマウント先と、まったく同じ path にならない。
+	configMapSpecs := make([]model.ConfigMapMountSpec, 0, len(resource.ConfigMaps))
+	for _, mount := range resource.ConfigMaps {
+		target := configMaps[mount.ConfigMap]
+		if target == nil {
+			return fmt.Errorf("%s: configmaps の configmap %q が、resources にありません", where, mount.ConfigMap)
+		}
+		hasKey := false
+		for _, file := range target.Files {
+			if file.Key == mount.Key {
+				hasKey = true
+			}
+		}
+		if !hasKey {
+			return fmt.Errorf("%s: configmaps の key %q が、configmap %q の files にありません", where, mount.Key, mount.ConfigMap)
+		}
+		configMapSpecs = append(configMapSpecs, model.ConfigMapMountSpec{ConfigMapID: model.ConfigMapIDPrefix + mount.ConfigMap, Key: mount.Key, Path: mount.Path, Mode: mount.Mode})
+	}
+	if _, configMapError := model.ValidateConfigMapMounts(configMapSpecs); configMapError != nil {
+		return fmt.Errorf("%s: configmaps: %v", where, configMapError)
+	}
+	if overlapError := model.ValidateConfigMapMountPaths(configMapSpecs, fileSpecs, mountSpecs); overlapError != nil {
+		return fmt.Errorf("%s: configmaps: %v", where, overlapError)
 	}
 	// service: ポートの規則。
 	if resource.Service != nil {
