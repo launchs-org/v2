@@ -76,6 +76,7 @@ k8s につながない既定の状態でも、API と画面は動く(k8s を操�
 - Traefik のプラグインの導入は、[docs/ingress-plugins.md](docs/ingress-plugins.md)。
 
 ## ドキュメント
+- [guide/](guide/index.html) — **利用者向けの使い方ガイド**(HTML + CSS の静的なサイト。非エンジニア向け。ブラウザで `guide/index.html` を開く)
 - [docs/endpoints/](docs/endpoints/README.md) — **エンドポイントの仕様**(実装の正本)
 - [docs/coding-conventions.md](docs/coding-conventions.md) — コードの書き方、ファイルのルール
 - [docs/call-flow.md](docs/call-flow.md) — リクエストの流れ、どこで何を組み立てるか
