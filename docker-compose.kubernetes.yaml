@@ -38,6 +38,13 @@ services:
       KUBECONFIG: /kube/config
     volumes:
       - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
+  # accessstats は、Traefik の Pod のログを読み取るだけ(traefik の namespace の pods の list と、pods/log の get)。
+  accessstats:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
   # logcollector は、k8s のログを読み取るだけ(pods/log の get)。どの Pod を追うかは、watcher が書く DB から知る。
   logcollector:
     environment:
