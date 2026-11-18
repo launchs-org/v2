@@ -6,12 +6,14 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
 	"launchs/shared/pagination"
+	"launchs/shared/projecttask"
 )
 
 // ProjectStore は、ProjectService が必要とする、プロジェクトの保存先の操作。
@@ -38,6 +40,27 @@ type ProjectDeletionStarter interface {
 type ProjectService struct {
 	projectStore           ProjectStore
 	projectDeletionStarter ProjectDeletionStarter
+	// taskRecorder は、プロジェクトの作成を、タスクとして記録する。nil なら、記録しない。
+	taskRecorder TaskRecorder
+}
+
+// TaskRecorder は、すぐに終わる出来事を、終わったタスクとして記録する。実体は repository.ProjectTaskRepository。
+type TaskRecorder interface {
+	// RecordFinished は、終わったタスクを、1 回で保存する(同じ記録は、二重にならない)。
+	RecordFinished(requestContext context.Context, task model.ProjectTask) error
+}
+
+// WithTaskRecorder は、プロジェクトの作成を、タスクとして記録するようにする(「タスク」の一覧に、プロジェクトの作成が出る)。
+//
+// 引数:
+//   - taskRecorder: タスクの記録先。
+//
+// 戻り値:
+//   - 記録先を持たせた ProjectService(自分自身)。
+func (projectService *ProjectService) WithTaskRecorder(taskRecorder TaskRecorder) *ProjectService {
+	// 記録先を持たせて返す。
+	projectService.taskRecorder = taskRecorder
+	return projectService
 }
 
 // NewProjectService は、ProjectService を作る。
@@ -78,6 +101,14 @@ func (projectService *ProjectService) Create(requestContext context.Context, use
 	if createError := projectService.projectStore.Create(requestContext, project); createError != nil {
 		// 保存に失敗したので、ID は返さず、エラーだけ返す。
 		return "", createError
+	}
+	// 作成を、終わったタスクとして記録する(記録の失敗は、作成の結果に影響させない)。
+	if projectService.taskRecorder != nil {
+		started := time.Now().UTC()
+		_ = projectService.taskRecorder.RecordFinished(context.WithoutCancel(requestContext), model.ProjectTask{
+			ID: model.ProjectTaskIDPrefix + uuid.NewString(), ProjectID: project.ID, UserID: userID, ProjectName: name, Kind: projecttask.KindProjectCreate,
+			ResourceID: project.ID, WorkflowID: "project-create-" + project.ID, RunID: "-", Status: model.TaskStatusSucceeded, StartedAt: started, FinishedAt: &started,
+		})
 	}
 	// 保存できたので、作ったプロジェクトの ID を返す。
 	return project.ID, nil

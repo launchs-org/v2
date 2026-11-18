@@ -102,6 +102,7 @@ func run() error {
 		IngressHostGenerator:   hostGenerator,
 		VolumeWorkflowStarter:  service.NewTemporalVolumeWorkflowStarter(temporalClient),
 		TemplateApplyStarter:   service.NewTemporalTemplateWorkflowStarter(temporalClient),
+		ActivityObserver:       service.NewTemporalActivityObserver(temporalClient),
 		VolumeMaxSizeMB:        backendConfig.VolumeMaxSizeMB,
 	})
 
