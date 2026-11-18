@@ -14,7 +14,7 @@ func TestTemplateService(testingT *testing.T) {
 	yamlText := func(id string) *fstest.MapFile {
 		return &fstest.MapFile{Data: []byte("apiVersion: launchs/v1\nkind: Template\nmetadata:\n  id: " + id + "\n  name: n\nresources:\n  - kind: deploy\n    name: a\n    image: x\n    spec: small\n")}
 	}
-	registry, loadError := template.Load(fstest.MapFS{"b.yaml": yamlText("b"), "a.yaml": yamlText("a")})
+	registry, loadError := template.Load(fstest.MapFS{"b/template.yaml": yamlText("b"), "a/template.yaml": yamlText("a")})
 	if loadError != nil {
 		testingT.Fatal(loadError)
 	}

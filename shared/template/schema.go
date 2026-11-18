@@ -181,6 +181,11 @@ type File struct {
 
 	// Content は、内容。text なら、${変数} を含められる。base64 では、${変数} は使えない。
 	Content string `yaml:"content"`
+
+	// From は、テンプレートのフォルダの中の、ファイルの path(例: files/default.conf)。content の代わりに、フォルダのファイルを読み込む。
+	// 読み込みのとき(Load)に、Content と Encoding に置き換わり、空になる。text は、content と同じに、${変数} を含められる。
+	// configmap の files では、バイナリも読める(自動で判定して、base64 にする)。deploy の files は、テキストだけ。
+	From string `yaml:"from"`
 }
 
 // ConfigMapMount は、deploy が、テンプレートの中の configmap の 1 ファイルを、コンテナの 1 つの path に置く指定。

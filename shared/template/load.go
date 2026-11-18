@@ -2,14 +2,15 @@ package template
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
-	"path"
-	"sort"
-	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+
+	"launchs/shared/model"
 )
 
 // Registry は、読み込んだテンプレートの一覧(id から引ける)。
@@ -46,46 +47,137 @@ func Parse(content []byte) (Template, error) {
 	return template, nil
 }
 
-// Load は、フォルダの中の *.yaml を、全て、読み込み、検証する。
+// TemplateFileName は、テンプレートのフォルダの中の、本体の YAML のファイル名。
+const TemplateFileName = "template.yaml"
+
+// Load は、フォルダの中の、テンプレートのフォルダ(<id>/template.yaml)を、全て、読み込み、検証する。
 //
-// ファイル名(拡張子を除く)は、metadata.id と同じでなければならない(これで、id の重複も、起こらない)。
+// フォルダの形:
+//
+//	<id>/
+//	  template.yaml    本体(必須)
+//	  files/...        from: で読み込む、ファイル(任意。置き場所は自由)
+//
+// フォルダ名は、metadata.id と同じでなければならない(これで、id の重複も、起こらない)。
+// フォルダの直下の、フォルダでないもの(README など)は、無視する。
+// YAML の from: は、そのテンプレートのフォルダの中のファイルだけを読める(外は、読めない)。
 // 1つでも不正なら、全体がエラー(backend は、起動のときに呼び、落ちて気づく)。
 //
 // 引数:
-//   - files: テンプレートの YAML を含むファイルシステム(通常は、templates.Files)。
+//   - files: テンプレートのフォルダを含むファイルシステム(通常は、templates.Files)。
 //
 // 戻り値:
 //   - 読み込んだテンプレートの一覧。
-//   - 読めない、検証に通らない、id が重複する、ファイル名と id が違うときの、ファイル名つきのエラー。
+//   - 読めない、template.yaml が無い、from のファイルを読めない、検証に通らない、フォルダ名と id が違うときの、テンプレート名つきのエラー。
 func Load(files fs.FS) (*Registry, error) {
-	// フォルダの直下の *.yaml を、名前の順に読む。
-	names, globError := fs.Glob(files, "*.yaml")
-	if globError != nil {
-		return nil, fmt.Errorf("テンプレートの一覧を読めません: %w", globError)
+	// 直下のフォルダを、名前の順に読む。
+	entries, readError := fs.ReadDir(files, ".")
+	if readError != nil {
+		return nil, fmt.Errorf("テンプレートの一覧を読めません: %w", readError)
 	}
-	sort.Strings(names)
 	registry := &Registry{byID: map[string]Template{}}
-	for _, name := range names {
-		content, readError := fs.ReadFile(files, name)
+	for _, entry := range entries {
+		// フォルダでないもの(README など)は、無視する。
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		folder, subError := fs.Sub(files, name)
+		if subError != nil {
+			return nil, fmt.Errorf("テンプレート %s を開けません: %w", name, subError)
+		}
+		content, readError := fs.ReadFile(folder, TemplateFileName)
 		if readError != nil {
-			return nil, fmt.Errorf("テンプレート %s を読めません: %w", name, readError)
+			return nil, fmt.Errorf("テンプレート %s: %s を読めません: %w", name, TemplateFileName, readError)
 		}
 		template, parseError := Parse(content)
 		if parseError != nil {
 			return nil, fmt.Errorf("テンプレート %s: %w", name, parseError)
 		}
+		// from: のファイルを、フォルダから読み込んで、内容にする。
+		if resolveError := resolveFiles(&template, folder); resolveError != nil {
+			return nil, fmt.Errorf("テンプレート %s: %w", name, resolveError)
+		}
 		if validateError := Validate(template); validateError != nil {
 			return nil, fmt.Errorf("テンプレート %s: %w", name, validateError)
 		}
-		// ファイル名と id を、そろえる(探しやすくするため)。同じフォルダのファイル名は、重複しないので、
+		// フォルダ名と id を、そろえる(探しやすくするため)。同じフォルダの名前は、重複しないので、
 		// この確認が通れば、id も重複しない(id の重複を、別に確かめる必要が無い)。
-		if expected := strings.TrimSuffix(path.Base(name), ".yaml"); template.Metadata.ID != expected {
-			return nil, fmt.Errorf("テンプレート %s: metadata.id(%q)が、ファイル名(%q)と違います", name, template.Metadata.ID, expected)
+		if template.Metadata.ID != name {
+			return nil, fmt.Errorf("テンプレート %s: metadata.id(%q)が、フォルダ名(%q)と違います", name, template.Metadata.ID, name)
 		}
 		registry.byID[template.Metadata.ID] = template
 		registry.ids = append(registry.ids, template.Metadata.ID)
 	}
 	return registry, nil
+}
+
+// resolveFiles は、部品の files の from: を、フォルダのファイルの内容に置き換える。
+//
+// 規則:
+//   - from と content は、同時に書けない。
+//   - from は、フォルダの中の、相対パス(「/」で始まらない、「..」を含まない)。
+//   - configmap の files: encoding の省略は、自動(UTF-8 で NUL を含まなければ text、それ以外は base64)。
+//     text を指定したのにバイナリなら、エラー。base64 を指定すれば、テキストでも、バイナリとして扱う。
+//   - deploy の files: テキストだけ(バイナリは、エラー)。
+//   - 1 つのファイルは、1 MiB まで(ConfigMap の上限)。
+//
+// 引数:
+//   - template: 読み込んだテンプレート(中身を書き換える)。
+//   - folder: テンプレートのフォルダ。
+//
+// 戻り値:
+//   - 規則に合わないとき、ファイルを読めないときのエラー(どの部品の、どのファイルかが分かる)。
+func resolveFiles(template *Template, folder fs.FS) error {
+	// 部品ごとに、ファイルを順に見る。
+	for resourceIndex := range template.Resources {
+		resource := &template.Resources[resourceIndex]
+		for fileIndex := range resource.Files {
+			file := &resource.Files[fileIndex]
+			if file.From == "" {
+				continue
+			}
+			where := fmt.Sprintf("%s %s の files の from(%s)", resource.Kind, resource.Name, file.From)
+			if file.Content != "" {
+				return fmt.Errorf("%s: content と同時には、書けません", where)
+			}
+			if !fs.ValidPath(file.From) || file.From == "." {
+				return fmt.Errorf("%s: フォルダの中の相対パスにしてください(「/」で始まる、「..」を含むパスは、使えません)", where)
+			}
+			data, readError := fs.ReadFile(folder, file.From)
+			if readError != nil {
+				return fmt.Errorf("%s: 読めません: %w", where, readError)
+			}
+			if len(data) > model.MaxConfigMapStoredBytes {
+				return fmt.Errorf("%s: 大きすぎます(1MiB まで)", where)
+			}
+			isText := utf8.Valid(data) && !bytes.Contains(data, []byte{0})
+			switch {
+			case resource.Kind == ResourceDeploy:
+				// deploy の files は、テキストだけ。
+				if !isText {
+					return fmt.Errorf("%s: deploy の files は、テキストだけです(バイナリは、configmap に置いてください)", where)
+				}
+				file.Content = string(data)
+			case file.Encoding == model.ConfigMapEncodingBase64 || (file.Encoding == "" && !isText):
+				// バイナリ(または、指定されたとき)は、base64 にする。
+				file.Encoding = model.ConfigMapEncodingBase64
+				file.Content = base64.StdEncoding.EncodeToString(data)
+			case file.Encoding == "" || file.Encoding == model.ConfigMapEncodingText:
+				// テキスト。text と指定されたのに、バイナリのときは、エラー。
+				if !isText {
+					return fmt.Errorf("%s: encoding が text ですが、UTF-8 のテキストではありません(base64 にしてください)", where)
+				}
+				file.Encoding = model.ConfigMapEncodingText
+				file.Content = string(data)
+			default:
+				return fmt.Errorf("%s: encoding は、text か base64 です(%q)", where, file.Encoding)
+			}
+			// 読み込めたので、from は、空にする(あとの検証と展開は、content だけを見る)。
+			file.From = ""
+		}
+	}
+	return nil
 }
 
 // List は、全てのテンプレートを、id の順に返す。

@@ -6,7 +6,7 @@
 
 | 場所 | 役割 |
 |---|---|
-| `templates/*.yaml` | 同梱のテンプレート(`nginx`、`redis`、`postgres`、`mariadb`、`code-server`)。ファイル名は、`metadata.id` と同じ |
+| `templates/<id>/` | 同梱のテンプレート(`nginx`、`redis`、`postgres`、`mariadb`、`code-server`)。ファイル名は、`metadata.id` と同じ |
 | `templates/embed.go` | `//go:embed *.yaml` で、YAML をバイナリに埋め込む(`templates.Files`)。イメージに入れ忘れず、利用者が変えられない |
 | `shared/template/` | 読み込み(`Parse`、`Load`)、検証(`Validate`)、値の検査と補い(`ResolveValues`、`ValidateValues`、`GeneratePassword`)、展開(`Expand`)。**データベースにも k8s にも触らない、純粋な処理** |
 | `backend/src/service/template_service.go`、`backend/src/controller/template_controller.go` | 一覧と取得の API。`resources` は返さず、`summary` だけ |
