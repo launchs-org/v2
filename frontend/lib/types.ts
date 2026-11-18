@@ -99,33 +99,9 @@ export type IngressDetail = {
   /** アクセスの集計(Traefik のプラグイン launchs-stats)を有効にしているか。 */
   accessStats?: boolean
 }
-/** アクセスの集計の、ステータス・メソッドなどの要約(合計と、グラフの 1 区間で同じ形)。 */
-export type AccessSummary = {
-  count: number
-  status: Record<"1xx" | "2xx" | "3xx" | "4xx" | "5xx", number>
-  methods: Record<string, number>
-  bytes: number
-  avgMs: number
-  p50Ms: number
-  p95Ms: number
-  p99Ms: number
-}
 /** アクセスログの 1 行(1 リクエスト)。 */
 export type AccessLogEntry = { time: string; method: string; url: string; status: number; durationMs: number; clientIp: string; bytes: number }
 export type AccessLogsResponse = { logs: AccessLogEntry[]; nextCursor: string | null }
-export type AccessRange = "1h" | "24h" | "7d" | "30d"
-export type AccessStatsResponse = {
-  enabled: boolean
-  range: AccessRange
-  from: string
-  to: string
-  bucketSeconds: number
-  totals: AccessSummary
-  series: (AccessSummary & { start: string })[]
-  paths: { key: string; count: number }[]
-  clients: { key: string; count: number }[]
-  uniqueClients: number
-}
 export type LoginHistoryResponse = {
   history: { historyId: string; ip: string; userAgent: string; createdAt: string }[]
   nextCursor: string | null
