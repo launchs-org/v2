@@ -199,6 +199,7 @@ export function TasksView({ project, refreshInterval, nav }: ProjectViewProps) {
                           <tr className="tasks-detail">
                             <td colSpan={6}>
                               {task.error && <div className="reason">{task.error}</div>}
+                              {task.status === "failed" && <div className="mut" style={{ fontSize: 12.5, marginTop: 6 }}>原因の手がかりは、「イベント」タブ(イメージの取得、配置、起動の失敗)や、「ログ」タブにあります。</div>}
                               {!task.error && task.status === "lost" && <div className="mut" style={{ fontSize: 13 }}>終わりの記録が付いていません(worker が止まった、または、時間切れの可能性があります)。</div>}
                               {!task.error && task.status !== "lost" && <div className="mut" style={{ fontSize: 13 }}>{task.status === "running" ? "実行中です。" : "問題なく終わりました。"}</div>}
                               <div className="meta mono">開始 {shortDateTime(task.startedAt)}{task.finishedAt ? ` · 終了 ${shortDateTime(task.finishedAt)}` : ""} · Workflow {task.workflowId}</div>

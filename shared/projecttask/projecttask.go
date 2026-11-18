@@ -114,6 +114,11 @@ func ErrorMessage(workflowError error) string {
 		return "取り消されました"
 	}
 	if temporal.IsTimeoutError(workflowError) {
+		// 時間切れになった処理(Activity)の名前が分かれば、添える。
+		var activityError *temporal.ActivityError
+		if errors.As(workflowError, &activityError) && activityError.ActivityType() != nil && activityError.ActivityType().Name != "" {
+			return "処理「" + activityError.ActivityType().Name + "」が、時間切れになりました"
+		}
 		return "時間切れになりました"
 	}
 	// 一番内側のアプリケーションのエラーを探す。

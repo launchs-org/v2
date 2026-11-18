@@ -1,12 +1,19 @@
 package projecttask
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/mock"
+	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/testsuite"
+	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	"launchs/shared/workflow"
 )
@@ -58,5 +65,22 @@ func TestErrorMessage(testingT *testing.T) {
 	}
 	if got := ErrorMessage(temporal.NewCanceledError()); got != "取り消されました" {
 		testingT.Errorf("取り消しは決まった文: %q", got)
+	}
+}
+
+// TestErrorMessageTimeout は、Activity が時間切れになった Workflow の失敗に、処理の名前が添えられることを確認する。
+func TestErrorMessageTimeout(testingT *testing.T) {
+	suite := &testsuite.WorkflowTestSuite{}
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterActivityWithOptions(func(_ context.Context) error { return nil }, activity.RegisterOptions{Name: "WaitDeploymentReady"})
+	workflowFunction := func(workflowContext sdkworkflow.Context) error {
+		activityContext := sdkworkflow.WithActivityOptions(workflowContext, sdkworkflow.ActivityOptions{StartToCloseTimeout: time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		return sdkworkflow.ExecuteActivity(activityContext, "WaitDeploymentReady").Get(activityContext, nil)
+	}
+	env.RegisterWorkflow(workflowFunction)
+	env.OnActivity("WaitDeploymentReady", mock.Anything).Return(temporal.NewTimeoutError(enums.TIMEOUT_TYPE_START_TO_CLOSE, nil))
+	env.ExecuteWorkflow(workflowFunction)
+	if got := ErrorMessage(env.GetWorkflowError()); got != "処理「WaitDeploymentReady」が、時間切れになりました" {
+		testingT.Errorf("時間切れは、処理の名前を添えるはず: %q", got)
 	}
 }
