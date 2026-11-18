@@ -348,6 +348,27 @@ POST /deploy/:id/files/apply  DeployService.ApplyFiles → DeployRepository.Begi
 - ConfigMap は、deploy を削除するとき、Deployment と一緒に消す(`KubernetesDeploymentOperator.DeleteDeployment`)。プロジェクトを削除すると、namespace ごと消える。
 - ConfigMap の volume の名前は `files`。PVC の volume(名前は volume の ID)とは、ぶつからない。ボリュームの上(`/data/init.sql`)にも、別の場所にも、置ける(実機で確認)。
 
+### 5.8.2 ConfigMap のマウント(共有の ConfigMap): `/deploy/:deployId/configmap-mounts`
+
+プロジェクトで共有する ConfigMap(`/projects/:id/configmaps`、`/configmaps/:id`。編集は版を足すだけで、k8s には触れない)を、deploy が、版を固定してマウントする。
+
+```
+PUT  /deploy/:id/configmap-mounts        DeployService.UpdateConfigMapMounts → model.ValidateConfigMapMounts(形、mode)
+                                           → DeployRepository.SavePendingConfigMapMounts
+                                           (行をロック → ConfigMap の行を共有ロックして、実在・版・key を確かめ、版を決める
+                                            → files、マウント先との重なりを確かめる → pending_configmap_mounts に保存。現在と同じなら NULL)
+POST /deploy/:id/configmap-mounts/apply  DeployService.ApplyConfigMapMounts → DeployRepository.BeginConfigMapMountsApply(applying にする。実在と重なりを再確認)
+ └─ ApplyDeployConfigMapMountsWorkflow     ApplyPendingConfigMapMounts: namespace を用意 → 使う版ごとに k8s の ConfigMap(`<id>-r<版>`、immutable)を作る
+                                           → pending のマウントを含めた Deployment に更新(マウントごとにボリュームを分け、subPath でマウント)
+                                           → 起動を待つ → 失敗したら Deployment を元に戻す → 結果を確定
+                                           → 成功したら CleanupConfigMapRevisions(どの deploy も使っていない版の ConfigMap を消す)
+DELETE /configmaps/:id                   ConfigMapRepository.Delete(ConfigMap の行を更新用にロック → 使っている deploy が無いことを確かめて削除。あれば 409)
+```
+
+- 現在のマウントは、`newDeploymentDefinition` が `deploy.ConfigMapMounts` から Deployment の内容に入れる。他の適用でも落ちない。
+- ConfigMap を編集しても、使っている deploy には届かない(`GET .../configmap-mounts` の `latestRevision` で、新しい版があると分かる。deploy が、版を明示して保存し直し、適用したとき、初めて届く)。
+- 使っている版(現在と pending)は、直近 10 版を超えても、DB から消さない。
+
 - プロジェクトのレコードを消すとき、配下の volume の行も消す。PVC は、namespace の削除で消える。
 
 ## 6. どのファイルを見ればよいか

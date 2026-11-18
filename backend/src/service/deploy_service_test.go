@@ -81,6 +81,26 @@ func (fakeStore *fakeDeployStore) BeginFilesApply(_ context.Context, _ string, _
 	return model.DeployStatusActive, nil
 }
 
+// SavePendingConfigMapMounts は、何もせず成功する。
+func (fakeStore *fakeDeployStore) SavePendingConfigMapMounts(_ context.Context, _ string, _ string, _ []model.ConfigMapMountSpec) error {
+	return nil
+}
+
+// DiscardPendingConfigMapMounts は、何もせず成功する。
+func (fakeStore *fakeDeployStore) DiscardPendingConfigMapMounts(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// BeginConfigMapMountsApply は、元の状態として active を返す。
+func (fakeStore *fakeDeployStore) BeginConfigMapMountsApply(_ context.Context, _ string, _ string) (string, error) {
+	return model.DeployStatusActive, nil
+}
+
+// FindConfigMapLatestRevisions は、空の対応を返す。
+func (fakeStore *fakeDeployStore) FindConfigMapLatestRevisions(_ context.Context, _ string, _ []string) (map[string]model.ConfigMap, error) {
+	return map[string]model.ConfigMap{}, nil
+}
+
 // SavePendingMounts は、何もせず成功する。
 func (fakeStore *fakeDeployStore) SavePendingMounts(_ context.Context, _ string, _ string, _ []model.MountSpec) error {
 	return nil
@@ -138,6 +158,11 @@ func (fakeStore *fakePodStore) ListPodsByDeploy(_ context.Context, deployID stri
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
 	startError       error
+}
+
+// StartConfigMapMountsApply は、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartConfigMapMountsApply(_ context.Context, _ string) error {
+	return fakeStarter.startError
 }
 
 // StartFilesApply は、決めたエラーを返す。

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,9 @@ const (
 	// filesVolumeName は、deploy のファイル(ConfigMap)を、Pod のボリュームとして付けるときの名前。
 	// PVC のボリューム(名前は volume の ID: "volume-…")と、ぶつからない名前にする。
 	filesVolumeName = "files"
+
+	// configMapMountVolumePrefix は、共有の ConfigMap のファイルを、Pod のボリュームとして付けるときの名前の接頭辞(後ろに連番を付ける)。
+	configMapMountVolumePrefix = "cm"
 )
 
 // deploymentNamePattern は、削除してよい Deployment の名前の形("deploy-" + UUID v4)。
@@ -319,6 +323,18 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: definition.Name}, Items: items, DefaultMode: int32Pointer(0o644)}},
 		})
 	}
+	// 共有の ConfigMap のファイルは、マウントごとに、ボリュームを 1 つ足す(権限 mode は、ボリュームの items に付くため)。subPath でマウントする。
+	for index, mount := range definition.ConfigMapMounts {
+		volumeName := configMapMountVolumePrefix + strconv.Itoa(index)
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: mount.ConfigMapName},
+				Items:                []corev1.KeyToPath{{Key: mount.Key, Path: mount.Key, Mode: int32Pointer(mount.Mode)}},
+			}},
+		})
+		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: volumeName, MountPath: mount.Path, SubPath: mount.Key, ReadOnly: true})
+	}
 	if operator.runtimeClassName != "" {
 		podSpec.RuntimeClassName = &operator.runtimeClassName
 	}
@@ -328,7 +344,7 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 	// ボリュームを持つときは、古い Pod を止めてから、新しい Pod を起動する(RWO の PVC は、古い Pod が持ったままだと、別のノードの新しい Pod が使えないため)。
 	strategy := appsv1.DeploymentStrategy{}
 	// ファイルを持つときも、同じ方式にする(subPath のマウントは、ConfigMap を更新しても、動いている Pod には反映されない。Pod を作り直して、確実に反映する)。
-	if len(definition.Mounts) > 0 || len(definition.Files) > 0 {
+	if len(definition.Mounts) > 0 || len(definition.Files) > 0 || len(definition.ConfigMapMounts) > 0 {
 		strategy.Type = appsv1.RecreateDeploymentStrategyType
 	}
 	return &appsv1.Deployment{

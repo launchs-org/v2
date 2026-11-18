@@ -88,6 +88,12 @@ type Deploy struct {
 	// PendingFiles は、まだ適用していないファイルの構成。変更が無ければ nil。空の配列は、全て外す変更。
 	PendingFiles datatypes.JSON `gorm:"column:pending_files"`
 
+	// ConfigMapMounts は、現在コンテナに反映されている、共有の ConfigMap のファイルのマウント(ConfigMapMountSpec の JSON の配列)。nil は無し。
+	ConfigMapMounts datatypes.JSON `gorm:"column:configmap_mounts"`
+
+	// PendingConfigMapMounts は、まだ適用していない ConfigMap のマウントの構成。変更が無ければ nil。空の配列は、全て外す変更。
+	PendingConfigMapMounts datatypes.JSON `gorm:"column:pending_configmap_mounts"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 
