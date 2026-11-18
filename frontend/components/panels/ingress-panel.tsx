@@ -142,11 +142,12 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
           <a className="mono" style={{ fontWeight: 500, color: "var(--accent)", overflowWrap: "anywhere" }} href={`https://${detail.host}`} target="_blank" rel="noreferrer">https://{detail.host}</a>
         </div>
-        {/* アクセスの集計(件数、ステータス、応答時間、上位のパスとクライアント)。 */}
+        {/* アクセスログ(概要のグラフと、1 リクエストごとの一覧)。 */}
+        <div className="card" style={{ overflow: "hidden" }}>
         <IngressAccessStats basePath={path} enabled={detail.accessStats !== false} locked={locked || busy} refreshInterval={refreshInterval}
-          onToggle={(next) => void run(async () => { await updateAccessStats(path, next); notify(next ? "アクセスの集計を有効にしました" : "アクセスの集計を止めました") })} />
-        {/* アクセスログ(1 リクエストごと。新しい順の表)。 */}
+          onToggle={(next) => void run(async () => { await updateAccessStats(path, next); notify(next ? "アクセスログの記録を有効にしました" : "アクセスログの記録を止めました") })} />
         <IngressAccessLog basePath={path} />
+        </div>
         {/* ルールの編集。 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="row pad" style={{ paddingBottom: 8 }}>
