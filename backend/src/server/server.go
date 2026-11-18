@@ -4,7 +4,7 @@
 package server
 
 import (
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 	"log/slog"
 
 	"github.com/labstack/echo/v5"
@@ -37,6 +37,9 @@ type Dependencies struct {
 
 	// VolumeWorkflowStarter は、volume の拡張の反映・削除の Workflow を開始するもの。
 	VolumeWorkflowStarter service.VolumeWorkflowStarter
+
+	// TemplateApplyStarter は、テンプレートから部品を作る Workflow を開始するもの。
+	TemplateApplyStarter service.TemplateApplyStarter
 
 	// TemplateRegistry は、読み込み済みのテンプレート(docs/templates.md)。nil のときは、同梱のものを読み込む(テスト用)。
 	TemplateRegistry *template.Registry

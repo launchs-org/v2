@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 	"launchs/templates"
 	"os"
 	"os/signal"
@@ -101,6 +101,7 @@ func run() error {
 		IngressWorkflowStarter: service.NewTemporalIngressWorkflowStarter(temporalClient),
 		IngressHostGenerator:   hostGenerator,
 		VolumeWorkflowStarter:  service.NewTemporalVolumeWorkflowStarter(temporalClient),
+		TemplateApplyStarter:   service.NewTemporalTemplateWorkflowStarter(temporalClient),
 		VolumeMaxSizeMB:        backendConfig.VolumeMaxSizeMB,
 	})
 

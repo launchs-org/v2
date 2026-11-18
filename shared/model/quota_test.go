@@ -164,3 +164,34 @@ func TestQuotaOverridesOf(testingT *testing.T) {
 		testingT.Fatalf("行に戻せるはず: %+v", row)
 	}
 }
+
+// TestCheckBatch は、まとめて作るものが、全体で、上限に収まるかの確認(数、スペックごと、volume の数と大きさ)を確認する。
+func TestCheckBatch(testingT *testing.T) {
+	limits := QuotaLimits{MaxDeploys: 5, MaxVolumes: 3, MaxVolumeTotalMB: 4096, MaxDeploysBySpec: map[string]int{"small": 3, "medium": 2}}
+	usage := QuotaUsage{Deploys: 2, DeploysBySpec: map[string]int{"small": 1, "medium": 1}, Volumes: 1, VolumeTotalMB: 1024}
+	for _, testCase := range []struct {
+		name      string
+		needs     BatchNeeds
+		wantError bool
+	}{
+		{"収まる", BatchNeeds{DeploysBySpec: map[string]int{"small": 2, "medium": 1}, Volumes: 2, VolumeTotalMB: 3072}, false},
+		{"何も作らない", BatchNeeds{}, false},
+		{"deploy の合計が、ちょうど上限", BatchNeeds{DeploysBySpec: map[string]int{"small": 2, "medium": 1}}, false},
+		{"deploy の合計が、上限を 1 超える", BatchNeeds{DeploysBySpec: map[string]int{"small": 2, "medium": 2}}, true},
+		{"スペックごとの数が、上限を超える(合計は収まる)", BatchNeeds{DeploysBySpec: map[string]int{"medium": 2}}, true},
+		{"上限のないスペックは、作れない", BatchNeeds{DeploysBySpec: map[string]int{"large": 1}}, true},
+		{"volume の数が、上限を超える", BatchNeeds{Volumes: 3, VolumeTotalMB: 100}, true},
+		{"volume の大きさの合計が、上限を超える", BatchNeeds{Volumes: 1, VolumeTotalMB: 3073}, true},
+		{"volume の大きさが、ちょうど上限", BatchNeeds{Volumes: 1, VolumeTotalMB: 3072}, false},
+	} {
+		testingT.Run(testCase.name, func(subTest *testing.T) {
+			checkError := limits.CheckBatch(usage, testCase.needs)
+			if testCase.wantError && (checkError == nil || apperror.KindOf(checkError) != apperror.KindConflict) {
+				subTest.Errorf("conflict のはず: %v", checkError)
+			}
+			if !testCase.wantError && checkError != nil {
+				subTest.Errorf("収まるはず: %v", checkError)
+			}
+		})
+	}
+}

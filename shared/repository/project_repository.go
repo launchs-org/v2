@@ -384,6 +384,10 @@ func (projectRepository *ProjectRepository) DeleteRecord(requestContext context.
 		if volumeError := transaction.Where(&model.Volume{ProjectID: projectID}).Delete(&model.Volume{}).Error; volumeError != nil {
 			return volumeError
 		}
+		// 配下の、テンプレートの実行の記録を削除する。
+		if applyError := transaction.Where(&model.TemplateApply{ProjectID: projectID}).Delete(&model.TemplateApply{}).Error; applyError != nil {
+			return applyError
+		}
 		// 配下の ConfigMap を削除する(版は、外部キーの CASCADE で消える。k8s の ConfigMap は、namespace の削除で消えている)。
 		if configMapError := transaction.Where(&model.ConfigMap{ProjectID: projectID}).Delete(&model.ConfigMap{}).Error; configMapError != nil {
 			return configMapError

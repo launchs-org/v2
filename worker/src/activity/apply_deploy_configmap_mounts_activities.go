@@ -120,30 +120,8 @@ func (applyActivities *ApplyDeployConfigMapMountsActivities) ApplyPendingConfigM
 		return 0, markNonRetryable(namespaceError)
 	}
 	// 使う版ごとに、1度だけ、k8s の ConfigMap を用意する(Deployment が、ConfigMap を参照できるように、先に作る)。
-	prepared := map[string]bool{}
-	for _, mount := range pendingMounts {
-		resourceName := model.ConfigMapRevisionResourceName(mount.ConfigMapID, mount.Revision)
-		if prepared[resourceName] {
-			continue
-		}
-		prepared[resourceName] = true
-		// 版の中身を DB から読む(版が無いのは、何度やっても同じなので、リトライしない)。
-		revision, revisionError := applyActivities.revisionStore.FindRevisionForWorker(requestContext, mount.ConfigMapID, mount.Revision)
-		if revisionError != nil {
-			return 0, temporal.NewNonRetryableApplicationError("ConfigMap の版を読めません: "+resourceName, "ConfigMapRevisionNotFound", revisionError)
-		}
-		files, filesError := model.ParseConfigMapFiles(revision.Files)
-		if filesError != nil {
-			return 0, temporal.NewNonRetryableApplicationError("ConfigMap の版が壊れています: "+resourceName, "InvalidConfigMapRevision", filesError)
-		}
-		data, binaryData, splitError := splitConfigMapFiles(files)
-		if splitError != nil {
-			return 0, temporal.NewNonRetryableApplicationError("ConfigMap の版のバイナリが壊れています: "+resourceName, "InvalidConfigMapRevision", splitError)
-		}
-		// k8s の ConfigMap を作る。
-		if applyError := applyActivities.revisionOperator.ApplyRevisionConfigMap(requestContext, deploy.ProjectID, resourceName, data, binaryData); applyError != nil {
-			return 0, markNonRetryable(applyError)
-		}
+	if revisionError := ensureRevisionConfigMaps(requestContext, applyActivities.revisionStore, applyActivities.revisionOperator, deploy.ProjectID, pendingMounts); revisionError != nil {
+		return 0, revisionError
 	}
 	// pending のマウントを使った Deployment の内容を組み立てて、k8s を操作するものに任せる。
 	pendingDeploy := deploy
@@ -153,6 +131,47 @@ func (applyActivities *ApplyDeployConfigMapMountsActivities) ApplyPendingConfigM
 		return 0, temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)
 	}
 	return applyActivities.deploymentOperator.ApplyDeployment(requestContext, definition)
+}
+
+// ensureRevisionConfigMaps は、マウントが使う版ごとに、k8s の ConfigMap(immutable)を、1 度だけ用意する(あれば、そのまま)。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context。
+//   - revisionStore: ConfigMap の版を読む、データベースの操作。
+//   - revisionOperator: k8s の、版の ConfigMap を操作するもの。
+//   - projectID: プロジェクトの ID(namespace の名前)。
+//   - mounts: ConfigMap のマウント。
+//
+// 戻り値:
+//   - 版が DB に無い・壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func ensureRevisionConfigMaps(requestContext context.Context, revisionStore ConfigMapRevisionStore, revisionOperator ConfigMapRevisionOperator, projectID string, mounts []model.ConfigMapMountSpec) error {
+	// 使う版ごとに、1 度だけ、用意する。
+	prepared := map[string]bool{}
+	for _, mount := range mounts {
+		resourceName := model.ConfigMapRevisionResourceName(mount.ConfigMapID, mount.Revision)
+		if prepared[resourceName] {
+			continue
+		}
+		prepared[resourceName] = true
+		// 版の中身を DB から読む(版が無いのは、何度やっても同じなので、リトライしない)。
+		revision, revisionError := revisionStore.FindRevisionForWorker(requestContext, mount.ConfigMapID, mount.Revision)
+		if revisionError != nil {
+			return temporal.NewNonRetryableApplicationError("ConfigMap の版を読めません: "+resourceName, "ConfigMapRevisionNotFound", revisionError)
+		}
+		files, filesError := model.ParseConfigMapFiles(revision.Files)
+		if filesError != nil {
+			return temporal.NewNonRetryableApplicationError("ConfigMap の版が壊れています: "+resourceName, "InvalidConfigMapRevision", filesError)
+		}
+		data, binaryData, splitError := splitConfigMapFiles(files)
+		if splitError != nil {
+			return temporal.NewNonRetryableApplicationError("ConfigMap の版のバイナリが壊れています: "+resourceName, "InvalidConfigMapRevision", splitError)
+		}
+		// k8s の ConfigMap を作る。
+		if applyError := revisionOperator.ApplyRevisionConfigMap(requestContext, projectID, resourceName, data, binaryData); applyError != nil {
+			return markNonRetryable(applyError)
+		}
+	}
+	return nil
 }
 
 // RollbackDeploymentConfigMapMounts は、反映に失敗したとき、Deployment を、現在の(動いていた)ConfigMap のマウントに戻す。
