@@ -80,10 +80,10 @@ function TopList({ title, items, empty }: { title: string; items: { key: string;
 }
 
 /**
- * ingress のアクセスの集計(件数の推移、ステータス、応答時間、上位のパスとクライアント)と、集計の有効・無効の切り替え。
+ * ingress のアクセスログの見出し(記録の有効・無効の切り替えと、件数の推移、ステータス、応答時間、件数の多いパスとクライアントの概要)。
  *
  * @param props.basePath ingress の API のパス(/api/v1/projects/.../ingresses/...)。
- * @param props.enabled 集計が有効か。
+ * @param props.enabled 記録が有効か。
  * @param props.locked 反映中・削除中(切り替えられない)。
  * @param props.refreshInterval 自動更新の間隔。
  * @param props.onToggle 有効・無効を切り替えるとき。
@@ -94,21 +94,21 @@ export function IngressAccessStats({ basePath, enabled, locked, refreshInterval,
   const totals = data?.totals
   const failureRate = totals && totals.count > 0 ? (totals.status["5xx"] / totals.count) * 100 : 0
   return (
-    <div className="card" style={{ overflow: "hidden" }}>
+    <div>
       <div className="row pad" style={{ paddingBottom: 8 }}>
-        <h2 className="h2 grow">アクセスの集計</h2>
+        <h2 className="h2 grow">アクセスログ</h2>
         <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
           <input type="checkbox" checked={enabled} disabled={locked} onChange={(event) => onToggle(event.target.checked)} />
-          記録・集計する
+          記録する
         </label>
       </div>
       <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 8px" }}>
-        {enabled ? "全てのリクエストを、アクセスログに記録し、件数、ステータス、応答時間、よく使われたパスを、集計しています(集計では、パスの ID らしい部分を :id にまとめます)。" : "記録と集計は止まっています。過去の分は、保存期間の間、見られます。"}
+        {enabled ? "全てのリクエスト(URL はクエリも含めて、そのまま)を記録しています。下の概要は、同じ記録から作っています(パスの ID らしい部分は :id にまとめます)。" : "記録は止まっています。過去の分は、保存期間の間、見られます。"}
       </div>
       <div className="row" style={{ gap: 6, padding: "0 18px 10px" }}>
         {RANGES.map((item) => <button key={item.value} type="button" className={`chip ${range === item.value ? "on" : ""}`} onClick={() => setRange(item.value)}>{item.label}</button>)}
       </div>
-      {error && <div style={{ color: "var(--bad)", fontSize: 12.5, padding: "0 18px 12px" }}>集計を取得できませんでした。</div>}
+      {error && <div style={{ color: "var(--bad)", fontSize: 12.5, padding: "0 18px 12px" }}>アクセスログの概要を取得できませんでした。</div>}
       {data && totals && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "0 18px 16px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10 }}>
@@ -132,8 +132,8 @@ export function IngressAccessStats({ basePath, enabled, locked, refreshInterval,
             {Object.keys(totals.methods).length > 0 && `   |   ${Object.entries(totals.methods).map(([name, count]) => `${name}: ${formatCount(count)}`).join("  ·  ")}`}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16 }}>
-            <TopList title="よく使われたパス" items={data.paths} empty="まだ集計がありません。" />
-            <TopList title="よく来たクライアント(IP)" items={data.clients} empty="記録がありません。" />
+            <TopList title="件数の多いパス" items={data.paths} empty="まだ記録がありません。" />
+            <TopList title="件数の多いクライアント(IP)" items={data.clients} empty="記録がありません。" />
           </div>
         </div>
       )}
