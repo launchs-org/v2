@@ -106,6 +106,10 @@ func (deployRepository *DeployRepository) SavePendingMounts(requestContext conte
 		if overlapError := model.ValidateFiles(files, mounts); overlapError != nil {
 			return apperror.New(apperror.KindInvalidRequest, "マウント先が、ファイルの path と重なっています: "+overlapError.Error())
 		}
+		// ConfigMap のマウントの path とも、まったく同じでないことを確かめる(照らす相手は、pending があればそれ、無ければ現在のもの)。
+		if overlapError := checkConfigMapMountOverlaps(effectiveJSON(deploy.ConfigMapMounts, deploy.PendingConfigMapMounts), effectiveJSON(deploy.Files, deploy.PendingFiles), encoded); overlapError != nil {
+			return apperror.New(apperror.KindInvalidRequest, "マウント先が、ConfigMap のマウントの path と重なっています: "+overlapError.Error())
+		}
 		// 現在と同じ内容なら、pending は空にする(現在が NULL のときは、空の配列と同じ内容として比べる)。
 		deploy.PendingMounts = datatypes.JSON(encoded)
 		if sameMounts(deploy.Mounts, encoded) {

@@ -8,9 +8,10 @@ import { ErrorState } from "@/components/ui-kit"
 import { KindIcon, type Kind } from "@/components/kind-icon"
 
 /** 未適用の変更の種類から、リソースの種類(色つきアイコン用)と、開くタブを決める。 */
-const KIND_OF: Record<PendingItem["kind"], { kind: Kind; tab?: "config" | "mounts" | "service" }> = {
+const KIND_OF: Record<PendingItem["kind"], { kind: Kind; tab?: "config" | "mounts" | "configmap" | "service" }> = {
   "起動設定": { kind: "deploy", tab: "config" },
   "マウント": { kind: "deploy", tab: "mounts" },
+  ConfigMap: { kind: "configmap", tab: "configmap" },
   Service: { kind: "service", tab: "service" },
   Ingress: { kind: "ingress" },
   "ボリューム": { kind: "volume" },

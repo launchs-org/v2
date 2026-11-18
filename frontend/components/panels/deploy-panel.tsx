@@ -8,13 +8,14 @@ import type { DeployTab, ProjectViewProps } from "@/lib/nav"
 import type { DeployDetail, ServicePort, VolumeListResponse } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, isBusyStatus, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import { LogTail } from "@/components/log-tail"
+import { ConfigMapMountsTab } from "@/components/panels/configmap-mounts-tab"
 import { PanelFrame } from "@/components/panels/panel-frame"
 
 /** 差分の 1 行。 */
 type DiffLine = { cls: "d-add" | "d-chg" | "d-del"; text: string }
 
 const TABS: { key: DeployTab; label: string }[] = [
-  { key: "overview", label: "概要" }, { key: "config", label: "起動設定" }, { key: "mounts", label: "マウント" }, { key: "service", label: "Service" }, { key: "logs", label: "ログ" },
+  { key: "overview", label: "概要" }, { key: "config", label: "起動設定" }, { key: "mounts", label: "マウント" }, { key: "configmap", label: "ConfigMap" }, { key: "service", label: "Service" }, { key: "logs", label: "ログ" },
 ]
 const MAX_REPLICAS = 5
 const PORT_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -82,7 +83,7 @@ function diffByKey(before: Map<string, string>, after: Map<string, string>): Dif
  * 処理の流れ:
  *  1. deploy の詳細を取る(自動更新の間隔で取り直す)。
  *  2. 取れなかった(削除が終わった、など)ら、パネルを閉じる。
- *  3. 見出しと、5 つのタブ(概要・起動設定・マウント・Service・ログ)を出す。
+ *  3. 見出しと、6 つのタブ(概要・起動設定・マウント・ConfigMap・Service・ログ)を出す。
  *
  * @param props.deployId 開いている deploy の ID。
  * @param props.tab 開いているタブ。
@@ -126,9 +127,10 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
   const config = data.config
   const hasConfigPending = config.pending_env !== null || config.pending_command !== null || config.pending_args !== null
   const hasMountsPending = data.volumes.pending_mounts !== null
+  const hasConfigMapPending = (data.configmapMounts?.pending_mounts ?? null) !== null
   const hasServicePending = Boolean(data.service?.pending_ports)
-  const hasPending = hasConfigPending || hasMountsPending || hasServicePending
-  const pendingTabs: Record<DeployTab, boolean> = { overview: false, config: hasConfigPending, mounts: hasMountsPending, service: hasServicePending, logs: false }
+  const hasPending = hasConfigPending || hasMountsPending || hasConfigMapPending || hasServicePending
+  const pendingTabs: Record<DeployTab, boolean> = { overview: false, config: hasConfigPending, mounts: hasMountsPending, configmap: hasConfigMapPending, service: hasServicePending, logs: false }
   const lockedMessage = data.status === "applying" ? "反映中です。完了するまで編集・削除はできません。" : data.status === "pending" ? "起動中です。完了するまで編集はできません。" : data.status === "deleting" ? "削除処理中です。" : ""
 
   return (
@@ -150,6 +152,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
         {tab === "overview" && <OverviewTab data={data} locked={locked} busy={busy} hasPending={hasPending} run={run} onTabChange={onTabChange} />}
         {tab === "config" && <ConfigTab data={data} locked={locked} busy={busy} run={run} />}
         {tab === "mounts" && <MountsTab data={data} projectId={project.projectId} locked={locked} busy={busy} run={run} />}
+        {tab === "configmap" && <ConfigMapMountsTab nav={props.nav} deployId={data.deployId} projectId={project.projectId} refreshInterval={refreshInterval} locked={locked} busy={busy} run={run} />}
         {tab === "service" && <ServiceTab data={data} locked={locked} busy={busy} run={run} />}
         {tab === "logs" && <LogsTab data={data} refreshInterval={refreshInterval} />}
       </PanelFrame>
