@@ -9,6 +9,7 @@ import { usePending } from "@/lib/pending"
 import type { IngressDetail, IngressRule } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
 import { PanelFrame } from "@/components/panels/panel-frame"
+import { IngressAccessStats, updateAccessStats } from "@/components/panels/ingress-access-stats"
 
 /** ルールの転送先に選べる、Service のポート 1 つ。 */
 type ServiceChoice = { serviceId: string; label: string; ports: number[] }
@@ -140,6 +141,9 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
           <a className="mono" style={{ fontWeight: 500, color: "var(--accent)", overflowWrap: "anywhere" }} href={`https://${detail.host}`} target="_blank" rel="noreferrer">https://{detail.host}</a>
         </div>
+        {/* アクセスの集計(件数、ステータス、応答時間、上位のパスとクライアント)。 */}
+        <IngressAccessStats basePath={path} enabled={detail.accessStats !== false} locked={locked || busy} refreshInterval={refreshInterval}
+          onToggle={(next) => void run(async () => { await updateAccessStats(path, next); notify(next ? "アクセスの集計を有効にしました" : "アクセスの集計を止めました") })} />
         {/* ルールの編集。 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <div className="row pad" style={{ paddingBottom: 8 }}>
