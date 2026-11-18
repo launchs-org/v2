@@ -69,7 +69,7 @@ func run() error {
 	// k8s を操作する役を、設定に合わせて選ぶ。
 	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, cluster.OperatorSettings{
 		RuntimeClass: workerConfig.RuntimeClass, IngressNamespace: workerConfig.IngressNamespace, BlockedNetworks: workerConfig.BlockedNetworks,
-	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints},
+	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints, StatsPlugin: workerConfig.IngressStatsPlugin},
 		cluster.VolumeSettings{StorageClass: workerConfig.VolumeStorageClass, AccessMode: workerConfig.VolumeAccessMode}, appLogger)
 	if operatorsError != nil {
 		return operatorsError
@@ -140,8 +140,10 @@ func run() error {
 	// ingress(ルールの反映と削除)の Workflow と Activity を登録する。
 	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyIngressRulesWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyIngressRulesWorkflowName})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteIngressWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteIngressWorkflowName})
+	generalWorker.RegisterWorkflowWithOptions(workflow.ReapplyIngressRouteWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ReapplyIngressRouteWorkflowName})
 	ingressActivities := activity.NewIngressActivities(repository.NewIngressRepository(appDatabase), operators.ingressOperator, appLogger)
 	generalWorker.RegisterActivityWithOptions(ingressActivities.ApplyIngressRules, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyIngressRulesActivityName})
+	generalWorker.RegisterActivityWithOptions(ingressActivities.ReapplyIngressRoute, sdkactivity.RegisterOptions{Name: sharedworkflow.ReapplyIngressRouteActivityName})
 	generalWorker.RegisterActivityWithOptions(ingressActivities.RollbackIngressRules, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackIngressRulesActivityName})
 	generalWorker.RegisterActivityWithOptions(ingressActivities.CommitIngressRulesResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitIngressRulesResultActivityName})
 	generalWorker.RegisterActivityWithOptions(ingressActivities.DeleteIngressObject, sdkactivity.RegisterOptions{Name: sharedworkflow.DeleteIngressObjectActivityName})

@@ -252,3 +252,39 @@ func marshalIngressRules(rules []model.IngressRule) (datatypes.JSON, error) {
 	}
 	return datatypes.JSON(encoded), nil
 }
+
+// SetAccessStats は、アクセスの集計の有効・無効を保存し、保存後の ingress を返す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - projectID: プロジェクトの ID。
+//   - ingressID: ingress の ID。
+//   - enabled: 有効にするなら true。
+//
+// 戻り値:
+//   - 保存後の ingress。無ければ not_found、反映中・削除中なら conflict。
+func (ingressRepository *IngressRepository) SetAccessStats(requestContext context.Context, userID string, projectID string, ingressID string, enabled bool) (model.Ingress, error) {
+	// 取得と更新を、1つのトランザクションで行う。
+	var result model.Ingress
+	transactionError := ingressRepository.database.WithContext(requestContext).Transaction(func(transaction *gorm.DB) error {
+		// 行をロックして読む。
+		ingress, lockError := lockIngress(transaction, userID, projectID, ingressID)
+		if lockError != nil {
+			return lockError
+		}
+		// 操作できる状態でなければ、conflict。
+		if !ingress.CanChangeAccessStats() {
+			return apperror.New(apperror.KindConflict, "ingress は "+ingress.Status+" のため、アクセスの集計の設定を変えられません")
+		}
+		// 値を設定して、変わったときだけ保存する(bool の false も保存するよう、列を指定する)。
+		if ingress.SetAccessStats(enabled) {
+			if saveError := transaction.Model(&model.Ingress{}).Where("id = ?", ingress.ID).Update("access_stats", ingress.AccessStats).Error; saveError != nil {
+				return apperror.Wrap(apperror.KindInternal, "アクセスの集計の設定を保存できませんでした", saveError)
+			}
+		}
+		result = ingress
+		return nil
+	})
+	return result, transactionError
+}

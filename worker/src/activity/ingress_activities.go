@@ -66,7 +66,7 @@ func rulesToDefinition(ingress model.Ingress, rulesJSON []byte) (IngressRouteDef
 	for _, rule := range rules {
 		routeRules = append(routeRules, IngressRouteRule{Path: rule.Path, ServiceName: rule.ServiceID, Port: int32(rule.Port)})
 	}
-	return IngressRouteDefinition{Namespace: ingress.ProjectID, Name: ingress.ID, Host: ingress.Host, Rules: routeRules}, nil
+	return IngressRouteDefinition{Namespace: ingress.ProjectID, Name: ingress.ID, Host: ingress.Host, Rules: routeRules, AccessStats: ingress.AccessStats}, nil
 }
 
 // ApplyIngressRules は、pending のルールで、IngressRoute を更新する。
@@ -91,6 +91,31 @@ func (ingressActivities *IngressActivities) ApplyIngressRules(requestContext con
 	}
 	// pending のルールから、IngressRoute の内容を組み立てて、k8s を操作するものに任せる。
 	definition, definitionError := rulesToDefinition(ingress, ingress.PendingRules)
+	if definitionError != nil {
+		return definitionError
+	}
+	return markNonRetryable(ingressActivities.ingressOperator.ApplyIngressRoute(requestContext, definition))
+}
+
+// ReapplyIngressRoute は、現在(反映済み)のルールで、IngressRoute を作り直す(アクセスの集計の切り替えなどに使う)。
+//
+// ルールの状態(pending、status)は変えない。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context(キャンセルと期限が伝わる)。
+//   - input: 対象の ingress の ID。
+//
+// 戻り値:
+//   - ingress を読めなかったとき、ルールが壊れているとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func (ingressActivities *IngressActivities) ReapplyIngressRoute(requestContext context.Context, input workflow.ReapplyIngressRouteInput) error {
+	// どの Activity が何のために動いているかを、ログに残す。
+	ingressActivities.appLogger.Info("現在のルールで IngressRoute を作り直す", "ingress_id", input.IngressID, "activity", workflow.ReapplyIngressRouteActivityName)
+	// DB から ingress を読み、正式なルールと、集計の設定で、内容を組み立てる。
+	ingress, findError := ingressActivities.ingressStore.FindForWorker(requestContext, input.IngressID)
+	if findError != nil {
+		return findError
+	}
+	definition, definitionError := rulesToDefinition(ingress, ingress.Rules)
 	if definitionError != nil {
 		return definitionError
 	}
