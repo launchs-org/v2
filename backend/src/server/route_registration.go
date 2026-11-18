@@ -4,7 +4,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"launchs/backend/src/middlewares"
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 	"launchs/templates"
 
 	"launchs/backend/src/controller"
