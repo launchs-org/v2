@@ -96,7 +96,12 @@ export type IngressDetail = {
   rules: IngressRule[]
   pending_rules: IngressRule[] | null
   status: "active" | "applying" | "deleting"
+  /** アクセスの集計(Traefik のプラグイン launchs-stats)を有効にしているか。 */
+  accessStats?: boolean
 }
+/** アクセスログの 1 行(1 リクエスト)。 */
+export type AccessLogEntry = { time: string; method: string; url: string; status: number; durationMs: number; clientIp: string; bytes: number }
+export type AccessLogsResponse = { logs: AccessLogEntry[]; nextCursor: string | null }
 export type LoginHistoryResponse = {
   history: { historyId: string; ip: string; userAgent: string; createdAt: string }[]
   nextCursor: string | null

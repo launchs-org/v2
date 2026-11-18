@@ -139,6 +139,91 @@ func TestKubernetesIngressOperatorApply(testingT *testing.T) {
 	})
 }
 
+// TestKubernetesIngressOperatorStats は、アクセスの集計の Middleware の作成・参照・撤去を確認する。
+func TestKubernetesIngressOperatorStats(testingT *testing.T) {
+	ctx := context.Background()
+	middlewareResource := schema.GroupVersionResource{Group: "traefik.io", Version: "v1alpha1", Resource: "middlewares"}
+	newOperator := func(subTest *testing.T, plugin string) (*KubernetesIngressOperator, *dynamicfake.FakeDynamicClient) {
+		fakeClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			testIngressRouteResource: "IngressRouteList", middlewareResource: "MiddlewareList",
+		})
+		operator, createError := NewKubernetesIngressOperator(fakeClient, IngressRouteSettings{APIVersion: "traefik.io/v1alpha1", EntryPoints: []string{"web"}, StatsPlugin: plugin})
+		if createError != nil {
+			subTest.Fatal(createError)
+		}
+		return operator, fakeClient
+	}
+	definition := newTestIngressDefinition()
+	definition.AccessStats = true
+	statsName := testIngressName + "-stats"
+
+	testingT.Run("有効なら、Middleware を作り、全てのルートが参照する", func(subTest *testing.T) {
+		operator, fakeClient := newOperator(subTest, "launchs-stats")
+		if applyError := operator.ApplyIngressRoute(ctx, definition); applyError != nil {
+			subTest.Fatal(applyError)
+		}
+		middleware, getError := fakeClient.Resource(middlewareResource).Namespace(validNamespaceName).Get(ctx, statsName, metav1.GetOptions{})
+		if getError != nil {
+			subTest.Fatalf("Middleware があるはず: %v", getError)
+		}
+		settings, _, _ := unstructured.NestedMap(middleware.Object, "spec", "plugin", "launchs-stats")
+		if settings["ingressId"] != testIngressName || settings["intervalSeconds"] != int64(10) {
+			subTest.Errorf("プラグインの設定が違う: %v", settings)
+		}
+		route, _ := fakeClient.Resource(testIngressRouteResource).Namespace(validNamespaceName).Get(ctx, testIngressName, metav1.GetOptions{})
+		routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+		for _, entry := range routes {
+			references := entry.(map[string]any)["middlewares"].([]any)
+			if len(references) != 1 || references[0].(map[string]any)["name"] != statsName {
+				subTest.Errorf("Middleware を参照するはず: %v", entry)
+			}
+		}
+	})
+	testingT.Run("無効にすると、参照を外し、Middleware を消す", func(subTest *testing.T) {
+		operator, fakeClient := newOperator(subTest, "launchs-stats")
+		_ = operator.ApplyIngressRoute(ctx, definition)
+		off := definition
+		off.AccessStats = false
+		if applyError := operator.ApplyIngressRoute(ctx, off); applyError != nil {
+			subTest.Fatal(applyError)
+		}
+		if _, getError := fakeClient.Resource(middlewareResource).Namespace(validNamespaceName).Get(ctx, statsName, metav1.GetOptions{}); !apierrors.IsNotFound(getError) {
+			subTest.Errorf("Middleware は消えているはず: %v", getError)
+		}
+		route, _ := fakeClient.Resource(testIngressRouteResource).Namespace(validNamespaceName).Get(ctx, testIngressName, metav1.GetOptions{})
+		routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+		if _, found := routes[0].(map[string]any)["middlewares"]; found {
+			subTest.Errorf("参照は外れているはず: %v", routes[0])
+		}
+	})
+	testingT.Run("プラグインを指定していない環境では、Middleware に触れず、参照も付けない", func(subTest *testing.T) {
+		operator, fakeClient := newOperator(subTest, "")
+		if applyError := operator.ApplyIngressRoute(ctx, definition); applyError != nil {
+			subTest.Fatal(applyError)
+		}
+		for _, action := range fakeClient.Actions() {
+			if action.GetResource().Resource == "middlewares" {
+				subTest.Errorf("Middleware に触れないはず: %v", action)
+			}
+		}
+		route, _ := fakeClient.Resource(testIngressRouteResource).Namespace(validNamespaceName).Get(ctx, testIngressName, metav1.GetOptions{})
+		routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+		if _, found := routes[0].(map[string]any)["middlewares"]; found {
+			subTest.Errorf("参照は付かないはず: %v", routes[0])
+		}
+	})
+	testingT.Run("IngressRoute を削除すると、Middleware も消える", func(subTest *testing.T) {
+		operator, fakeClient := newOperator(subTest, "launchs-stats")
+		_ = operator.ApplyIngressRoute(ctx, definition)
+		if deleteError := operator.DeleteIngressRoute(ctx, validNamespaceName, testIngressName); deleteError != nil {
+			subTest.Fatal(deleteError)
+		}
+		if _, getError := fakeClient.Resource(middlewareResource).Namespace(validNamespaceName).Get(ctx, statsName, metav1.GetOptions{}); !apierrors.IsNotFound(getError) {
+			subTest.Errorf("Middleware は消えているはず: %v", getError)
+		}
+	})
+}
+
 // TestKubernetesIngressOperatorDeleteAndSettings は、IngressRoute の削除(冪等、不正な名前の拒否)と、不正な apiVersion の拒否を確認する。
 func TestKubernetesIngressOperatorDeleteAndSettings(testingT *testing.T) {
 	ctx := context.Background()

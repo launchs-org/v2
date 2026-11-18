@@ -1,10 +1,13 @@
 package server
 
 import (
+	"time"
+
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -16,14 +19,21 @@ import (
 
 // fakeIngressWorkflowStarter は、テスト用の IngressWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeIngressWorkflowStarter struct {
-	appliedIngressIDs []string
-	deletedIngressIDs []string
-	startError        error
+	appliedIngressIDs   []string
+	deletedIngressIDs   []string
+	reappliedIngressIDs []string
+	startError          error
 }
 
 // StartRulesApply は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeIngressWorkflowStarter) StartRulesApply(_ context.Context, ingressID string) error {
 	fakeStarter.appliedIngressIDs = append(fakeStarter.appliedIngressIDs, ingressID)
+	return fakeStarter.startError
+}
+
+// StartRouteReapply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeIngressWorkflowStarter) StartRouteReapply(_ context.Context, ingressID string) error {
+	fakeStarter.reappliedIngressIDs = append(fakeStarter.reappliedIngressIDs, ingressID)
 	return fakeStarter.startError
 }
 
@@ -457,6 +467,154 @@ func TestIngressAPIDelete(testingT *testing.T) {
 		environment.database.Table("ingresses").Count(&count)
 		if count != 0 {
 			subTest.Errorf("ingress も消えるはず: %d", count)
+		}
+	})
+}
+
+// TestIngressAPIAccessStats は、アクセスの集計の切り替え(PATCH)を確認する。
+func TestIngressAPIAccessStats(testingT *testing.T) {
+	testingT.Run("作成直後は有効で、無効にできる(ルールが無ければ、IngressRoute の作り直しは開始しない)", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		_, created := environment.ownerClient.call(http.MethodGet, path, "")
+		if created["accessStats"] != true {
+			subTest.Fatalf("既定は有効のはず: %v", created)
+		}
+		statusCode, body := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":false}`)
+		if statusCode != 200 || body["accessStats"] != false {
+			subTest.Fatalf("無効になるはず: %d %v", statusCode, body)
+		}
+		_, fetched := environment.ownerClient.call(http.MethodGet, path, "")
+		if fetched["accessStats"] != false || len(environment.starter.reappliedIngressIDs) != 0 {
+			subTest.Errorf("保存され、作り直しは開始しないはず: %v %v", fetched, environment.starter.reappliedIngressIDs)
+		}
+	})
+	testingT.Run("反映済みのルールがあれば、IngressRoute の作り直しを開始する(同じ値でも)", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		environment.database.Exec("UPDATE ingresses SET rules = ? WHERE id = ?", `[{"path":"/","serviceId":"`+environment.serviceID+`","port":8080}]`, ingressID)
+		for range 2 {
+			if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":true}`); statusCode != 200 {
+				subTest.Fatalf("200 のはず: %d", statusCode)
+			}
+		}
+		if len(environment.starter.reappliedIngressIDs) != 2 {
+			subTest.Errorf("2回開始するはず: %v", environment.starter.reappliedIngressIDs)
+		}
+	})
+	testingT.Run("accessStats が無いと 400、他人は 404、反映中は 409", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{}`); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.otherClient.call(http.MethodPatch, path, `{"accessStats":false}`); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
+		}
+		environment.database.Exec("UPDATE ingresses SET status = 'applying' WHERE id = ?", ingressID)
+		if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":false}`); statusCode != 409 {
+			subTest.Errorf("409 のはず: %d", statusCode)
+		}
+	})
+}
+
+// TestIngressAPIAccessStatsReport は、アクセスの集計の取得(期間、合計、持ち主の確認)を確認する。
+func TestIngressAPIAccessStatsReport(testingT *testing.T) {
+	environment := newIngressTestEnvironment(testingT)
+	ingressID := createIngress(environment)
+	path := environment.basePath + "/" + ingressID + "/access-stats"
+	// 5 分前の 1 分ごとの行を、直接入れる。
+	start := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
+	environment.database.Exec(`INSERT INTO ingress_access_minutes (ingress_id, replica, bucket_start, interval_sec, count, status, methods, bytes, latency, sum_ms, paths, clients, unique_clients)
+		VALUES (?, 'traefik-0', ?, 60, 10, '{"2xx":9,"5xx":1}', '{"GET":10}', 500, '[10,0,0,0,0,0,0,0,0,0,0]', 20, '[{"key":"/a","count":10}]', '[{"key":"1.1.1.1","count":10}]', 1)`, ingressID, start)
+
+	testingT.Run("1h の集計に、合計と区間が入る", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
+		totals, _ := body["totals"].(map[string]any)
+		if statusCode != 200 || body["range"] != "1h" || body["enabled"] != true || totals["count"] != float64(10) || len(body["series"].([]any)) < 60 {
+			subTest.Fatalf("合計が違う: %d %v", statusCode, body)
+		}
+		paths := body["paths"].([]any)
+		if paths[0].(map[string]any)["key"] != "/a" {
+			subTest.Errorf("パスの上位が入るはず: %v", paths)
+		}
+	})
+	testingT.Run("他の期間も読める。不正な range は 400", func(subTest *testing.T) {
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=24h", ""); statusCode != 200 {
+			subTest.Errorf("24h は 200 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=7d", ""); statusCode != 200 {
+			subTest.Errorf("7d は 200 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=2h", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+	})
+	testingT.Run("他人の ingress は 404", func(subTest *testing.T) {
+		if statusCode, _ := environment.otherClient.call(http.MethodGet, path, ""); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
+		}
+	})
+}
+
+// TestIngressAPIAccessLogs は、アクセスログの一覧(新しい順、クエリ文字列の保持、絞り込み、ページング、持ち主の確認)を確認する。
+func TestIngressAPIAccessLogs(testingT *testing.T) {
+	environment := newIngressTestEnvironment(testingT)
+	ingressID := createIngress(environment)
+	path := environment.basePath + "/" + ingressID + "/access-logs"
+	now := time.Now().UTC()
+	for index, row := range []struct {
+		url    string
+		status int
+	}{{"/a?token=abc", 200}, {"/b", 404}, {"/c", 500}} {
+		environment.database.Exec(`INSERT INTO ingress_access_logs (ingress_id, replica, batch_start, seq, requested_at, method, url, status, duration_ms, client_ip, bytes)
+			VALUES (?, 'traefik-0', ?, ?, ?, 'GET', ?, ?, 1.5, '203.0.113.9', 10)`, ingressID, now, index, now.Add(time.Duration(index)*time.Second), row.url, row.status)
+	}
+	testingT.Run("新しい順に返り、URL は、クエリも含めて、そのまま", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
+		logs, _ := body["logs"].([]any)
+		if statusCode != 200 || len(logs) != 3 || logs[0].(map[string]any)["url"] != "/c" || logs[2].(map[string]any)["url"] != "/a?token=abc" || body["nextCursor"] != nil {
+			subTest.Fatalf("新しい順に 3 件のはず: %d %v", statusCode, body)
+		}
+		first := logs[0].(map[string]any)
+		if first["status"] != float64(500) || first["clientIp"] != "203.0.113.9" || first["method"] != "GET" {
+			subTest.Errorf("項目が違う: %v", first)
+		}
+	})
+	testingT.Run("絞り込みとページング", func(subTest *testing.T) {
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?status=4xx", ""); len(body["logs"].([]any)) != 1 {
+			subTest.Errorf("4xx は 1 件のはず: %v", body)
+		}
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?q=token%3Dabc", ""); len(body["logs"].([]any)) != 1 {
+			subTest.Errorf("クエリ文字列でも探せるはず: %v", body)
+		}
+		_, page := environment.ownerClient.call(http.MethodGet, path+"?limit=2", "")
+		cursor, _ := page["nextCursor"].(string)
+		if len(page["logs"].([]any)) != 2 || cursor == "" {
+			subTest.Fatalf("2 件と次のカーソルのはず: %v", page)
+		}
+		if _, rest := environment.ownerClient.call(http.MethodGet, path+"?limit=2&cursor="+cursor, ""); len(rest["logs"].([]any)) != 1 || rest["nextCursor"] != nil {
+			subTest.Errorf("残り 1 件のはず: %v", rest)
+		}
+	})
+	testingT.Run("期間で絞り込める。不正な日時は 400", func(subTest *testing.T) {
+		from := now.Add(time.Second).Format(time.RFC3339Nano)
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?from="+url.QueryEscape(from), ""); len(body["logs"].([]any)) != 2 {
+			subTest.Errorf("from 以降の 2 件のはず: %v", body)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?from=yesterday", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+	})
+	testingT.Run("不正な status は 400、他人は 404", func(subTest *testing.T) {
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?status=abc", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.otherClient.call(http.MethodGet, path, ""); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
 		}
 	})
 }

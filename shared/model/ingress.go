@@ -73,6 +73,9 @@ type Ingress struct {
 	// Status は、ingress の状態(IngressStatus... のどれか)。
 	Status string `gorm:"column:status"`
 
+	// AccessStats は、アクセスの集計(launchs-stats)を有効にするか。既定は有効。
+	AccessStats bool `gorm:"column:access_stats;default:true"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 
@@ -163,6 +166,32 @@ func (ingress Ingress) IsApplying() bool {
 func (ingress Ingress) CanChangeRules() bool {
 	// 反映中と削除中以外なら、操作できる。
 	return ingress.Status == IngressStatusActive || ingress.Status == IngressStatusFailed
+}
+
+// CanChangeAccessStats は、アクセスの集計の有効・無効を切り替えられるかを返す。
+//
+// 戻り値:
+//   - 反映中と削除中以外なら true(ルールと同じ条件)。
+func (ingress Ingress) CanChangeAccessStats() bool {
+	// ルールを変えられる状態なら、切り替えられる。
+	return ingress.CanChangeRules()
+}
+
+// SetAccessStats は、アクセスの集計の有効・無効を設定する。
+//
+// 引数:
+//   - enabled: 有効にするなら true。
+//
+// 戻り値:
+//   - 値が変わったら true(同じ値なら、何もせず false)。
+func (ingress *Ingress) SetAccessStats(enabled bool) bool {
+	// 同じなら変えない。
+	if ingress.AccessStats == enabled {
+		return false
+	}
+	// 値を設定する。
+	ingress.AccessStats = enabled
+	return true
 }
 
 // CanDelete は、削除を受け付けられるかを返す。
