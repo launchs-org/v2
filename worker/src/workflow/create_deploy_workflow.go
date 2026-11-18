@@ -13,6 +13,7 @@ import (
 //
 // 処理の順序:
 //  1. プロジェクトの namespace を用意する(無ければ作る)
+//     1.5. マウントとファイルに必要なもの(PVC、ConfigMap)を用意する(テンプレートから作る deploy など。普通は何もしない)
 //  2. Deployment を作る
 //  3. Deployment が起動し終える(Ready)まで待つ(最長 300 秒)
 //  4. 成功なら、status を active にする
@@ -63,6 +64,15 @@ func startDeploy(workflowContext sdkworkflow.Context, input sharedworkflow.Creat
 	if namespaceError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.EnsureProjectNamespaceActivityName,
 		sharedworkflow.EnsureProjectNamespaceInput{DeployID: input.DeployID}).Get(infrastructureContext, nil); namespaceError != nil {
 		return fmt.Errorf("namespace を用意できませんでした: %w", namespaceError)
+	}
+
+	// 1.5. 現在のマウントとファイルに必要なもの(PVC、ConfigMap)を用意する(普通の deploy では、何もしない)。
+	//      すでに実行中の Workflow(この手順の無い履歴)を壊さないよう、版で切り替える。
+	if sdkworkflow.GetVersion(workflowContext, "prepare-deploy-dependencies", sdkworkflow.DefaultVersion, 1) >= 1 {
+		if prepareError := sdkworkflow.ExecuteActivity(infrastructureContext, sharedworkflow.PrepareDeployDependenciesActivityName,
+			sharedworkflow.PrepareDeployDependenciesInput{DeployID: input.DeployID}).Get(infrastructureContext, nil); prepareError != nil {
+			return fmt.Errorf("マウントとファイルの準備ができませんでした: %w", prepareError)
+		}
 	}
 
 	// 2. Deployment を作る。作った Deployment の設定の世代を受け取り、起動を待つときの下限にする。

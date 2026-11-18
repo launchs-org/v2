@@ -114,6 +114,22 @@ func (applyDeployMountsActivities *ApplyDeployMountsActivities) ApplyPendingMoun
 // 戻り値:
 //   - volume が見つからないとき(リトライしない)、k8s への依頼に失敗したときのエラー。
 func (applyDeployMountsActivities *ApplyDeployMountsActivities) ensureClaims(requestContext context.Context, projectID string, mounts []model.MountSpec) error {
+	// 共通の処理に任せる(deploy の作成の前の準備でも、同じ処理を使う)。
+	return ensureVolumeClaims(requestContext, applyDeployMountsActivities.volumeStore, applyDeployMountsActivities.volumeOperator, projectID, mounts)
+}
+
+// ensureVolumeClaims は、マウントする volume の PVC を、無ければ作る(あれば、そのまま)。
+//
+// 引数:
+//   - requestContext: Temporal が渡す context。
+//   - volumeStore: volume の大きさを調べる、データベースの操作。
+//   - volumeOperator: k8s の PVC を操作するもの。
+//   - projectID: プロジェクトの ID。
+//   - mounts: マウントの構成。
+//
+// 戻り値:
+//   - volume が見つからないとき(リトライしない)、k8s への依頼に失敗したときのエラー。
+func ensureVolumeClaims(requestContext context.Context, volumeStore MountedVolumeStore, volumeOperator VolumeOperator, projectID string, mounts []model.MountSpec) error {
 	// マウントが無ければ、用意するものが無い。
 	if len(mounts) == 0 {
 		return nil
@@ -123,7 +139,7 @@ func (applyDeployMountsActivities *ApplyDeployMountsActivities) ensureClaims(req
 	for _, mount := range mounts {
 		volumeIDs = append(volumeIDs, mount.VolumeID)
 	}
-	volumes, findError := applyDeployMountsActivities.volumeStore.FindManyForWorker(requestContext, projectID, volumeIDs)
+	volumes, findError := volumeStore.FindManyForWorker(requestContext, projectID, volumeIDs)
 	if findError != nil {
 		return findError
 	}
@@ -140,7 +156,7 @@ func (applyDeployMountsActivities *ApplyDeployMountsActivities) ensureClaims(req
 			return temporal.NewNonRetryableApplicationError("volume が見つかりません: "+mount.VolumeID, "VolumeNotFound", nil)
 		}
 		// 無ければ、現在の大きさで作る。
-		claimError := applyDeployMountsActivities.volumeOperator.EnsureVolumeClaim(requestContext, VolumeClaimDefinition{Namespace: projectID, Name: volume.ID, SizeMB: volume.SizeMB})
+		claimError := volumeOperator.EnsureVolumeClaim(requestContext, VolumeClaimDefinition{Namespace: projectID, Name: volume.ID, SizeMB: volume.SizeMB})
 		if claimError != nil {
 			return markNonRetryable(claimError)
 		}
