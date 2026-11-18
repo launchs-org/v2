@@ -27,6 +27,9 @@ type DeployStore interface {
 	SavePendingMounts(requestContext context.Context, userID string, deployID string, mounts []model.MountSpec) error
 	DiscardPendingMounts(requestContext context.Context, userID string, deployID string) error
 	BeginMountsApply(requestContext context.Context, userID string, deployID string) (string, error)
+	SavePendingFiles(requestContext context.Context, userID string, deployID string, files []model.FileSpec) error
+	DiscardPendingFiles(requestContext context.Context, userID string, deployID string) error
+	BeginFilesApply(requestContext context.Context, userID string, deployID string) (string, error)
 	BeginScale(requestContext context.Context, userID string, deployID string, replicas int) (repository.ScaleStart, error)
 	RevertScale(requestContext context.Context, deployID string, start repository.ScaleStart) error
 	MarkDeleting(requestContext context.Context, userID string, deployID string) (string, error)
@@ -53,6 +56,9 @@ type DeployWorkflowStarter interface {
 
 	// StartMountsApply は、ボリュームのマウントの反映の Workflow を開始する。
 	StartMountsApply(requestContext context.Context, deployID string) error
+
+	// StartFilesApply は、ファイルの反映の Workflow を開始する。
+	StartFilesApply(requestContext context.Context, deployID string) error
 
 	// StartScale は、レプリカ数を反映する処理を開始する。完了は待たない。
 	StartScale(requestContext context.Context, deployID string) error

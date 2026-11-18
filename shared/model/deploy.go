@@ -82,6 +82,12 @@ type Deploy struct {
 	// PendingMounts は、まだ適用していないマウントの構成。変更が無ければ nil。空の配列は、全て外す変更。
 	PendingMounts datatypes.JSON `gorm:"column:pending_mounts"`
 
+	// Files は、現在コンテナに反映されている「ファイル」(FileSpec の JSON の配列。k8s の ConfigMap としてマウントする)。nil はファイル無し。
+	Files datatypes.JSON `gorm:"column:files"`
+
+	// PendingFiles は、まだ適用していないファイルの構成。変更が無ければ nil。空の配列は、全て外す変更。
+	PendingFiles datatypes.JSON `gorm:"column:pending_files"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 

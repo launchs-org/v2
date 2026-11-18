@@ -80,6 +80,9 @@ type DeployResponse struct {
 	// Volumes は、ボリュームのマウント設定。ボリュームの機能ができるまでは、空のマウントを返す。
 	Volumes DeployVolumesResponse `json:"volumes"`
 
+	// Files は、deploy のファイル(設定ファイルなど)。現在のファイルと、まだ適用していないファイル。
+	Files FilesResponse `json:"files"`
+
 	// Service は、deploy に紐づく service。まだ作っていなければ null(controller が、設定する)。
 	Service any `json:"service"`
 }
@@ -127,6 +130,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 			PendingArgs:    jsonOrNull(deploy.PendingArgs),
 		},
 		Volumes: DeployVolumesResponse{Mounts: mounts, PendingMounts: pendingMounts},
+		Files:   newFilesResponse(deploy),
 		Service: nil,
 	}
 }

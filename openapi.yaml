@@ -32,6 +32,8 @@ tags:
     description: 永続ストレージ (PersistentVolumeClaim)
   - name: Quota
     description: リソースクォータ・利用状況の確認と管理
+  - name: Templates
+    description: テンプレート (複数の部品と入力の変数を YAML で定義した、よく使う構成)
 
 paths:
   # ============================================================================
@@ -1131,6 +1133,105 @@ paths:
   # ============================================================================
   # Services
   # ============================================================================
+  /api/v1/deploy/{deployId}/files:
+    get:
+      summary: ファイル(設定ファイルなど)の取得
+      description: デプロイのコンテナに置くファイルと、未反映 (pending) の設定を取得します。ファイルは k8s の ConfigMap として 1 ファイルずつマウントされます。内容は平文で保存され、そのまま返ります。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: ファイルの構成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployFilesData'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: ファイルの下書き保存
+      description: ファイルの構成を、全件置き換えで、下書き (pending) として保存します。path は「/」で始まり、英数字と `. _ - /` だけの 200 文字以内(「..」「//」末尾の「/」は不可)。内容は UTF-8 のテキストで、1 ファイル 64KiB・1 deploy に 20 ファイル・合計 256KiB まで。ボリュームのマウント先と、まったく同じ path は 400(マウント先の下は可)。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeployFilesRequest'
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: 反映中または削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/files/apply:
+    post:
+      summary: ファイルの適用
+      description: 下書き (pending) のファイルを、ConfigMap として作り、Pod を作り直して反映させます(反映の間、短い停止があります)。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 適用開始
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、反映中・削除中・起動中、またはマウント先と重なる場合
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/deploy/{deployId}/files/discard:
+    post:
+      summary: ファイルの下書き破棄
+      description: 下書き (pending) のファイルの設定を破棄します。
+      tags: [Deploys]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DeployIdPath'
+      responses:
+        '200':
+          description: 破棄成功
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: pending が無い、または反映中・削除中の場合
+          $ref: '#/components/responses/ConflictError'
+
   /api/v1/deploy/{deployId}/service:
     post:
       summary: Service 作成 (ポート公開)
@@ -1741,6 +1842,50 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '403':
           $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/templates:
+    get:
+      summary: テンプレート一覧
+      description: |
+        このシステムに同梱のテンプレート (リポジトリの templates/*.yaml を起動時に読み込んだもの) を、id の辞書順に返します。全員に同じものを返します。
+        作る部品の中身 (resources) は返さず、要約 (summary) だけを返します。自動で作る password の既定値は返しません。
+      tags: [Templates]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: テンプレート一覧
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/templates/{templateId}:
+    get:
+      summary: テンプレート取得
+      tags: [Templates]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: postgres
+      responses:
+        '200':
+          description: テンプレート
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/NotFoundError'
 
@@ -2420,6 +2565,104 @@ components:
           format: date-time
           example: "2026-09-16T09:00:00+09:00"
 
+    TemplateVariable:
+      type: object
+      required: [name, label, type, default, required, generate, options, min, max, minLength, maxLength, pattern]
+      properties:
+        name:
+          type: string
+          example: database
+        label:
+          type: string
+          example: データベース名
+        type:
+          type: string
+          enum: [string, integer, password, choice, boolean]
+        default:
+          type: string
+          nullable: true
+          description: 既定の値 (文字列)。自動で作る password は、常に null (返さない)。
+        required:
+          type: boolean
+          description: 入力が必須か (既定値が無く、自動生成でもない)。
+        generate:
+          type: boolean
+          description: password を、入力が無いとき、自動で作るか。
+        options:
+          type: array
+          description: choice の選択肢。他の型では空の配列。
+          items:
+            type: object
+            required: [value, label]
+            properties:
+              value:
+                type: string
+              label:
+                type: string
+        min:
+          type: integer
+          nullable: true
+        max:
+          type: integer
+          nullable: true
+        minLength:
+          type: integer
+          nullable: true
+        maxLength:
+          type: integer
+          nullable: true
+        pattern:
+          type: string
+          nullable: true
+          description: string の値の全体に一致すべき正規表現。
+
+    Template:
+      type: object
+      required: [id, name, description, icon, category, variables, summary]
+      properties:
+        id:
+          type: string
+          example: postgres
+        name:
+          type: string
+          example: PostgreSQL
+        description:
+          type: string
+        icon:
+          type: string
+          example: database
+        category:
+          type: string
+          description: database / web / cache / tool、または空文字。
+          example: database
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVariable'
+        summary:
+          type: object
+          description: 何が作られるかの要約。
+          required: [deploys, volumes, ingress, files]
+          properties:
+            deploys:
+              type: integer
+            volumes:
+              type: integer
+            ingress:
+              type: boolean
+            files:
+              type: integer
+              description: deploy に置くファイルの、合計の数。
+
+    TemplateListResponse:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+
     ProjectEvent:
       type: object
       required: [eventId, type, reason, message, objectKind, objectName, deployId, count, firstSeenAt, lastSeenAt]
@@ -2547,6 +2790,41 @@ components:
           items:
             $ref: '#/components/schemas/MountItem'
 
+    DeployFile:
+      type: object
+      required: [path, content]
+      properties:
+        path:
+          type: string
+          example: /etc/app/app.conf
+        content:
+          type: string
+          example: "key=value\n"
+
+    DeployFilesData:
+      type: object
+      required: [files, pending_files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeployFile'
+        pending_files:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/DeployFile'
+
+    UpdateDeployFilesRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/DeployFile'
+
     DeployDetail:
       type: object
       required:
@@ -2561,6 +2839,7 @@ components:
         - createdAt
         - config
         - volumes
+        - files
       properties:
         deployId:
           type: string
@@ -2598,6 +2877,8 @@ components:
           $ref: '#/components/schemas/DeployConfigData'
         volumes:
           $ref: '#/components/schemas/DeployMountsData'
+        files:
+          $ref: '#/components/schemas/DeployFilesData'
         service:
           nullable: true
           $ref: '#/components/schemas/ServiceInfo'

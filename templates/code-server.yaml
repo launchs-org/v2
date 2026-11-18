@@ -1,0 +1,49 @@
+# code-server(ブラウザで動く VS Code。https://github.com/coder/code-server)。パスワードつき。作業フォルダは、ボリュームに保存する。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: code-server
+  name: code-server(VS Code)
+  description: ブラウザで使える VS Code(code-server)。パスワードで保護され、作業フォルダは、ボリュームに保存されます。
+  icon: code
+  category: tool
+
+variables:
+  - name: password
+    label: ログインのパスワード
+    type: password
+    generate: true
+    length: 24
+  - name: storage
+    label: 作業フォルダの大きさ(MB)
+    type: integer
+    default: "2048"
+    min: 512
+    max: 5120
+
+resources:
+  - kind: volume
+    name: home
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: ide
+    image: codercom/code-server:latest
+    spec: large
+    replicas: 1
+    env:
+      PASSWORD: ${password}
+    mounts:
+      - volume: home
+        path: /home/coder/project
+    service:
+      ports:
+        - name: http
+          port: 8080
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: ide
+        port: 8080
