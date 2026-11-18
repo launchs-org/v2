@@ -2,10 +2,10 @@
 import type { Project } from "@/lib/types"
 
 /** 画面の種類。プロジェクトを選ばなくても開ける画面(projects、quota、account)と、プロジェクトの中の画面(canvas、logs、settings)。 */
-export type View = "projects" | "quota" | "account" | "canvas" | "events" | "logs" | "settings"
+export type View = "projects" | "quota" | "account" | "canvas" | "configmaps" | "events" | "logs" | "settings"
 
 /** deploy の詳細のタブ。 */
-export type DeployTab = "overview" | "config" | "mounts" | "service" | "logs"
+export type DeployTab = "overview" | "config" | "mounts" | "configmap" | "service" | "logs"
 
 /** キャンバスで選んだカード(右のパネルに、詳細を出す対象)。 */
 export type Selection =

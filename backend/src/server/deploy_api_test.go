@@ -12,13 +12,14 @@ import (
 
 // fakeDeployWorkflowStarter は、テスト用の DeployWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeDeployWorkflowStarter struct {
-	startedDeployIDs []string
-	appliedDeployIDs []string
-	mountedDeployIDs []string
-	filesDeployIDs   []string
-	scaledDeployIDs  []string
-	deletedDeployIDs []string
-	startError       error
+	startedDeployIDs         []string
+	appliedDeployIDs         []string
+	mountedDeployIDs         []string
+	configMapMountsDeployIDs []string
+	filesDeployIDs           []string
+	scaledDeployIDs          []string
+	deletedDeployIDs         []string
+	startError               error
 }
 
 // StartDeployCreation は、ID を覚えて、決めたエラーを返す。
@@ -36,6 +37,12 @@ func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context
 // StartMountsApply は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartMountsApply(_ context.Context, deployID string) error {
 	fakeStarter.mountedDeployIDs = append(fakeStarter.mountedDeployIDs, deployID)
+	return fakeStarter.startError
+}
+
+// StartConfigMapMountsApply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartConfigMapMountsApply(_ context.Context, deployID string) error {
+	fakeStarter.configMapMountsDeployIDs = append(fakeStarter.configMapMountsDeployIDs, deployID)
 	return fakeStarter.startError
 }
 

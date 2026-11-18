@@ -27,6 +27,21 @@ type FileDefinition struct {
 	Path string
 }
 
+// ConfigMapMountDefinition は、Pod にマウントする、共有の ConfigMap のファイル1つ(k8s の ConfigMap の 1 つのキーを、subPath でマウントする)。
+type ConfigMapMountDefinition struct {
+	// ConfigMapName は、k8s の ConfigMap の名前(版ごとに作る、immutable な ConfigMap。"<configMapId>-r<revision>")。
+	ConfigMapName string
+
+	// Key は、ConfigMap の中のキー(ファイル名)。
+	Key string
+
+	// Path は、コンテナの中のファイルの path。
+	Path string
+
+	// Mode は、ファイルの権限(0o644 など)。
+	Mode int32
+}
+
 // DeploymentDefinition は、k8s に作る Deployment の内容。
 //
 // DB の deploy と、スペックのマスターデータから組み立てる。k8s の型を、Activity に持ち込まないための入れ物。
@@ -63,6 +78,9 @@ type DeploymentDefinition struct {
 
 	// Files は、Pod にマウントするファイル(ConfigMap。名前は Name と同じ)。無ければ空。
 	Files []FileDefinition
+
+	// ConfigMapMounts は、Pod にマウントする、共有の ConfigMap のファイル(path の順)。無ければ空。
+	ConfigMapMounts []ConfigMapMountDefinition
 }
 
 // DeploymentOperator は、k8s の namespace と Deployment を操作する。
@@ -122,19 +140,31 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 	if filesError != nil {
 		return DeploymentDefinition{}, fmt.Errorf("ファイルを読み取れません: %w", filesError)
 	}
+	// 共有の ConfigMap のマウント(現在反映されているもの)を読む。他の適用でも落とさないよう、必ず入れる(path の順)。
+	parsedConfigMapMounts, configMapMountsError := model.ParseConfigMapMounts(deploy.ConfigMapMounts)
+	if configMapMountsError != nil {
+		return DeploymentDefinition{}, fmt.Errorf("ConfigMap のマウントを読み取れません: %w", configMapMountsError)
+	}
+	configMapMounts := make([]ConfigMapMountDefinition, 0, len(parsedConfigMapMounts))
+	for _, mount := range model.SortConfigMapMounts(parsedConfigMapMounts) {
+		configMapMounts = append(configMapMounts, ConfigMapMountDefinition{
+			ConfigMapName: model.ConfigMapRevisionResourceName(mount.ConfigMapID, mount.Revision), Key: mount.Key, Path: mount.Path, Mode: mount.ModeBits(),
+		})
+	}
 	// 組み立てて返す。
 	return DeploymentDefinition{
-		Files:         newFileDefinitions(parsedFiles),
-		Namespace:     deploy.ProjectID,
-		Name:          deploy.ID,
-		Image:         deploy.ImageRef,
-		Replicas:      int32(deploy.Replicas),
-		CPUMillicores: spec.CPUMillicores,
-		MemoryMiB:     spec.MemoryMiB,
-		Env:           environment,
-		Command:       deploy.Command,
-		Args:          arguments,
-		Mounts:        mounts,
+		ConfigMapMounts: configMapMounts,
+		Files:           newFileDefinitions(parsedFiles),
+		Namespace:       deploy.ProjectID,
+		Name:            deploy.ID,
+		Image:           deploy.ImageRef,
+		Replicas:        int32(deploy.Replicas),
+		CPUMillicores:   spec.CPUMillicores,
+		MemoryMiB:       spec.MemoryMiB,
+		Env:             environment,
+		Command:         deploy.Command,
+		Args:            arguments,
+		Mounts:          mounts,
 	}, nil
 }
 
