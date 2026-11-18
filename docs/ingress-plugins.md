@@ -115,3 +115,27 @@ accessstats(新しいコンテナ)──(k8s の API で、ログを読む)─�
 2. **本番の Traefik には触らず**、私の専用の namespace に、別の Traefik を、プラグイン付きで立てて、実際の通信で確認する(エコーサーバー、WebSocket、code-server)。
 3. プラットフォーム(worker、accessstats、API、画面)を、その Traefik で、通しで確認する。
 4. 本番の Traefik への適用は、**あなたの判断**で行う(手順を、ドキュメントに書く)。
+
+## 11. 実装と確認の結果(2026-11-18)
+実装は、設計どおり。違いと、確認で分かったことを書く。
+
+### 設計との違い(実装が正)
+- **出力の行**: `LAUNCHS_STATS {"ingressId","start"(RFC3339),"intervalSec","count","status":{"1xx":…,"5xx":…},"methods","bytes","latencyBounds","latency"(度数。最後は「それ以上」),"sumMs","paths":[{"key","count"}],"clients":[{"key","count"}],"uniqueClients","uniqueCapped"}`。パスごとのバイト数とエラー数は、持たない(件数だけ)。
+- **WebSocket とイベントストリームは、応答を包まない**。Yaegi は、interpreter の中で包んだ `ResponseWriter` の `Flush` を、下流に見せない(`http.Flusher` の確認が失敗する。`Hijack` は通る)。`Upgrade` ヘッダーのあるリクエストと、`Accept: text/event-stream` のリクエストは、素通しにして、接続の開始だけを数える(ステータスは、記録しない)。通常のリクエストの `Flush` は、包んだ応答では、使えない(`Unwrap` を足しても、Yaegi の包みでは、`ResponseController` からも見えない)。
+- **API のレスポンス**: `docs/endpoints/ingresses.md` の「アクセスの集計の取得」が正。`topPaths` ではなく `paths`、`series` の各点に、メソッドと分位も入る。
+- **テーブル**: `bucket_start`(時刻)、`interval_sec`。`ingress_access_hours` は、`replica` が空の行(Pod をまたいで合算)。ingress の削除では、集計の行を消さない(保存期間で消える)。
+- accessstats は、Pod の一覧から、`Running` の Traefik の Pod を 10 秒ごとに見て、Pod ごとに、ログを追う(最初は 300 秒さかのぼる)。切れたら、3 秒後に、120 秒さかのぼって、つなぎ直す。同じ行は、上書きされるだけ。1 分ごとに、1 時間への、まとめ直し(直近 2 時間)と、保存期間を過ぎた行の削除を行う。
+
+### 実機での確認(Talos の、専用 namespace の Traefik v3.7.17。本番の Traefik には、触っていない)
+- 2 つのプラグインを、ConfigMap から `/plugins-local/src/...` に置いて、`experimental.localPlugins` で読み込めた。launchs-edge は、`--entryPoints.web.http.middlewares=<ns>-<名前>@kubernetescrd` で、全てのリクエストに掛かった。
+- **信頼された接続元(Pod の範囲)**から `Cf-Connecting-Ip`、`Cf-Visitor: {"scheme":"https"}` を付けると、アプリには `X-Real-Ip: <クライアント>`、`X-Forwarded-For: <クライアント>, <接続元>`、`X-Forwarded-Proto: https`、`X-Forwarded-Port: 443` が届いた(code-server の WebSocket が 403 になる原因の、`X-Forwarded-Port: 80` が直る)。**信頼されない接続元**(`kubectl port-forward` の 127.0.0.1)からの `Cf-Connecting-Ip` と `X-Forwarded-For` の偽装は、捨てられた。
+- WebSocket のハンドシェイク(`/echo`)は、集計のプラグインを通して、101 になった。
+- プラットフォームで作った ingress(deploy + service + ingress、ルールの反映)が、Middleware(`<ingress の ID>-stats`)と、それを参照する IngressRoute になり、通信が、集計された。accessstats が、DB に保存し、API が、件数、ステータス、メソッド、パス(UUID と数字は `:id`、クエリは除去)、クライアントの IP を返した。
+- `PATCH` で `accessStats` を false にすると、Middleware が消えて、route の参照が外れ(通信は、200 のまま)、true に戻すと、再び付いた。
+- 確認が終わったあと、検証用のプロジェクトと namespace を、全て削除した。
+- **本番の Traefik への適用は、未実施**(あなたの判断。手順は §8 と `traefik-plugins/helm-values.example.yaml`)。code-server の WebSocket(1006)が、直ったかの確認は、本番の Traefik に、launchs-edge を入れたあと。
+
+### 運用の注意
+- 検証では、`task up:k8s` のあと、別の `docker compose run` で、環境変数(`INGRESS_STATS_PLUGIN`、`ACCESS_STATS_TRAEFIK_NAMESPACE`、`ACCESS_STATS_TRAEFIK_SELECTOR`)が、コンテナに残らないことがあった。`.env` に書く(`.env.example` に、例を置いた)か、毎回、指定する。
+- 試験用の Traefik には、Traefik の namespace 以外の Pod が、プロジェクトの namespace に入るための、NetworkPolicy(`docs/network-isolation.md`)の許可が要る。本番の Traefik は、`INGRESS_NAMESPACE` で、許可済み。
+- プラグインが入っていない Traefik に、`INGRESS_STATS_PLUGIN` を指定すると、ルートが、壊れる。必ず、先に Traefik にプラグインを入れる。
