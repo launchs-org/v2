@@ -1,0 +1,49 @@
+# Redis 7。パスワードつき。データは、ボリュームに保存する(AOF)。クラスターの中からだけ、使える(外には、公開しない)。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: redis
+  name: Redis
+  description: キャッシュとキューに使う、インメモリのデータストア(Redis 7)。パスワードで保護され、データは、ボリュームに保存されます。
+  icon: database
+  category: cache
+
+variables:
+  - name: password
+    label: パスワード
+    type: password
+    generate: true
+    length: 24
+  - name: storage
+    label: ボリュームの大きさ(MB)
+    type: integer
+    default: "512"
+    min: 128
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: redis
+    image: redis:7
+    spec: medium
+    replicas: 1
+    command: redis-server
+    args:
+      - --requirepass
+      - ${password}
+      - --appendonly
+      - "yes"
+      - --dir
+      - /data
+    mounts:
+      - volume: data
+        path: /data
+    service:
+      ports:
+        - name: redis
+          port: 6379
+          protocol: tcp

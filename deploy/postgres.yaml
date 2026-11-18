@@ -1,0 +1,95 @@
+# PostgreSQL(1 つ。app、auth、temporal、temporal_visibility の 4 つのデータベースを持つ)。
+# データは PVC(クラスターの既定の StorageClass)に置く。バックアップは、運用側で行う。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: launchs
+data:
+  # データを初めて作るときだけ実行される。
+  init.sql: |
+    CREATE DATABASE app;
+    CREATE DATABASE auth;
+    CREATE DATABASE temporal;
+    CREATE DATABASE temporal_visibility;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: launchs
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: launchs
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        # このクラスターの Datadog の admission webhook は、hostPath を差し込んで、PodSecurity に拒否されるので、止める。
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: launchs-secret
+                  key: POSTGRES_PASSWORD
+            # PVC の直下に、lost+found があっても、初期化できるよう、サブフォルダに置く。
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

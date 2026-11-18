@@ -1,0 +1,54 @@
+# ワーカー、watcher、logcollector を、開発用の k8s につなぐための、docker-compose.yaml に重ねる設定。
+#
+# 使い方:
+#   docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build worker
+# (task up:k8s でも同じ)
+#
+# ホストの ~/.kube/config(root 相当)を、読み取り専用でマウントする。
+# このクラスタの namespace のうち、"project-" + UUID の形のものだけを、ワーカーが削除する。
+services:
+  worker:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+      # deploy の Pod の RuntimeClass(例: gvisor)。空なら指定せず、クラスターの既定のランタイムを使う。
+      RUNTIME_CLASS: ${RUNTIME_CLASS:-}
+      # 外からの通信を中継する namespace(Traefik など)。プロジェクトの namespace の NetworkPolicy で、ここからの通信を許可する。空なら許可しない。
+      INGRESS_NAMESPACE: ${INGRESS_NAMESPACE:-}
+      # インターネットへの出口の許可から除く、内部のネットワーク(CIDR のカンマ区切り。IPv4)。空なら、既定(10/8、172.16/12、192.168/16、169.254/16、100.64/10)。
+      EGRESS_BLOCKED_NETWORKS: ${EGRESS_BLOCKED_NETWORKS:-}
+      # service として作る k8s の Service の種類(ClusterIP、NodePort、LoadBalancer)。LoadBalancer は、deploy ごとに外部 IP を使い、ポートを LAN に公開する。
+      SERVICE_TYPE: ${SERVICE_TYPE:-ClusterIP}
+      # クラスターのドメイン(service の DNS 名の最後の部分)。クラスターごとに違う(CoreDNS の Corefile の kubernetes の行で確かめる)。
+      CLUSTER_DOMAIN: ${CLUSTER_DOMAIN:-cluster.local}
+      # volume の PVC の StorageClass(空ならクラスターの既定。拡張に対応したものが前提)と、アクセスモード(ReadWriteOnce か ReadWriteMany)。
+      VOLUME_STORAGE_CLASS: ${VOLUME_STORAGE_CLASS:-}
+      VOLUME_ACCESS_MODE: ${VOLUME_ACCESS_MODE:-ReadWriteMany}
+      # Traefik の IngressRoute の apiVersion と、受け付ける entryPoint の名前(カンマ区切り)。
+      TRAEFIK_API_VERSION: ${TRAEFIK_API_VERSION:-traefik.io/v1alpha1}
+      TRAEFIK_ENTRY_POINTS: ${TRAEFIK_ENTRY_POINTS:-web}
+      # アクセスの集計の Traefik プラグインの名前(空なら使わない。Traefik に入れてから指定する。docs/ingress-plugins.md)。
+      INGRESS_STATS_PLUGIN: ${INGRESS_STATS_PLUGIN:-}
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
+  # watcher は、k8s を読み取るだけ(Pod と Deployment の get / list / watch)。
+  watcher:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
+  # accessstats は、Traefik の Pod のログを読み取るだけ(traefik の namespace の pods の list と、pods/log の get)。
+  accessstats:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro
+  # logcollector は、k8s のログを読み取るだけ(pods/log の get)。どの Pod を追うかは、watcher が書く DB から知る。
+  logcollector:
+    environment:
+      KUBERNETES_ACCESS: kubeconfig
+      KUBECONFIG: /kube/config
+    volumes:
+      - ${KUBECONFIG_HOST_PATH:-~/.kube/config}:/kube/config:ro

@@ -1,0 +1,86 @@
+version: '3'
+
+# 開発のコマンド。全てコンテナの中で実行する(ホストの Go は go.mod より古いため)。
+
+tasks:
+  image:
+    desc: 開発用のイメージをビルドする(dockerfile を変えたあとに反映される)
+    cmds:
+      - docker compose build backend
+
+  up:
+    desc: 開発環境を起動する(バックグラウンド)
+    cmds:
+      - docker compose up -d --build
+
+  up:k8s:
+    desc: 開発環境を起動し、ワーカー、watcher、logcollector、accessstats を開発用の k8s につなぐ(~/.kube/config を使う。namespace を実際に削除する)
+    cmds:
+      - docker compose -f docker-compose.yaml -f docker-compose.kubernetes.yaml up -d --build
+
+  down:
+    desc: 開発環境を停止する
+    cmds:
+      - docker compose down
+
+  reset:
+    desc: 開発環境を停止し、データベースのデータも消す(最初からやり直す)
+    cmds:
+      - docker compose down --volumes
+
+  migrate:
+    desc: app と auth のデータベースのマイグレーションを流す
+    cmds:
+      - docker compose --profile tools run --rm migrate-app
+      - docker compose --profile tools run --rm migrate-auth
+
+  logs:
+    desc: バックエンドのログを表示する
+    cmds:
+      - docker compose logs -f backend
+
+  build:
+    desc: 全てのパッケージがビルドできるか確認する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go build -o /dev/null ./...
+
+  admin:create:
+    desc: "管理者を作る(例: task admin:create -- alice。パスワードは、環境変数 AUTH_ADMIN_PASSWORD か、標準入力で渡す)"
+    deps: [image]
+    cmds:
+      - docker compose run --rm -T auth go run ./auth/src admin create {{.CLI_ARGS}}
+
+  admin:promote:
+    desc: "すでにあるユーザーを管理者にする(例: task admin:promote -- alice)"
+    deps: [image]
+    cmds:
+      - docker compose run --rm -T auth go run ./auth/src admin promote {{.CLI_ARGS}}
+
+  frontend:test:
+    desc: フロントエンドの型の検査を実行する(コンテナの中で。テストは、まだ無い)
+    cmds:
+      - docker compose run --rm --no-deps frontend sh -c "corepack enable && pnpm install --no-frozen-lockfile && pnpm exec tsc --noEmit"
+
+  frontend:build:
+    desc: フロントエンドの本番用のイメージを作る(ビルドと、Node で動かすイメージ)
+    cmds:
+      - docker build -f frontend/dockerfile --target Production -t launchs-frontend:local .
+
+  test:
+    desc: 全てのテストを実行する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go test ./...
+
+  vet:
+    desc: go vet で問題を検出する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go vet ./...
+
+  fmt:
+    desc: コードを整形する
+    deps: [image]
+    cmds:
+      - docker compose run --rm backend go fmt ./...

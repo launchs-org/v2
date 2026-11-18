@@ -1,0 +1,7 @@
+# マイグレーション用のイメージ(golang-migrate に、app と auth の SQL を入れたもの)。
+# 本番の Kubernetes では、backend と auth の initContainer が、これで、起動のたびに up を流す(何度流しても、変わらない)。
+# ビルドのコンテキストは、リポジトリルート。
+FROM migrate/migrate:v4.19.1 AS Production
+
+COPY migrations/app /migrations/app
+COPY migrations/auth /migrations/auth

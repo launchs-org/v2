@@ -1,7 +1,133 @@
+// バックエンドの API サーバーのエントリポイント。
 package main
 
-import "log"
+import (
+	"context"
+	"fmt"
+	"launchs/shared/template"
+	"launchs/templates"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/labstack/echo/v5"
+	"go.temporal.io/sdk/client"
+
+	"launchs/backend/src/config"
+	"launchs/backend/src/server"
+	"launchs/backend/src/service"
+	sharedconfig "launchs/shared/config"
+	"launchs/shared/database"
+	"launchs/shared/ingresshost"
+	"launchs/shared/logger"
+)
+
+// gracefulShutdownTimeout は、停止の合図を受けてから、処理中のリクエストが終わるのを待つ時間。
+const gracefulShutdownTimeout = 10 * time.Second
+
+// main は、サーバーを起動し、失敗したときは、原因を標準エラー出力に書いて、終了コード 1 で終わる。
 func main() {
-	log.Println("Hello world")
+	// サーバーを動かし、失敗して戻ってきたときだけ、エラー終了の処理に進む。
+	if runError := run(); runError != nil {
+		// 原因を標準エラー出力に書き、利用者が失敗に気づけるようにする。
+		fmt.Fprintln(os.Stderr, runError)
+		// 終了コード 1 で終わり、起動の失敗を呼び出し元(コンテナなど)に伝える。
+		os.Exit(1)
+	}
+}
+
+// run は、設定を読み、サーバーを起動して、停止の合図(SIGINT、SIGTERM)を受けるまで動かす。
+//
+// 停止の合図を受けたら、処理中のリクエストが終わるのを待ってから、正常に終わる。
+//
+// 戻り値:
+//   - 設定の読み込みやサーバーの起動に失敗したときのエラー。正常に停止したときは nil。
+func run() error {
+	// 環境変数から設定を読む。読み方は shared の部品に任せ、名前と既定値はこのバックエンドの config が決める。
+	backendConfig, configError := config.LoadBackendConfig(sharedconfig.NewProcessEnvironmentReader())
+	// 設定に問題があるときは、サーバーを起動せず、全ての問題を含むエラーを返す。
+	if configError != nil {
+		// 呼び出し側で原因を表示できるよう、元のエラーを %w で包む。
+		return fmt.Errorf("設定を読み込めませんでした: %w", configError)
+	}
+
+	// 設定したログレベルで、標準出力に JSON を出すロガーを作る。
+	appLogger := logger.New(os.Stdout, "backend", backendConfig.LogLevel)
+
+	// データベースに接続する。接続できない状態でサーバーを起動しても、全ての API が失敗するだけなので、先に確認する。
+	appDatabase, databaseError := database.Open(backendConfig.DatabaseURL)
+	// 接続に失敗したときは、そのエラーをそのまま返して終わる。
+	if databaseError != nil {
+		// 呼び出し側が原因を表示できるよう、エラーを返す。
+		return databaseError
+	}
+	// run が終わるときに、データベースの接続を閉じる。閉じるときのエラーは、できることが無いので捨てる。
+	defer func() { _ = database.Close(appDatabase) }()
+
+	// ロガーとデータベースと開発用ユーザー ID を渡して、ルートとミドルウェアを組み立てたサーバーを作る。
+	// Temporal のサーバーに接続する(削除などの非同期の処理を開始するため)。
+	temporalClient, temporalError := client.Dial(client.Options{
+		HostPort:  backendConfig.TemporalAddress,
+		Namespace: backendConfig.TemporalNamespace,
+	})
+	if temporalError != nil {
+		return fmt.Errorf("Temporal に接続できませんでした: %w", temporalError)
+	}
+	defer temporalClient.Close()
+
+	// ingress に払い出すホスト名を作るもの(ベースドメインと、払い出さないサブドメインを設定から受け取る)。
+	hostGenerator, hostGeneratorError := ingresshost.NewGenerator(backendConfig.IngressBaseDomain, backendConfig.IngressReservedSubdomains)
+	if hostGeneratorError != nil {
+		return fmt.Errorf("ホスト名の払い出しを準備できませんでした: %w", hostGeneratorError)
+	}
+
+	// 認証のミドルウェアを決める(JWKS で access token を検証する。指定が無ければ、開発用の仮の認証)。
+	authentication := newAuthentication(appLogger, backendConfig)
+
+	// 同梱のテンプレートを読み込む。1つでも不正なら、起動を止める(誤った定義を、公開しない)。
+	templateRegistry, templateError := template.Load(templates.Files)
+	if templateError != nil {
+		return fmt.Errorf("テンプレートを読み込めませんでした: %w", templateError)
+	}
+
+	echoServer := server.New(appLogger, server.Dependencies{
+		TemplateRegistry:       templateRegistry,
+		Database:               appDatabase,
+		Authentication:         authentication,
+		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),
+		DeployWorkflowStarter:  service.NewTemporalDeployWorkflowStarter(temporalClient),
+		ServiceWorkflowStarter: service.NewTemporalServiceWorkflowStarter(temporalClient),
+		IngressWorkflowStarter: service.NewTemporalIngressWorkflowStarter(temporalClient),
+		IngressHostGenerator:   hostGenerator,
+		VolumeWorkflowStarter:  service.NewTemporalVolumeWorkflowStarter(temporalClient),
+		TemplateApplyStarter:   service.NewTemporalTemplateWorkflowStarter(temporalClient),
+		VolumeMaxSizeMB:        backendConfig.VolumeMaxSizeMB,
+	})
+
+	// SIGINT と SIGTERM を受けると終わる context を作る。これを使って、停止の合図で、サーバーを止める。
+	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// run が終わるときに、シグナルの監視を止めて、資源を解放する。
+	defer stopListening()
+
+	// 待ち受けるアドレスと、起動時の表示、停止時に待つ時間を決める。バナーとポートの表示は、ログに任せるので消す。
+	startConfig := echo.StartConfig{
+		Address:         fmt.Sprintf(":%d", backendConfig.HTTPPort),
+		HideBanner:      true,
+		HidePort:        true,
+		GracefulTimeout: gracefulShutdownTimeout,
+	}
+
+	// 起動することを、使うポート番号と一緒に記録する。
+	appLogger.Info("サーバーを起動する", "port", backendConfig.HTTPPort)
+	// 停止の合図があるまで、サーバーを動かす。正常に停止したときは、エラーにならない。
+	if startError := startConfig.Start(shutdownContext, echoServer); startError != nil {
+		// 異常終了の原因を、%w で包んで返す。
+		return fmt.Errorf("サーバーが異常終了した: %w", startError)
+	}
+
+	// 正常に停止したことを記録する。
+	appLogger.Info("サーバーを停止した")
+	// 正常に停止したので、エラーは無い。
+	return nil
 }

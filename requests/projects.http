@@ -1,0 +1,31 @@
+# プロジェクト関連の API の動作確認用(VS Code の REST Client 拡張機能で使う)。
+# 開発環境(task up)の nginx 経由で呼ぶ。自己署名の証明書なので、拡張機能の設定で証明書の検証を外す。
+# 認証のコンテナができるまでは、docker-compose.yaml の DEV_USER_ID のユーザーとして扱われる。
+
+@baseUrl = https://localhost:18443/api/v1
+
+### プロジェクト作成
+# @name createProject
+POST {{baseUrl}}/projects
+Content-Type: application/json
+
+{"name": "my-app"}
+
+###
+
+@projectId = {{createProject.response.body.projectId}}
+
+### プロジェクト一覧(limit と cursor は省略できる)
+GET {{baseUrl}}/projects?limit=20
+
+### プロジェクト取得
+GET {{baseUrl}}/projects/{{projectId}}
+
+### プロジェクト名の変更
+PATCH {{baseUrl}}/projects/{{projectId}}
+Content-Type: application/json
+
+{"name": "my-app-renamed"}
+
+### プロジェクト削除(すぐ 200 を返す。実体は非同期に削除され、完了すると取得が 404 になる)
+DELETE {{baseUrl}}/projects/{{projectId}}
