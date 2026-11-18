@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -597,6 +598,15 @@ func TestIngressAPIAccessLogs(testingT *testing.T) {
 		}
 		if _, rest := environment.ownerClient.call(http.MethodGet, path+"?limit=2&cursor="+cursor, ""); len(rest["logs"].([]any)) != 1 || rest["nextCursor"] != nil {
 			subTest.Errorf("残り 1 件のはず: %v", rest)
+		}
+	})
+	testingT.Run("期間で絞り込める。不正な日時は 400", func(subTest *testing.T) {
+		from := now.Add(time.Second).Format(time.RFC3339Nano)
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?from="+url.QueryEscape(from), ""); len(body["logs"].([]any)) != 2 {
+			subTest.Errorf("from 以降の 2 件のはず: %v", body)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?from=yesterday", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
 		}
 	})
 	testingT.Run("不正な status は 400、他人は 404", func(subTest *testing.T) {

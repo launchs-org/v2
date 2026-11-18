@@ -9,8 +9,7 @@ import { usePending } from "@/lib/pending"
 import type { IngressDetail, IngressRule } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
 import { PanelFrame } from "@/components/panels/panel-frame"
-import { IngressAccessLog } from "@/components/panels/ingress-access-log"
-import { IngressAccessStats, updateAccessStats } from "@/components/panels/ingress-access-stats"
+import { IngressAccessLog, updateAccessLogEnabled } from "@/components/panels/ingress-access-log"
 
 /** ルールの転送先に選べる、Service のポート 1 つ。 */
 type ServiceChoice = { serviceId: string; label: string; ports: number[] }
@@ -142,11 +141,10 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
           <a className="mono" style={{ fontWeight: 500, color: "var(--accent)", overflowWrap: "anywhere" }} href={`https://${detail.host}`} target="_blank" rel="noreferrer">https://{detail.host}</a>
         </div>
-        {/* アクセスログ(概要のグラフと、1 リクエストごとの一覧)。 */}
+        {/* アクセスログ(1 リクエストごとの表。日時、パス、IP、ステータスなどで絞り込める)。 */}
         <div className="card" style={{ overflow: "hidden" }}>
-        <IngressAccessStats basePath={path} enabled={detail.accessStats !== false} locked={locked || busy} refreshInterval={refreshInterval}
-          onToggle={(next) => void run(async () => { await updateAccessStats(path, next); notify(next ? "アクセスログの記録を有効にしました" : "アクセスログの記録を止めました") })} />
-        <IngressAccessLog basePath={path} />
+          <IngressAccessLog basePath={path} enabled={detail.accessStats !== false} locked={locked || busy}
+            onToggle={(next) => void run(async () => { await updateAccessLogEnabled(path, next); notify(next ? "アクセスログの記録を有効にしました" : "アクセスログの記録を止めました") })} />
         </div>
         {/* ルールの編集。 */}
         <div className="card" style={{ overflow: "hidden" }}>
