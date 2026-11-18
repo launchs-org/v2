@@ -27,6 +27,7 @@ worker/              Temporal の Worker
   src/               main.go と、workflow/ activity/
 registry/            自作のレジストリ
 logcollector/        ログ収集コンテナ
+accessstats/         ingress のアクセスの集計を、Traefik のログから保存するコンテナ
 shared/              バックエンドとワーカーで共有するコード(src/ は挟まない)
 migrations/          DB のマイグレーション(app/ と auth/ に分ける)
 k8s/                 本番の k8s マニフェスト
