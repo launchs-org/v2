@@ -65,6 +65,10 @@
     "mounts": [{"volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "mountPath": "/data"}],
     "pending_mounts": null
   },
+  "files": {
+    "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+    "pending_files": null
+  },
   "service": {
     "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "ports": [
@@ -280,3 +284,83 @@
 ```
 - Note: pending_env/pending_command/pending_args の内容を適用せずに破棄する(env/command/args には影響しない)。全て null の場合は 409 を返す
 - Note: deploy の status が "applying" の間は 409 を返す(applying中はconfigに対する操作を排他制御する)。"deleting" の間も 409 を返す
+
+### デプロイ ファイル取得 (設定ファイルなど)
+- Get: /deploy/:deployId/files
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+  "pending_files": null
+}
+```
+- Response (200、pending が存在する場合)
+```json
+{
+  "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+  "pending_files": [
+    {"path": "/etc/app/app.conf", "content": "key=value2\n"},
+    {"path": "/etc/app/extra.conf", "content": "x=1\n"}
+  ]
+}
+```
+- Note: ファイルは、deploy のコンテナの中に、指定した path で置かれる設定ファイル(k8s の ConfigMap として、1 ファイルずつマウントする)。files は現在コンテナに反映されているもの(無ければ空の配列)。pending_files は、まだ適用していない変更(変更が無ければ null。空の配列は「全て外す」変更)
+- Note: [デプロイ詳細取得](#デプロイ詳細取得) のレスポンスにも、同じ内容が `files` として入る(`files.files` と `files.pending_files`)
+- Note: 内容は UTF-8 のテキストだけ。**秘密(パスワードなど)を含めても、環境変数と同じく、平文で保存され、そのまま返る**
+
+### デプロイ ファイル設定 (一括置き換え、pendingとして保存)
+- Put: /deploy/:deployId/files
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{"files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}]}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 個別のファイル単位の CRUD ではなく、常に全件を送って置き換える(env、mounts と同じ)。空の配列は、全て外す変更
+- Note: この時点では、まだコンテナには反映されない。pending_files として保存され、適用するまで files は変わらない
+- Note: 送った内容が現在の files と同じ(JSON の書式ではなく、中身で比べる。現在がファイル無しのときは、空の配列と同じ)なら、pending_files は保存せず null にする(以前の pending_files も消える)。そのため、同じ内容を適用し直すことはできない(409)
+- Note: path は、「/」で始まり、英数字と `. _ - /` だけの 200 文字以内。「/」だけ、「..」、「//」、「./」、末尾の「/」は不可。同じ path の重複は不可。不正は 400
+- Note: 内容は 1 ファイル 64KiB まで、1 deploy に 20 ファイルまで、合計 256KiB まで。UTF-8 でないもの、NUL 文字を含むものは不可。超過と不正は 400
+- Note: **ボリュームのマウント先と、まったく同じ path は 400**(ファイルが、ボリュームを覆ってしまうため)。照らすマウントは、pending のマウントがあればそれ、無ければ現在のもの。マウント先の**下**(例: ボリュームを `/data` に、ファイルを `/data/init.sql` に)は許す。逆向きに、pending のファイルと、まったく同じ path のマウントを [マウント設定](volumes.md#デプロイへのボリュームマウント設定-pendingとして保存) で保存しようとしても、400
+- Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す。"deleting" の間も 409 を返す。deploy が無い(他のユーザーのものを含む)なら 404
+
+### デプロイ ファイル 適用
+- Post: /deploy/:deployId/files/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_files の内容を files に反映するため、k8s の ConfigMap(名前は deploy の ID)を作り(または更新し)、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ files は更新されていない。pending_files が null の場合は 409 を返す
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_files は消費されず、適用しようとしている内容を保持する。成功すれば files を pending_files の内容に更新して pending_files を null に戻し、status は "active"(replicas が 0 のときは "scaled_zero")に戻る。失敗すれば、ConfigMap と Deployment を元のファイルに戻し、files も pending_files も変えず(試して失敗した値は pending_files に残る)、status を "failed" にする([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
+- Note: 全て外す(空の配列)ときは、Deployment からファイルを外してから、ConfigMap を削除する
+- Note: ファイルを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。ConfigMap の 1 ファイルを `subPath` でマウントすると、ConfigMap を更新しても、動いている Pod には反映されないため、Pod を作り直して、確実に反映する。そのぶん、適用の間、短い停止がある
+- Note: 起動設定やマウントを適用しても、現在のファイルは、そのまま、Deployment に残る
+- Note: 既に status が "applying" の場合は 409 を返す(多重 apply 不可)。"deleting" の間、起動中("pending")の間も 409 を返す。適用の時点で、ファイルの path が、現在のマウント先と、まったく同じになっていたら 409
+- Note: applying には 300 秒(5 分)のタイムアウトを設ける(他の apply と同じ)
+
+### デプロイ ファイル 破棄
+- Post: /deploy/:deployId/files/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_files の内容を適用せずに破棄する(files には影響しない)。pending_files が null の場合は 409 を返す
+- Note: deploy の status が "applying" の間は 409 を返す。"deleting" の間も 409 を返す

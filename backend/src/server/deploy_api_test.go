@@ -15,6 +15,7 @@ type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
 	appliedDeployIDs []string
 	mountedDeployIDs []string
+	filesDeployIDs   []string
 	scaledDeployIDs  []string
 	deletedDeployIDs []string
 	startError       error
@@ -35,6 +36,12 @@ func (fakeStarter *fakeDeployWorkflowStarter) StartConfigApply(_ context.Context
 // StartMountsApply は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeDeployWorkflowStarter) StartMountsApply(_ context.Context, deployID string) error {
 	fakeStarter.mountedDeployIDs = append(fakeStarter.mountedDeployIDs, deployID)
+	return fakeStarter.startError
+}
+
+// StartFilesApply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartFilesApply(_ context.Context, deployID string) error {
+	fakeStarter.filesDeployIDs = append(fakeStarter.filesDeployIDs, deployID)
 	return fakeStarter.startError
 }
 
