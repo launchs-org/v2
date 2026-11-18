@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"context"
 	"errors"
 	"fmt"
@@ -514,6 +516,45 @@ func TestIngressAPIAccessStats(testingT *testing.T) {
 		environment.database.Exec("UPDATE ingresses SET status = 'applying' WHERE id = ?", ingressID)
 		if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":false}`); statusCode != 409 {
 			subTest.Errorf("409 のはず: %d", statusCode)
+		}
+	})
+}
+
+// TestIngressAPIAccessStatsReport は、アクセスの集計の取得(期間、合計、持ち主の確認)を確認する。
+func TestIngressAPIAccessStatsReport(testingT *testing.T) {
+	environment := newIngressTestEnvironment(testingT)
+	ingressID := createIngress(environment)
+	path := environment.basePath + "/" + ingressID + "/access-stats"
+	// 5 分前の 1 分ごとの行を、直接入れる。
+	start := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
+	environment.database.Exec(`INSERT INTO ingress_access_minutes (ingress_id, replica, bucket_start, interval_sec, count, status, methods, bytes, latency, sum_ms, paths, clients, unique_clients)
+		VALUES (?, 'traefik-0', ?, 60, 10, '{"2xx":9,"5xx":1}', '{"GET":10}', 500, '[10,0,0,0,0,0,0,0,0,0,0]', 20, '[{"key":"/a","count":10}]', '[{"key":"1.1.1.1","count":10}]', 1)`, ingressID, start)
+
+	testingT.Run("1h の集計に、合計と区間が入る", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
+		totals, _ := body["totals"].(map[string]any)
+		if statusCode != 200 || body["range"] != "1h" || body["enabled"] != true || totals["count"] != float64(10) || len(body["series"].([]any)) < 60 {
+			subTest.Fatalf("合計が違う: %d %v", statusCode, body)
+		}
+		paths := body["paths"].([]any)
+		if paths[0].(map[string]any)["key"] != "/a" {
+			subTest.Errorf("パスの上位が入るはず: %v", paths)
+		}
+	})
+	testingT.Run("他の期間も読める。不正な range は 400", func(subTest *testing.T) {
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=24h", ""); statusCode != 200 {
+			subTest.Errorf("24h は 200 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=7d", ""); statusCode != 200 {
+			subTest.Errorf("7d は 200 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?range=2h", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+	})
+	testingT.Run("他人の ingress は 404", func(subTest *testing.T) {
+		if statusCode, _ := environment.otherClient.call(http.MethodGet, path, ""); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
 		}
 	})
 }
