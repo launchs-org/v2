@@ -67,13 +67,13 @@ func TestLoadBundled(testingT *testing.T) {
 				subTest.Errorf("password は、generate で、default 無し、必須でない: %+v", variable)
 			}
 		}
-		if summary := postgres.Summarize(); summary.Deploys != 1 || summary.Volumes != 1 || summary.Ingress || summary.Files != 1 {
+		if summary := postgres.Summarize(); summary.Deploys != 1 || summary.Volumes != 1 || summary.Ingress || summary.Files != 1 || summary.ConfigMaps != 1 {
 			subTest.Errorf("要約が違う: %+v", summary)
 		}
 	})
-	testingT.Run("nginx の要約: deploy 1、ingress あり、ファイル 1", func(subTest *testing.T) {
+	testingT.Run("nginx の要約: deploy 1、ingress あり、ConfigMap 1(設定、ページ、バイナリの画像)", func(subTest *testing.T) {
 		nginx, _ := registry.Get("nginx")
-		if summary := nginx.Summarize(); summary.Deploys != 1 || summary.Volumes != 0 || !summary.Ingress || summary.Files != 1 {
+		if summary := nginx.Summarize(); summary.Deploys != 1 || summary.Volumes != 0 || !summary.Ingress || summary.Files != 0 || summary.ConfigMaps != 1 {
 			subTest.Errorf("要約が違う: %+v", summary)
 		}
 	})
