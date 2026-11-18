@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"launchs/shared/model"
+	"sort"
+	"strconv"
 )
 
 // MountDefinition は、Pod にマウントするボリューム1つ。
@@ -14,6 +16,15 @@ type MountDefinition struct {
 
 	// MountPath は、コンテナの中のマウント先の path。
 	MountPath string
+}
+
+// FileDefinition は、Pod にマウントするファイル1つ(deploy の「ファイル」。k8s の ConfigMap の 1 つのキーを、subPath でマウントする)。
+type FileDefinition struct {
+	// Key は、ConfigMap の中のキー(path から決めた、安全な名前: f0、f1 …)。
+	Key string
+
+	// Path は、コンテナの中のファイルの path。
+	Path string
 }
 
 // DeploymentDefinition は、k8s に作る Deployment の内容。
@@ -49,6 +60,9 @@ type DeploymentDefinition struct {
 
 	// Args は、起動引数。nil ならイメージの既定。
 	Args []string
+
+	// Files は、Pod にマウントするファイル(ConfigMap。名前は Name と同じ)。無ければ空。
+	Files []FileDefinition
 }
 
 // DeploymentOperator は、k8s の namespace と Deployment を操作する。
@@ -103,8 +117,14 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 	for _, mount := range parsedMounts {
 		mounts = append(mounts, MountDefinition{ClaimName: mount.VolumeID, MountPath: mount.MountPath})
 	}
+	// ファイル(現在反映されているもの)を読む。起動設定やマウントを適用するときも、現在のファイルを落とさないよう、必ず入れる。
+	parsedFiles, filesError := model.ParseFiles(deploy.Files)
+	if filesError != nil {
+		return DeploymentDefinition{}, fmt.Errorf("ファイルを読み取れません: %w", filesError)
+	}
 	// 組み立てて返す。
 	return DeploymentDefinition{
+		Files:         newFileDefinitions(parsedFiles),
 		Namespace:     deploy.ProjectID,
 		Name:          deploy.ID,
 		Image:         deploy.ImageRef,
@@ -116,4 +136,54 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 		Args:          arguments,
 		Mounts:        mounts,
 	}, nil
+}
+
+// newFileDefinitions は、ファイルの構成から、Pod にマウントするファイルの一覧を作る。
+// ConfigMap のキーは、path の順に f0、f1 … と付ける(path に使える文字は、キーには使えない文字を含むため、path から作らない)。
+//
+// 引数:
+//   - files: ファイルの構成。
+//
+// 戻り値:
+//   - マウントするファイルの一覧(path の順)。無ければ空。
+func newFileDefinitions(files []model.FileSpec) []FileDefinition {
+	// path の順に並べる(同じ内容なら、毎回、同じキーになるように)。
+	sorted := append([]model.FileSpec(nil), files...)
+	sort.Slice(sorted, func(first int, second int) bool { return sorted[first].Path < sorted[second].Path })
+	// 順に、キーを付ける。
+	definitions := make([]FileDefinition, 0, len(sorted))
+	for index, file := range sorted {
+		definitions = append(definitions, FileDefinition{Key: "f" + strconv.Itoa(index), Path: file.Path})
+	}
+	return definitions
+}
+
+// newConfigMapData は、ファイルの構成から、ConfigMap のデータ(キー → 内容)を作る。キーは、newFileDefinitions と同じ付け方。
+//
+// 引数:
+//   - files: ファイルの構成。
+//
+// 戻り値:
+//   - ConfigMap のデータ。
+func newConfigMapData(files []model.FileSpec) map[string]string {
+	// 同じ順(path の順)に、同じキーを付けて、内容を入れる。
+	sorted := append([]model.FileSpec(nil), files...)
+	sort.Slice(sorted, func(first int, second int) bool { return sorted[first].Path < sorted[second].Path })
+	data := make(map[string]string, len(sorted))
+	for index, file := range sorted {
+		data["f"+strconv.Itoa(index)] = file.Content
+	}
+	return data
+}
+
+// ConfigMapOperator は、k8s の ConfigMap(deploy のファイルの置き場)を操作する。
+//
+// 実体は、client-go で操作する KubernetesConfigMapOperator(worker/src/cluster)。
+// k8s につながない設定(KUBERNETES_ACCESS=none)のときは、LoggingConfigMapOperator を使う。
+type ConfigMapOperator interface {
+	// ApplyConfigMap は、ConfigMap を作る。すでにあれば内容を置き換える(冪等)。
+	ApplyConfigMap(requestContext context.Context, namespaceName string, name string, data map[string]string) error
+
+	// DeleteConfigMap は、ConfigMap を削除する。無ければ何もしない(冪等)。
+	DeleteConfigMap(requestContext context.Context, namespaceName string, name string) error
 }

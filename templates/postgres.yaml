@@ -1,0 +1,60 @@
+# PostgreSQL 16。データは、ボリュームに保存する。初期化の SQL は、deploy の「ファイル」として渡す。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: postgres
+  name: PostgreSQL
+  description: データベース(PostgreSQL 16)。データは、ボリュームに保存されます。
+  icon: database
+  category: database
+
+variables:
+  - name: database
+    label: データベース名
+    type: string
+    default: app
+    pattern: "^[a-z][a-z0-9_]{0,30}$"
+  - name: user
+    label: ユーザー名
+    type: string
+    default: app
+    pattern: "^[a-z][a-z0-9_]{0,30}$"
+  - name: password
+    label: パスワード
+    type: password
+    generate: true
+    length: 24
+  - name: storage
+    label: ボリュームの大きさ(MB)
+    type: integer
+    default: "1024"
+    min: 256
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: db
+    image: postgres:16
+    spec: medium
+    replicas: 1
+    env:
+      POSTGRES_DB: ${database}
+      POSTGRES_USER: ${user}
+      POSTGRES_PASSWORD: ${password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    mounts:
+      - volume: data
+        path: /var/lib/postgresql/data
+    files:
+      - path: /docker-entrypoint-initdb.d/init.sql
+        content: |
+          CREATE EXTENSION IF NOT EXISTS pgcrypto;
+    service:
+      ports:
+        - name: postgres
+          port: 5432
+          protocol: tcp
