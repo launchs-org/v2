@@ -1,10 +1,10 @@
-# PostgreSQL 16。データは、ボリュームに保存する。初期化の SQL は、deploy の「ファイル」として渡す。
+# PostgreSQL 16。データはボリュームに保存する。サーバーの設定(postgresql.conf)は ConfigMap で渡し、初期化の SQL は deploy のファイルで渡す。
 apiVersion: launchs/v1
 kind: Template
 metadata:
   id: postgres
   name: PostgreSQL
-  description: データベース(PostgreSQL 16)。データは、ボリュームに保存されます。
+  description: データベース(PostgreSQL 16)。データはボリュームに保存され、設定ファイルは ConfigMap で編集できます。
   icon: database
   category: database
 
@@ -30,17 +30,44 @@ variables:
     default: "1024"
     min: 256
     max: 5120
+  - name: max_connections
+    label: 最大の接続数
+    type: integer
+    default: "100"
+    min: 20
+    max: 500
+  - name: log_statement
+    label: SQL のログ
+    type: choice
+    default: none
+    options:
+      - value: none
+        label: 出さない
+      - value: ddl
+        label: 定義の変更だけ
+      - value: all
+        label: 全て
 
 resources:
   - kind: volume
     name: data
     sizeMB: ${storage}
 
+  - kind: configmap
+    name: pgconf
+    files:
+      - key: postgresql.conf
+        content: |
+          listen_addresses = '*'
+          max_connections = ${max_connections}
+          log_statement = '${log_statement}'
+
   - kind: deploy
     name: db
     image: postgres:16
     spec: medium
     replicas: 1
+    args: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     env:
       POSTGRES_DB: ${database}
       POSTGRES_USER: ${user}
@@ -49,6 +76,10 @@ resources:
     mounts:
       - volume: data
         path: /var/lib/postgresql/data
+    configmaps:
+      - configmap: pgconf
+        key: postgresql.conf
+        path: /etc/postgresql/postgresql.conf
     files:
       - path: /docker-entrypoint-initdb.d/init.sql
         content: |
