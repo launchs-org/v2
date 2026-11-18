@@ -170,6 +170,25 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(filesActivities.RollbackDeploymentFiles, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentFilesActivityName})
 	generalWorker.RegisterActivityWithOptions(filesActivities.CommitFilesResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitFilesResultActivityName})
 
+	// テンプレートから部品を作る Workflow と Activity を登録する(計画のステップを、順に実行する)。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyTemplateWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyTemplateWorkflowName})
+	templateActivities := activity.NewApplyTemplateActivities(repository.NewTemplateApplyRepository(appDatabase), repository.NewVolumeRepository(appDatabase), repository.NewConfigMapRepository(appDatabase),
+		repository.NewDeployRepository(appDatabase), repository.NewServiceRepository(appDatabase), repository.NewIngressRepository(appDatabase), appLogger)
+	for name, function := range map[string]any{
+		sharedworkflow.LoadTemplateStepsActivityName:       templateActivities.LoadTemplateSteps,
+		sharedworkflow.CreateTemplateVolumeActivityName:    templateActivities.CreateTemplateVolume,
+		sharedworkflow.CreateTemplateConfigMapActivityName: templateActivities.CreateTemplateConfigMap,
+		sharedworkflow.CreateTemplateDeployActivityName:    templateActivities.CreateTemplateDeploy,
+		sharedworkflow.CreateTemplateServiceActivityName:   templateActivities.CreateTemplateService,
+		sharedworkflow.CreateTemplateIngressActivityName:   templateActivities.CreateTemplateIngress,
+		sharedworkflow.UpdateTemplateStepActivityName:      templateActivities.UpdateTemplateStep,
+		sharedworkflow.FinishTemplateApplyActivityName:     templateActivities.FinishTemplateApply,
+	} {
+		generalWorker.RegisterActivityWithOptions(function, sdkactivity.RegisterOptions{Name: name})
+	}
+	// deploy の起動の前に、マウントとファイルに必要なもの(PVC、ConfigMap)を用意する Activity を登録する。
+	prepareActivities := activity.NewPrepareDeployActivities(repository.NewDeployRepository(appDatabase), volumeRepository, operators.volumeOperator, operators.configMapOperator, repository.NewConfigMapRepository(appDatabase), operators.configMapRevisionOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(prepareActivities.PrepareDeployDependencies, sdkactivity.RegisterOptions{Name: sharedworkflow.PrepareDeployDependenciesActivityName})
 	// deploy の ConfigMap のマウント(共有の ConfigMap の版を固定してマウントする)の反映の Workflow と Activity を登録する。
 	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployConfigMapMountsWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployConfigMapMountsWorkflowName})
 	configMapMountsActivities := activity.NewApplyDeployConfigMapMountsActivities(repository.NewDeployRepository(appDatabase), repository.NewConfigMapRepository(appDatabase), operators.deploymentOperator, operators.configMapRevisionOperator, appLogger)
