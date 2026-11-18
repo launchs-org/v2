@@ -45,12 +45,7 @@ resources:
     name: editor
     files:
       - key: settings.json
-        content: |
-          {
-            "workbench.colorTheme": "${theme}",
-            "editor.fontSize": ${font_size},
-            "files.autoSave": "afterDelay"
-          }
+        from: files/settings.json
 
   - kind: deploy
     name: ide
