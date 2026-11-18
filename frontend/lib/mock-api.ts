@@ -7,6 +7,7 @@ import type {
   ConfigMapMount,
   DeployDetail,
   DeployListItem,
+  AccessLogsResponse,
   IngressDetail,
   IngressListItem,
   Project,
@@ -267,6 +268,32 @@ function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
 }
 
 let nextId = 1
+/**
+ * アクセスログの、見せかけのデータを作る(新しい順。絞り込みも効く)。
+ *
+ * @param query クエリ(status、method、ip、q)。
+ * @returns API と同じ形のレスポンス。
+ */
+function mockAccessLogs(query: URLSearchParams): AccessLogsResponse {
+  // 決まった種類のリクエストを、時刻をずらして並べる。
+  const samples = [
+    ["GET", "/", 200, "203.0.113.9"], ["GET", "/api/items/42?token=abc&sort=desc", 200, "198.51.100.7"], ["POST", "/api/orders", 201, "203.0.113.9"],
+    ["GET", "/static/app.js?v=3", 304, "198.51.100.8"], ["GET", "/missing", 404, "203.0.113.50"], ["POST", "/api/orders", 500, "198.51.100.7"],
+  ] as const
+  const now = Date.now()
+  const status = query.get("status") ?? ""
+  const logs = Array.from({ length: 60 }, (_, index) => {
+    const [method, url, code, clientIp] = samples[index % samples.length]
+    return { time: new Date(now - index * 4000).toISOString(), method, url, status: code, durationMs: 3 + (index % 9) * 1.7, clientIp, bytes: 512 + index * 37 }
+  }).filter((entry) => (!status || (status.endsWith("xx") ? String(entry.status).startsWith(status[0]) : String(entry.status) === status))
+    && (!query.get("method") || entry.method === query.get("method")?.toUpperCase())
+    && (!query.get("from") || entry.time >= (query.get("from") ?? ""))
+    && (!query.get("to") || entry.time < (query.get("to") ?? ""))
+    && (!query.get("ip") || entry.clientIp === query.get("ip"))
+    && (!query.get("q") || entry.url.toLowerCase().includes((query.get("q") ?? "").toLowerCase())))
+  return { logs, nextCursor: null }
+}
+
 const newId = (prefix: string) => `${prefix}_${nextId++}_${Math.random().toString(36).slice(2, 7)}`
 const clone = <T,>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T
 const getProjectDeploys = (projectId: string) => Object.values(deployDetails).filter((deploy) => deploy.projectId === projectId)
@@ -440,6 +467,11 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           else if (segments.length === 6 && method === "PUT") {
             ingress.pending_rules = clone((payload.rules ?? []) as IngressDetail["rules"])
             result = undefined
+          } else if (segments.length === 6 && method === "PATCH") {
+            ingress.accessStats = Boolean(payload.accessStats)
+            result = clone(ingress)
+          } else if (segments[6] === "access-logs" && method === "GET") {
+            result = mockAccessLogs(url.searchParams)
           } else if (segments[6] === "apply" && method === "POST") {
             if (ingress.pending_rules !== null) ingress.rules = ingress.pending_rules
             ingress.pending_rules = null

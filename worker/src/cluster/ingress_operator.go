@@ -19,6 +19,16 @@ const (
 	// ingressRouteKind と ingressRouteResource は、Traefik の IngressRoute の種類と、API のリソース名。
 	ingressRouteKind     = "IngressRoute"
 	ingressRouteResource = "ingressroutes"
+
+	// middlewareKind と middlewareResource は、Traefik の Middleware の種類と、API のリソース名。
+	middlewareKind     = "Middleware"
+	middlewareResource = "middlewares"
+
+	// statsMiddlewareSuffix は、アクセスの集計の Middleware の名前の末尾(名前は、ingress の ID + この文字列)。
+	statsMiddlewareSuffix = "-stats"
+
+	// statsIntervalSeconds は、アクセスの集計を出力する間隔(秒)。
+	statsIntervalSeconds = 10
 )
 
 // ingressNamePattern は、IngressRoute の名前として受け付ける形(ingress の ID: "ingress-" + UUID v4)。
@@ -34,6 +44,10 @@ type IngressRouteSettings struct {
 
 	// EntryPoints は、IngressRoute を受け付ける Traefik の entryPoint の名前(環境変数 TRAEFIK_ENTRY_POINTS。例: web)。
 	EntryPoints []string
+
+	// StatsPlugin は、アクセスの集計の Traefik プラグインの名前(環境変数 INGRESS_STATS_PLUGIN。例: launchs-stats)。
+	// 空なら、この機能は使わない(Middleware を作らない。Traefik にプラグインが無いのに Middleware を参照すると、ルートが壊れるため)。
+	StatsPlugin string
 }
 
 // KubernetesIngressOperator は、動的クライアントで、Traefik の IngressRoute を操作する IngressOperator の実装。
@@ -46,6 +60,12 @@ type KubernetesIngressOperator struct {
 
 	// entryPoints は、IngressRoute の entryPoints。
 	entryPoints []string
+
+	// middlewareResource は、Middleware の API のリソース(IngressRoute と同じ group と version)。
+	middlewareResource schema.GroupVersionResource
+
+	// statsPlugin は、アクセスの集計のプラグインの名前。空なら、使わない。
+	statsPlugin string
 
 	// client は、型を持たない k8s のクライアント。
 	client dynamic.Interface
@@ -71,6 +91,9 @@ func NewKubernetesIngressOperator(client dynamic.Interface, settings IngressRout
 		apiVersion:  settings.APIVersion,
 		entryPoints: settings.EntryPoints,
 		client:      client,
+
+		middlewareResource: parsed.WithResource(middlewareResource),
+		statsPlugin:        strings.TrimSpace(settings.StatsPlugin),
 	}, nil
 }
 
@@ -101,27 +124,105 @@ func (operator *KubernetesIngressOperator) ApplyIngressRoute(requestContext cont
 	if !hostPattern.MatchString(definition.Host) {
 		return fmt.Errorf("ホスト名の形が正しくありません: %q", definition.Host)
 	}
-	// IngressRoute を組み立てる。
-	desired := operator.buildIngressRoute(definition)
-	routes := operator.client.Resource(operator.resource).Namespace(definition.Namespace)
-	// まず作ってみる。無ければ作れる。
-	_, createError := routes.Create(requestContext, desired, metav1.CreateOptions{})
+	// アクセスの集計を付けるかを決める(プラグインが無効な環境では、付けない)。
+	withStats := definition.AccessStats && operator.statsPlugin != ""
+	// 付けるなら、IngressRoute より先に、Middleware を用意する(参照先が無い時間を作らない)。
+	if withStats {
+		if upsertError := operator.upsert(requestContext, operator.middlewareResource, definition.Namespace, operator.buildStatsMiddleware(definition)); upsertError != nil {
+			return fmt.Errorf("Middleware %s を反映できませんでした: %w", statsMiddlewareName(definition.Name), upsertError)
+		}
+	}
+	// IngressRoute を反映する。
+	if upsertError := operator.upsert(requestContext, operator.resource, definition.Namespace, operator.buildIngressRoute(definition, withStats)); upsertError != nil {
+		return fmt.Errorf("IngressRoute %s を反映できませんでした: %w", definition.Name, upsertError)
+	}
+	// 付けないなら、IngressRoute が参照しなくなってから、Middleware を消す(機能が無効な環境では、触らない)。
+	if !withStats && operator.statsPlugin != "" {
+		return operator.deleteStatsMiddleware(requestContext, definition.Namespace, definition.Name)
+	}
+	return nil
+}
+
+// upsert は、オブジェクトを、無ければ作り、あれば resourceVersion を引き継いで更新する(冪等)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - resource: 対象の API のリソース。
+//   - namespaceName: namespace の名前。
+//   - desired: 反映するオブジェクト。
+//
+// 戻り値:
+//   - k8s への依頼に失敗したときのエラー。
+func (operator *KubernetesIngressOperator) upsert(requestContext context.Context, resource schema.GroupVersionResource, namespaceName string, desired *unstructured.Unstructured) error {
+	// まず作ってみる。
+	client := operator.client.Resource(resource).Namespace(namespaceName)
+	_, createError := client.Create(requestContext, desired, metav1.CreateOptions{})
 	if createError == nil {
 		return nil
 	}
 	if !apierrors.IsAlreadyExists(createError) {
-		return fmt.Errorf("IngressRoute %s を作れませんでした: %w", definition.Name, createError)
+		return createError
 	}
 	// すでにあるときは、resourceVersion を引き継いで、更新する。
-	existing, getError := routes.Get(requestContext, definition.Name, metav1.GetOptions{})
+	existing, getError := client.Get(requestContext, desired.GetName(), metav1.GetOptions{})
 	if getError != nil {
-		return fmt.Errorf("IngressRoute %s を取得できませんでした: %w", definition.Name, getError)
+		return getError
 	}
 	desired.SetResourceVersion(existing.GetResourceVersion())
-	if _, updateError := routes.Update(requestContext, desired, metav1.UpdateOptions{}); updateError != nil {
-		return fmt.Errorf("IngressRoute %s を更新できませんでした: %w", definition.Name, updateError)
+	_, updateError := client.Update(requestContext, desired, metav1.UpdateOptions{})
+	return updateError
+}
+
+// statsMiddlewareName は、ingress の、アクセスの集計の Middleware の名前を返す。
+func statsMiddlewareName(ingressName string) string {
+	// ingress の ID に、末尾を足す。
+	return ingressName + statsMiddlewareSuffix
+}
+
+// deleteStatsMiddleware は、アクセスの集計の Middleware を削除する(無くてもエラーにしない)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - namespaceName: namespace の名前。
+//   - ingressName: ingress の ID。
+//
+// 戻り値:
+//   - k8s への依頼に失敗したときのエラー。
+func (operator *KubernetesIngressOperator) deleteStatsMiddleware(requestContext context.Context, namespaceName string, ingressName string) error {
+	// 削除する。無ければ、すでに目的どおり。
+	deleteError := operator.client.Resource(operator.middlewareResource).Namespace(namespaceName).Delete(requestContext, statsMiddlewareName(ingressName), metav1.DeleteOptions{})
+	if deleteError != nil && !apierrors.IsNotFound(deleteError) {
+		return fmt.Errorf("Middleware %s を削除できませんでした: %w", statsMiddlewareName(ingressName), deleteError)
 	}
 	return nil
+}
+
+// buildStatsMiddleware は、アクセスの集計の Middleware(プラグイン launchs-stats の設定)を組み立てる。
+//
+// 引数:
+//   - definition: 反映する内容(ingress の ID を、集計の宛先として設定する)。
+//
+// 戻り値:
+//   - 組み立てた Middleware。
+func (operator *KubernetesIngressOperator) buildStatsMiddleware(definition activity.IngressRouteDefinition) *unstructured.Unstructured {
+	// プラグインの設定を持つ Middleware を返す。
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": operator.apiVersion,
+		"kind":       middlewareKind,
+		"metadata": map[string]any{
+			"name":      statsMiddlewareName(definition.Name),
+			"namespace": definition.Namespace,
+			"labels":    map[string]any{projectIDLabel: definition.Namespace},
+		},
+		"spec": map[string]any{
+			"plugin": map[string]any{
+				operator.statsPlugin: map[string]any{
+					"ingressId":       definition.Name,
+					"intervalSeconds": int64(statsIntervalSeconds),
+				},
+			},
+		},
+	}}
 }
 
 // DeleteIngressRoute は、IngressRoute を削除する(無くてもエラーにしない。冪等)。
@@ -146,6 +247,10 @@ func (operator *KubernetesIngressOperator) DeleteIngressRoute(requestContext con
 	if deleteError != nil && !apierrors.IsNotFound(deleteError) {
 		return fmt.Errorf("IngressRoute %s を削除できませんでした: %w", ingressName, deleteError)
 	}
+	// 集計の Middleware も消す(機能が無効な環境では、触らない)。
+	if operator.statsPlugin != "" {
+		return operator.deleteStatsMiddleware(requestContext, namespaceName, ingressName)
+	}
 	return nil
 }
 
@@ -156,20 +261,26 @@ func (operator *KubernetesIngressOperator) DeleteIngressRoute(requestContext con
 //
 // 引数:
 //   - definition: 反映する内容。
+//   - withStats: アクセスの集計の Middleware を、各ルートに付けるか。
 //
 // 戻り値:
 //   - 組み立てた IngressRoute。
-func (operator *KubernetesIngressOperator) buildIngressRoute(definition activity.IngressRouteDefinition) *unstructured.Unstructured {
+func (operator *KubernetesIngressOperator) buildIngressRoute(definition activity.IngressRouteDefinition, withStats bool) *unstructured.Unstructured {
 	// ルールごとの routes を作る。
 	routes := make([]any, 0, len(definition.Rules))
 	for _, rule := range definition.Rules {
-		routes = append(routes, map[string]any{
+		route := map[string]any{
 			"kind":  "Rule",
 			"match": "Host(`" + definition.Host + "`) && PathPrefix(`" + rule.Path + "`)",
 			"services": []any{
 				map[string]any{"name": rule.ServiceName, "port": int64(rule.Port)},
 			},
-		})
+		}
+		// 集計を付けるなら、Middleware を参照する。
+		if withStats {
+			route["middlewares"] = []any{map[string]any{"name": statsMiddlewareName(definition.Name)}}
+		}
+		routes = append(routes, route)
 	}
 	// entryPoints を、型を持たない形にする。
 	entryPoints := make([]any, 0, len(operator.entryPoints))
