@@ -22,7 +22,7 @@
 |---|---|---|
 | **A. deploy のファイル** | deploy に、ファイル(パス + 内容)を持たせ、ConfigMap としてマウントする。API(`/deploy/:id/files`)、pending → 適用、画面のタブ | なし(単独で役に立つ) |
 | **B. テンプレートの定義と検証** | `templates/*.yaml` の形(スキーマ)、読み込み、検証、変数の展開(純粋関数)。`GET /templates`、`GET /templates/:id` | なし |
-| **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認 | A、B |
+| **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認。起動前の準備(PVC、ファイルの ConfigMap)を、`CreateDeployWorkflow` に足す | A、B、B2 |
 | **D. 画面** | ウィザードに「テンプレートから」を足す。入力欄、自動生成のパスワード、進み具合 | C |
 | **B2. ConfigMap の部品**(実装済み) | テンプレートに、共有の ConfigMap([configmap.md](configmap.md))を足す。`kind: configmap` と、deploy の `configmaps`。テキストと、base64 のバイナリ、権限(mode)に対応する | B |
 | **E. 同梱のテンプレート** | nginx、PostgreSQL、Redis、MariaDB、WordPress など、数個 | B |
@@ -186,15 +186,34 @@ resources:
 - クォータ: 作る前に、テンプレート全体で、上限(deploy の数、volume の数と合計の大きさ)を超えないか、**まとめて**確かめる(途中で足りなくなって、半端に残さない)。
 - 変数の値: `pattern`、`min`/`max` などを、サーバーで、必ず検査する(画面の検査は、補助)。
 
-## 作る流れ(段階 C)
+## 作る流れ(段階 C。設計の確定: 2026-11-18)
 
-`POST /projects/:projectId/templates/:id/apply`(Body: `{ "values": { "database": "app", "password": "…" } }`)
+### API
 
-1. テンプレートと変数を検査し、**クォータを、全体で確認**する(失敗なら、何も作らない。409 か 400)。
-2. Temporal の Workflow を開始し、`applyId` を返す(非同期)。
-3. Workflow は、`resources` を、**依存の順**(volume → deploy → service → ingress)に作る。deploy の作成、ファイル、マウント、service、ingress は、既存の仕組み(API と同じ処理)を使う。`${service.X.dns}` は、service が `active` になってから、展開する。
-4. 進み具合を、`GET /projects/:projectId/template-applies/:applyId` で返す(部品ごとに、待機中/作成中/完了/失敗)。
-5. **途中で失敗したら**: 作れたものは、**そのまま残す**(自動では消さない)。失敗した部品と理由を返す。利用者は、画面で、残りを手で直すか、消す。(自動のロールバックは、別の部品を、利用者の知らないうちに消すので、しない。)
+- `POST /projects/:projectId/templates/:templateId/apply`(Body: `{"values": {"database": "app"}}`)→ 200 `{"applyId": "...", "values": {...}}`。`values` は、自動生成を含む、**全ての変数の値**(画面が、パスワードを見せるため)。非同期。
+- `GET /projects/:projectId/template-applies/:applyId` → 進み具合。`{"applyId", "templateId", "status": "running|succeeded|failed", "values", "steps": [{"kind", "name", "status": "waiting|creating|done|failed", "resourceId", "error"}], "error", "createdAt", "updatedAt"}`。
+- 400: 変数の値が不正、404: プロジェクトかテンプレートが無い(他人のプロジェクトも)、409: プロジェクトが active でない、**クォータを超える**(作る前に、全体で確かめる)。
+
+### 流れ
+
+1. **受け付ける(API。同期)**: 変数の値を検査・補完(自動生成)→ テンプレート全体を**展開**(`${service.X.dns}` だけは、まだ決まらないので、**この実行だけの、ランダムな目印**に置き換えておく)→ クォータを、全体で確認 → **作るもの全ての ID を、先に決めて**、「計画」(展開済みの部品の一覧)として、`template_applies` に保存 → Workflow を開始 → `applyId` を返す。
+2. **作る(Workflow `ApplyTemplateWorkflow`)**: 計画の**ステップ**を、順に実行する。順番は、volume → configmap → deploy と、その service(`${service.X.dns}` の参照に従って、参照される側が先)→ ingress。
+   - **volume、configmap**: 行を作る(クォータは、既存の repository が、作るときにも確かめる)。
+   - **deploy**: 行を、**最初から、マウント(volume、configmap)とファイルを持った形**で作る → 既存の `CreateDeployWorkflow` を、子として実行して、起動(active)を待つ。起動の前に、PVC と、ファイルの ConfigMap を用意する(下の「起動前の準備」)。`PostgreSQL` の `/docker-entrypoint-initdb.d/init.sql` のように、**最初の起動から、ファイルが要る**ため、「作ってから、あとでマウント」にはしない。
+   - **service**: 行を作る → 既存の `CreateServiceWorkflow` を子として実行して active を待つ → DNS 名を読む。以降の deploy の、目印を、DNS 名に置き換える(置き換えるのは、**この実行の目印だけ**。利用者の入力に、同じ文字列があっても、置き換わらない)。
+   - **ingress**: 行を作り(ホスト名は、受け付けるときに、複数の候補を計画に入れてある。重なったら、次の候補)、ルールを pending に保存して、既存の `ApplyIngressRulesWorkflow` を子として実行する。
+3. **進み具合**: 各ステップの前後で、`template_applies.steps` を更新する(待機中 → 作成中 → 完了 / 失敗)。`status` は、全て完了で `succeeded`、1 つでも失敗で `failed`。
+4. **途中で失敗したら**: そこで止め、作れたものは、**そのまま残す**(自動では消さない)。失敗したステップと理由を返す。利用者は、残りを手で直すか、消す。
+5. **やり直しに強い**: ステップの ID は計画で決まっているので、Activity が、再実行されても、同じ行を、二重に作らない(あれば、完了として扱う)。
+
+### 起動前の準備(既存の `CreateDeployWorkflow` の拡張)
+
+deploy の起動の前に、**現在のマウント・ファイルに必要なものを、k8s に用意する**手順(`PrepareDeployDependencies`)を足す: マウントする volume の PVC、deploy のファイルの ConfigMap、configmap のマウントが使う版の ConfigMap。マウントもファイルも無い、普通の deploy では、何もしない。
+
+### 保存と秘密
+
+- 計画には、展開済みの値(env のパスワードなど)が、**平文**で入る(env と同じ扱い。`docs/templates.md` の「未決」の 1)。ログには出さない。
+- 展開は、受け付けるときに 1 回だけ。Workflow は、目印を、DNS 名に置き換えるだけ(式の評価は、無い)。
 
 ## deploy のファイル(段階 A)
 
