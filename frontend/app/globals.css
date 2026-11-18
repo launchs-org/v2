@@ -290,3 +290,17 @@ button.alog-toggle { font-family: inherit; }
 .alog-status.s0 { background: var(--panel2); color: var(--faint); }
 .alog-foot { display: flex; align-items: center; gap: 10px; padding: 12px 18px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--mut); }
 .alog-empty { padding: 28px 18px; text-align: center; color: var(--mut); font-size: 13px; }
+
+/* タスク(プロジェクトの Workflow の履歴) */
+.tasks-screen { display: flex; flex-direction: column; gap: 12px; }
+.tasks-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.alog-status.run { background: #E8F0FE; color: #1A73E8; }
+.alog-status.lost { background: var(--panel2); color: var(--faint); border: 1px dashed var(--line2); }
+.alog-status.canceled { background: var(--panel2); color: var(--mut); }
+.alog-status.ok { background: #E6F4EA; color: #137333; }
+.tasks-table tbody tr.clickable { cursor: pointer; }
+.tasks-detail td { background: var(--bg); padding: 10px 16px 14px 40px; white-space: normal; }
+.tasks-detail .reason { color: var(--bad); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.tasks-detail .meta { color: var(--faint); font-size: 12px; margin-top: 6px; }
+.tasks-detail ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tasks-detail li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }

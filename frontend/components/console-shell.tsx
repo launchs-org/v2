@@ -5,23 +5,24 @@ import useSWR from "swr"
 import { authenticatedFetcher } from "@/lib/api"
 import { usePending } from "@/lib/pending"
 import type { DeployTab, Nav, Selection, View } from "@/lib/nav"
-import type { Project, ProjectEventListResponse, ProjectListResponse, User } from "@/lib/types"
+import type { Project, ProjectEventListResponse, ProjectListResponse, ProjectTaskListResponse, User } from "@/lib/types"
 import { PendingPopover } from "@/components/pending-popover"
 import { ErrorState, LoadingState } from "@/components/ui-kit"
 import { ProjectsView } from "@/components/views/projects-view"
 import { CanvasView } from "@/components/views/canvas-view"
 import { ConfigMapsView } from "@/components/views/configmaps-view"
 import { EventsView } from "@/components/views/events-view"
+import { TasksView } from "@/components/views/tasks-view"
 import { LogsView } from "@/components/views/logs-view"
 import { SettingsView } from "@/components/views/settings-view"
 import { QuotaView } from "@/components/views/quota-view"
 import { AccountView } from "@/components/views/account-view"
 
 /** 画面の名前。 */
-const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", configmaps: "ConfigMap", events: "イベント", logs: "ログ", settings: "設定" }
+const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", configmaps: "ConfigMap", tasks: "タスク", events: "イベント", logs: "ログ", settings: "設定" }
 
 /** プロジェクトの中のタブ(上のバー)。 */
-const PROJECT_TABS: View[] = ["canvas", "configmaps", "events", "logs", "settings"]
+const PROJECT_TABS: View[] = ["canvas", "configmaps", "tasks", "events", "logs", "settings"]
 
 /** 最後に開いたプロジェクトを覚えるキー(localStorage)。 */
 const LAST_PROJECT_KEY = "launchs.lastProject"
@@ -106,7 +107,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
           )}
           <div className="tabs" role="tablist" style={{ marginLeft: 8 }}>
             {inProject
-              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}{key === "events" && project && <EventsTabBadge project={project} refreshInterval={refreshInterval} />}</button>)
+              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}{key === "events" && project && <EventsTabBadge project={project} refreshInterval={refreshInterval} />}{key === "tasks" && project && <TasksTabBadge project={project} refreshInterval={refreshInterval} />}</button>)
               : (["projects", "quota", "account"] as View[]).map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}</button>)}
           </div>
           <div className="grow" />
@@ -135,6 +136,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
         {data && !project && PROJECT_TABS.includes(view) && <div className="page"><ProjectsView projects={projects} refreshInterval={refreshInterval} onRefresh={mutate} nav={nav} search="" createTick={0} /></div>}
         {project && view === "canvas" && <CanvasView project={project} refreshInterval={refreshInterval} nav={nav} selection={selection} deployTab={deployTab} onDeployTabChange={setDeployTab} wizardOpen={wizardOpen} onWizardClose={() => setWizardOpen(false)} />}
         {project && view === "configmaps" && <div className="page"><ConfigMapsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
+        {project && view === "tasks" && <div className="page fill"><TasksView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "events" && <div className="page fill"><EventsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "logs" && <div className="page fill"><LogsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "settings" && <div className="page"><SettingsView project={project} refreshInterval={refreshInterval} nav={nav} onChanged={() => void mutate()} /></div>}
@@ -156,6 +158,17 @@ function EventsTabBadge({ project, refreshInterval }: { project: Project; refres
   const recent = (data?.events ?? []).filter((event) => new Date(event.lastSeenAt).getTime() >= since).length
   if (recent === 0) return null
   return <span className="cnt" style={{ marginLeft: 6, background: "#D9480F", color: "#fff", borderRadius: 4, font: "500 11px/1 Roboto, sans-serif", padding: "3px 6px" }} aria-label={`直近 1 時間の警告 ${recent} 件`}>{recent > 99 ? "99+" : recent}</span>
+}
+
+/** 「タスク」のタブの印。実行中があれば青、直近の失敗があれば橙の数を出す。 */
+function TasksTabBadge({ project, refreshInterval }: { project: Project; refreshInterval: number }) {
+  const { data } = useSWR<ProjectTaskListResponse>(`/api/v1/projects/${encodeURIComponent(project.projectId)}/tasks?limit=1`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true, refreshWhenHidden: false })
+  const running = data?.counts.running ?? 0
+  const failed = data?.counts.failedRecent ?? 0
+  if (running === 0 && failed === 0) return null
+  const failedFirst = failed > 0
+  const count = failedFirst ? failed : running
+  return <span className="cnt" style={{ marginLeft: 6, background: failedFirst ? "#D9480F" : "#1A73E8", color: "#fff", borderRadius: 4, font: "500 11px/1 Roboto, sans-serif", padding: "3px 6px" }} aria-label={failedFirst ? `直近 24 時間の失敗 ${failed} 件` : `実行中 ${running} 件`}>{count > 99 ? "99+" : count}</span>
 }
 
 /** 上のバーの、反映待ち(プロジェクトごとに集計する)。 */

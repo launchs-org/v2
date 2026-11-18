@@ -99,6 +99,22 @@ export type IngressDetail = {
   /** アクセスの集計(Traefik のプラグイン launchs-stats)を有効にしているか。 */
   accessStats?: boolean
 }
+/** プロジェクトのタスク(worker が記録した Workflow の履歴)。 */
+export type TaskStatus = "running" | "succeeded" | "failed" | "canceled" | "lost"
+export type ProjectTask = {
+  taskId: string
+  kind: string
+  resourceId: string
+  status: TaskStatus
+  error: string
+  startedAt: string
+  finishedAt: string | null
+  durationMs: number
+  workflowId: string
+  children?: ProjectTask[]
+}
+export type ProjectTaskListResponse = { tasks: ProjectTask[]; nextCursor: string | null; counts: { running: number; failedRecent: number } }
+
 /** アクセスログの 1 行(1 リクエスト)。 */
 export type AccessLogEntry = { time: string; method: string; url: string; status: number; durationMs: number; clientIp: string; bytes: number }
 export type AccessLogsResponse = { logs: AccessLogEntry[]; nextCursor: string | null }

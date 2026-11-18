@@ -8,6 +8,8 @@ import type {
   DeployDetail,
   DeployListItem,
   AccessLogsResponse,
+  ProjectTask,
+  ProjectTaskListResponse,
   IngressDetail,
   IngressListItem,
   Project,
@@ -269,6 +271,37 @@ function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
 
 let nextId = 1
 /**
+ * タスク(Workflow の履歴)の、見せかけのデータを作る。
+ *
+ * @param taskId 詳細のときの、タスクの ID(一覧なら undefined)。
+ * @param query クエリ(status、kind)。
+ * @returns 一覧、または、子つきの詳細。
+ */
+function mockTasks(taskId: string | undefined, query: URLSearchParams): ProjectTaskListResponse | ProjectTask {
+  // 決まったタスクを、時刻をずらして並べる(1 つは実行中、1 つは失敗)。
+  const now = Date.now()
+  const make = (index: number, kind: string, resourceId: string, status: ProjectTask["status"], seconds: number, error = ""): ProjectTask => ({
+    taskId: `task-mock-${index}`, kind, resourceId, status, error, startedAt: new Date(now - index * 90_000).toISOString(),
+    finishedAt: status === "running" ? null : new Date(now - index * 90_000 + seconds * 1000).toISOString(), durationMs: seconds * 1000, workflowId: `wf-mock-${index}`,
+  })
+  const all = [
+    make(0, "ingress_apply", "ingress-mock-1", "running", 4),
+    make(1, "template_apply", "apply-mock-1", "succeeded", 48),
+    make(2, "deploy_create", "deploy-mock-1", "failed", 300, "イメージを取得できません: ghcr.io/example/app:missing (not found)"),
+    make(3, "deploy_scale", "deploy-mock-1", "succeeded", 12),
+    make(4, "volume_resize", "volume-mock-1", "succeeded", 9),
+  ]
+  if (taskId) {
+    const found = all.find((task) => task.taskId === taskId) ?? all[0]
+    return found.kind === "template_apply" ? { ...found, children: [make(11, "deploy_create", "deploy-mock-2", "succeeded", 20), make(12, "service_create", "service-mock-2", "succeeded", 6)] } : { ...found, children: [] }
+  }
+  const status = query.get("status")
+  const kind = query.get("kind")
+  const tasks = all.filter((task) => (!status || task.status === status) && (!kind || task.kind === kind))
+  return { tasks, nextCursor: null, counts: { running: 1, failedRecent: 1 } }
+}
+
+/**
  * アクセスログの、見せかけのデータを作る(新しい順。絞り込みも効く)。
  *
  * @param query クエリ(status、method、ip、q)。
@@ -452,6 +485,8 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
         const apply = mockApplies[segments[5]]
         if (!apply) throw new Error("テンプレートの実行が見つかりません")
         result = mockApplyProgress(apply)
+      } else if (resource === "tasks" && method === "GET") {
+        result = mockTasks(segments[5], url.searchParams)
       } else if (resource === "builds" && method === "GET") result = { builds: clone(getBuildList(projectId)), nextCursor: null }
       else if (resource === "ingresses") {
         const list = getIngressList(projectId)
