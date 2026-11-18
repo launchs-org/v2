@@ -40,6 +40,7 @@ func (source *fakeSource) OpenLog(_ context.Context, podName string, _ int64) (i
 type fakeStore struct {
 	mutex   sync.Mutex
 	records []accessstats.Record
+	logged  int
 }
 
 // UpsertMinute は、集計を覚える。
@@ -47,6 +48,14 @@ func (store *fakeStore) UpsertMinute(_ context.Context, record accessstats.Recor
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 	store.records = append(store.records, record)
+	return nil
+}
+
+// InsertLogs は、記録の数を覚える。
+func (store *fakeStore) InsertLogs(_ context.Context, record accessstats.Record) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	store.logged += len(record.Requests)
 	return nil
 }
 
@@ -59,7 +68,7 @@ func (store *fakeStore) count() int {
 
 // TestManagerIngestsLines は、集計の行だけが、Pod の名前つきで保存され、他の行は無視されることを確認する。
 func TestManagerIngestsLines(testingT *testing.T) {
-	line := `LAUNCHS_STATS {"count":2,"ingressId":"ingress-a","intervalSec":60,"latency":[2,0,0,0,0,0,0,0,0,0,0],"start":"2026-11-18T09:50:00Z","status":{"2xx":2},"methods":{"GET":2},"paths":[{"key":"/","count":2}],"clients":[{"key":"1.1.1.1","count":2}],"uniqueClients":1}`
+	line := `LAUNCHS_STATS {"count":2,"ingressId":"ingress-a","intervalSec":60,"latency":[2,0,0,0,0,0,0,0,0,0,0],"start":"2026-11-18T09:50:00Z","status":{"2xx":2},"methods":{"GET":2},"requests":[{"t":1700000000000,"m":"GET","u":"/?a=1","s":200,"d":1,"ip":"1.1.1.1","b":1},{"t":1700000000001,"m":"GET","u":"/","s":200,"d":1,"ip":"1.1.1.1","b":1}],"paths":[{"key":"/","count":2}],"clients":[{"key":"1.1.1.1","count":2}],"uniqueClients":1}`
 	source := &fakeSource{pods: []string{"traefik-0"}, logs: map[string]string{"traefik-0": "普通のログ\n" + line + "\n{壊れた}\nLAUNCHS_STATS {oops\n"}, opens: map[string]int{}}
 	store := &fakeStore{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,6 +90,9 @@ func TestManagerIngestsLines(testingT *testing.T) {
 	defer store.mutex.Unlock()
 	if store.records[0].Replica != "traefik-0" || store.records[0].IngressID != "ingress-a" || store.records[0].Clients[0].Key != "1.1.1.1" {
 		testingT.Errorf("Pod の名前つきで保存されるはず: %+v", store.records[0])
+	}
+	if store.logged < 2 {
+		testingT.Errorf("1 リクエストごとの記録も保存されるはず: %d", store.logged)
 	}
 	for _, record := range store.records {
 		if record.IngressID != "ingress-a" {

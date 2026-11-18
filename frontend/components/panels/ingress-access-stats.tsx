@@ -96,14 +96,14 @@ export function IngressAccessStats({ basePath, enabled, locked, refreshInterval,
   return (
     <div className="card" style={{ overflow: "hidden" }}>
       <div className="row pad" style={{ paddingBottom: 8 }}>
-        <h2 className="h2 grow">アクセス</h2>
+        <h2 className="h2 grow">アクセスの集計</h2>
         <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
           <input type="checkbox" checked={enabled} disabled={locked} onChange={(event) => onToggle(event.target.checked)} />
-          集計する
+          記録・集計する
         </label>
       </div>
       <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 8px" }}>
-        {enabled ? "IP アドレス、パス、メソッド、応答時間を、1 分ごとに集計しています(パスの ID らしい部分は :id にまとめます)。" : "集計は止まっています。過去の集計は、保存期間の間、見られます。"}
+        {enabled ? "全てのリクエストを、アクセスログに記録し、件数、ステータス、応答時間、よく使われたパスを、集計しています(集計では、パスの ID らしい部分を :id にまとめます)。" : "記録と集計は止まっています。過去の分は、保存期間の間、見られます。"}
       </div>
       <div className="row" style={{ gap: 6, padding: "0 18px 10px" }}>
         {RANGES.map((item) => <button key={item.value} type="button" className={`chip ${range === item.value ? "on" : ""}`} onClick={() => setRange(item.value)}>{item.label}</button>)}

@@ -247,3 +247,30 @@
 - Note: `p50Ms` などは、応答時間の度数(区切り 5、10、25、50、100、250、500、1000、2500、5000 ミリ秒)からの見積もりで、その区切りの上限を返す
 - Note: `paths` は、ID らしい区間(数字、UUID、16 文字以上の 16 進)を `:id` にまとめたパス。`clients` は、`X-Real-Ip`(launchs-edge が入っていれば、本当のクライアントの IP)。どちらも上位 20 件。`ACCESS_STATS_KEEP_CLIENTS=false` では、`clients` は空
 - Note: 他のユーザーの ingress は 404
+
+### アクセスログの取得
+- Get: /projects/:projectId/ingresses/:ingressId/access-logs
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Query(全て任意)
+```json
+{"limit": 100, "cursor": "<前回の nextCursor>", "status": "5xx", "method": "POST", "ip": "203.0.113.9", "q": "token=abc"}
+```
+- Response (200)
+```json
+{
+  "logs": [
+    {"time": "2026-11-18T10:42:04.123Z", "method": "GET", "url": "/api/items/42?token=abc&sort=desc", "status": 200, "durationMs": 1.5, "clientIp": "203.0.113.9", "bytes": 234}
+  ],
+  "nextCursor": null
+}
+```
+- Note: 1 リクエストにつき 1 行。**新しい順**。`url` は、パスとクエリを、**そのまま**記録する(クエリに秘密が入るアプリでは、記録される前提で使う)。1000 バイトを超える部分は切る
+- Note: `limit` は 1〜100(既定 20)。範囲外の `limit` と不正な `cursor` は 400。`nextCursor` は、最後のページなら null
+- Note: 絞り込みは全て AND。`status` は `2xx`〜`5xx` の分類か、`404` のような数字(それ以外は 400)。`method` は大文字小文字を問わない。`ip` は完全一致。`q` は、URL に含まれる文字列(大文字小文字を問わない。`%` と `_` は、そのままの文字として探す)
+- Note: `status` が 0 のものは、ステータスを記録できなかったもの(WebSocket などの接続の切り替えと、イベントストリーム)
+- Note: 保存は、保存期間(既定 24 時間。`ACCESS_LOG_RETENTION`)と、ingress ごとの行数の上限(既定 5000。`ACCESS_LOG_MAX_ROWS`)の、どちらか早い方まで。リクエストが多いときは、プラグインが 10 秒ごとに出す記録に上限(200 件)があり、超えた分は、記録されない(集計の件数には入る)。`ACCESS_STATS_KEEP_CLIENTS=false` では `clientIp` は空
+- Note: 他のユーザーの ingress は 404
+

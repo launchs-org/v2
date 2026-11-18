@@ -90,3 +90,16 @@ func TestBuildReport(testingT *testing.T) {
 		testingT.Errorf("1 区間だけが埋まり、上位が入るはず: %d %+v", filled, report)
 	}
 }
+
+// TestParseLineRequests は、1 リクエストごとの記録の読み取り(クエリを含む URL、IP を捨てる設定、壊れた記録の除外)を確認する。
+func TestParseLineRequests(testingT *testing.T) {
+	line := `LAUNCHS_STATS {"count":2,"ingressId":"i","intervalSec":10,"latency":[2,0,0,0,0,0,0,0,0,0,0],"start":"2026-11-18T09:50:00Z","requests":[{"t":1700000000123,"m":"GET","u":"/a?token=x&y=1","s":200,"d":1.5,"ip":"1.1.1.1","b":10},{"t":0,"m":"GET","u":"/bad","s":200,"d":1,"ip":"","b":0}],"requestsDropped":3}`
+	record, parsed := ParseLine(line, true)
+	if !parsed || len(record.Requests) != 1 || record.Requests[0].URL != "/a?token=x&y=1" || record.Requests[0].ClientIP != "1.1.1.1" || record.RequestsDropped != 3 {
+		testingT.Fatalf("クエリも含めて残り、時刻の無い記録は除かれるはず: %+v", record)
+	}
+	noClients, _ := ParseLine(line, false)
+	if noClients.Requests[0].ClientIP != "" {
+		testingT.Error("IP を保存しない設定では、記録の IP も空のはず")
+	}
+}

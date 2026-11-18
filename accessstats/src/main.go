@@ -83,7 +83,7 @@ func run() error {
 		// まとめと削除は、別の goroutine で動かす。
 		workContext, stopWork := context.WithCancel(leaderContext)
 		defer stopWork()
-		go retention.NewRoller(statsRepository, statsConfig.MinuteRetention, statsConfig.HourRetention, retention.Interval, appLogger).Run(workContext)
+		go retention.NewRoller(statsRepository, statsConfig.MinuteRetention, statsConfig.HourRetention, statsConfig.LogRetention, statsConfig.LogMaxRows, retention.Interval, appLogger).Run(workContext)
 		// 収集は、リーダーでなくなる(または、止める合図)まで、動かす。
 		collector.NewManager(collector.NewKubernetesSource(clientset, statsConfig.TraefikNamespace, statsConfig.TraefikSelector), statsRepository,
 			collector.Settings{ReconcileInterval: statsConfig.ReconcileInterval, KeepClients: statsConfig.KeepClients}, appLogger).Run(workContext)

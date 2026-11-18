@@ -35,6 +35,38 @@ type Counted struct {
 	Count int64 `json:"count"`
 }
 
+const (
+	// MaxRequestEntries は、1 行に入れてよい、1 リクエストごとの記録の数の上限(プラグインと同じ)。
+	MaxRequestEntries = 200
+
+	// MaxURLLength は、保存する URL の長さの上限(バイト)。
+	MaxURLLength = 1000
+)
+
+// RequestEntry は、1 リクエストの記録(アクセスログの 1 行)。
+type RequestEntry struct {
+	// T は、リクエストを受けた時刻(Unix のミリ秒)。
+	T int64 `json:"t"`
+
+	// Method は、メソッド。
+	Method string `json:"m"`
+
+	// URL は、パスとクエリ(そのまま)。
+	URL string `json:"u"`
+
+	// Status は、ステータス(WebSocket など、記録できないものは 0)。
+	Status int `json:"s"`
+
+	// DurationMs は、応答にかかった時間(ミリ秒)。
+	DurationMs float64 `json:"d"`
+
+	// ClientIP は、クライアントの IP(分からなければ空)。
+	ClientIP string `json:"ip"`
+
+	// Bytes は、応答の大きさ(バイト)。
+	Bytes int64 `json:"b"`
+}
+
 // Record は、1 つの ingress の、ある期間の集計。
 type Record struct {
 	// IngressID は、ingress の ID。
@@ -75,6 +107,12 @@ type Record struct {
 
 	// UniqueClients は、重複を除いたクライアントの数(合算すると、重複して数えうる)。
 	UniqueClients int `json:"uniqueClients"`
+
+	// Requests は、この期間の、1 リクエストごとの記録(上限まで。集計の行には保存しない)。
+	Requests []RequestEntry `json:"requests"`
+
+	// RequestsDropped は、上限を超えて、記録しなかったリクエストの数。
+	RequestsDropped int64 `json:"requestsDropped"`
 }
 
 // wireLine は、プラグインが出す JSON の形(start が文字列)。
@@ -120,10 +158,28 @@ func ParseLine(text string, keepClients bool) (Record, bool) {
 	if record.Methods == nil {
 		record.Methods = map[string]int64{}
 	}
-	// クライアントを保存しない設定なら、捨てる。
+	// 1 リクエストごとの記録を、上限にそろえる(URL を切り、時刻の無いものは捨てる)。
+	if len(record.Requests) > MaxRequestEntries {
+		record.Requests = record.Requests[:MaxRequestEntries]
+	}
+	entries := make([]RequestEntry, 0, len(record.Requests))
+	for _, entry := range record.Requests {
+		if entry.T <= 0 || entry.Method == "" {
+			continue
+		}
+		if len(entry.URL) > MaxURLLength {
+			entry.URL = entry.URL[:MaxURLLength]
+		}
+		entries = append(entries, entry)
+	}
+	record.Requests = entries
+	// クライアントを保存しない設定なら、捨てる(記録の IP も)。
 	if !keepClients {
 		record.Clients = nil
 		record.UniqueClients = 0
+		for index := range record.Requests {
+			record.Requests[index].ClientIP = ""
+		}
 	}
 	// 上位の数を、保存する数にそろえる。
 	record.Paths = topOf(record.Paths, MinuteTopLimit)
