@@ -165,3 +165,54 @@ export type ConfigMapListItem = {
 export type ConfigMapListResponse = { configmaps: ConfigMapListItem[]; nextCursor: string | null }
 export type ConfigMapRevisionItem = { revision: number; fileCount: number; totalBytes: number; createdAt: string }
 export type ConfigMapUsage = { deployId: string; revision: number; key: string; path: string; pending: boolean }
+
+/** テンプレートの変数の型。 */
+export type TemplateVariableType = "string" | "integer" | "password" | "choice" | "boolean"
+/** テンプレートの、入力欄 1 つの定義(GET /api/v1/templates)。値は、全て、文字列で扱う。 */
+export type TemplateVariable = {
+  name: string
+  label: string
+  type: TemplateVariableType
+  /** 既定の値。自動生成の password は、常に null。 */
+  default: string | null
+  required: boolean
+  /** password を、入力が無いとき、自動で作るか。 */
+  generate: boolean
+  options: { value: string; label: string }[]
+  min: number | null
+  max: number | null
+  minLength: number | null
+  maxLength: number | null
+  pattern: string | null
+}
+/** テンプレートが、何を作るかの要約。 */
+export type TemplateSummary = { deploys: number; volumes: number; ingress: boolean; files: number; configmaps: number }
+export type Template = {
+  id: string
+  name: string
+  description: string
+  icon: string
+  category: string
+  variables: TemplateVariable[]
+  summary: TemplateSummary
+}
+export type TemplateListResponse = { templates: Template[] }
+/** テンプレートの実行の、ステップ 1 つの進み具合。 */
+export type TemplateApplyStep = {
+  kind: "volume" | "configmap" | "deploy" | "service" | "ingress"
+  name: string
+  status: "waiting" | "creating" | "done" | "failed"
+  resourceId: string
+  error: string | null
+}
+/** GET /api/v1/projects/:projectId/template-applies/:applyId(docs/endpoints/templates.md)。 */
+export type TemplateApplyProgress = {
+  applyId: string
+  templateId: string
+  status: "running" | "succeeded" | "failed"
+  values: Record<string, string>
+  steps: TemplateApplyStep[]
+  error: string | null
+  createdAt: string
+  updatedAt: string
+}
