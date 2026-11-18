@@ -28,7 +28,7 @@ const (
 	statsMiddlewareSuffix = "-stats"
 
 	// statsIntervalSeconds は、アクセスの集計を出力する間隔(秒)。
-	statsIntervalSeconds = 60
+	statsIntervalSeconds = 10
 )
 
 // ingressNamePattern は、IngressRoute の名前として受け付ける形(ingress の ID: "ingress-" + UUID v4)。

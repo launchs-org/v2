@@ -110,6 +110,9 @@ export type AccessSummary = {
   p95Ms: number
   p99Ms: number
 }
+/** アクセスログの 1 行(1 リクエスト)。 */
+export type AccessLogEntry = { time: string; method: string; url: string; status: number; durationMs: number; clientIp: string; bytes: number }
+export type AccessLogsResponse = { logs: AccessLogEntry[]; nextCursor: string | null }
 export type AccessRange = "1h" | "24h" | "7d" | "30d"
 export type AccessStatsResponse = {
   enabled: boolean
