@@ -45,13 +45,22 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。この場�
 | accessstats | Traefik のログから、アクセスログを DB に保存(リーダーは 1 つ) | **Traefik の namespace だけ**の Pod の読み取りと、ログの取得(Role) |
 | frontend | Next.js(standalone) | なし |
 
-watcher、logcollector、accessstats は、複数起動しても、advisory lock で、リーダーの 1 つだけが動く。いまは、どれも `replicas: 1`。
+watcher、logcollector、accessstats は、複数起動しても、advisory lock で、リーダーの 1 つだけが動く(残りは、待機で、リーダーが落ちたら、引き継ぐ)。
+
+## 高可用性(3 つのノード)
+- **アプリ(auth、backend、worker、watcher、logcollector、accessstats、frontend)と Temporal は、3 つずつ**動かす(`kustomization.yaml` の `replicas`。数を変えるのは、ここだけ)。`topologySpreadConstraints` で、3 つのノードに、ばらけさせる(ノードが足りないときは、偏ってもよい)。`pdb.yaml` の PodDisruptionBudget で、ノードの入れ替え(drain)のときも、最低 2 つを、動かし続ける。
+- **Temporal**: 各 Pod が、全てのサービス(frontend、history、matching、worker)を動かし、DB の `cluster_membership` で見つけ合って、1 つのクラスターになる(`broadcastAddress` は、各 Pod の IP)。1 つずつ入れ替える(RollingUpdate)。**`numHistoryShards`(512)は、最初に起動するときに決まり、後から変えられない**。
+- **PostgreSQL は、1 つのまま**。データは、Longhorn の PVC(既定の StorageClass は、3 複製)に置くので、ディスクやノードが 1 つ壊れても、データは残る。ただし、**PostgreSQL の Pod 自体は 1 つ**なので、そのノードが落ちると、別のノードで再起動するまで(数十秒〜数分)、DB が止まる。Pod を増やすだけでは、別々の DB になり、壊れる(複製の仕組みが要る)。ノードが落ちたとき、自動で別のノードに移るには、Longhorn の設定 `node-down-pod-deletion-policy` を、`delete-both-statefulset-and-deployment-pod` にする(既定の `do-nothing` では、Pod が Terminating のまま、手で消すまで、動かない)。より強い高可用性(自動フェイルオーバー)が要るなら、CloudNativePG などの、PostgreSQL のオペレーターに替える。
+- **接続数**: PostgreSQL の `max_connections` は 300(`postgres.yaml`)。アプリは、1 プロセスあたり最大 10 接続(`shared/database`)、Temporal は、Pod ごとに約 30 接続で、3 つずつ動かすと、約 250 になる。レプリカを増やすときは、`max_connections` も見直す。
 
 ## 含まれないもの
 - **バックアップ**: PostgreSQL のバックアップ(PVC のスナップショットや `pg_dump`)は、運用側で行う。
 - **TLS と DNS**: Cloudflare などで行う(このマニフェストは、HTTP の `web` の entryPoint に出す)。
 - **Traefik 自体**と、プラグインの導入([docs/ingress-plugins.md](../docs/ingress-plugins.md))。
 - **Temporal の認証**: Temporal は、クラスターの外に出さない前提で、認証を使わない(`TEMPORAL_ALLOW_NO_AUTH`)。Service(`temporal`)は ClusterIP のみ。
+
+## 実行ユーザー
+auth、backend、worker などは、`runAsUser: 65532`(distroless の nonroot)、frontend は、`runAsUser: 1000`(node)を、**数字で**指定している。イメージの `USER` は、名前(`nonroot`、`node`)で、kubelet は、名前の ID を確かめられず、`runAsNonRoot: true` だけでは、`container has runAsNonRoot and image has non-numeric user` で、起動できないため。
 
 ## 検証したこと
 - `kubectl kustomize .` で描画でき、全てのリソースが、server-side dry-run を通る。
