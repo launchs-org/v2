@@ -16,14 +16,21 @@ import (
 
 // fakeIngressWorkflowStarter は、テスト用の IngressWorkflowStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeIngressWorkflowStarter struct {
-	appliedIngressIDs []string
-	deletedIngressIDs []string
-	startError        error
+	appliedIngressIDs   []string
+	deletedIngressIDs   []string
+	reappliedIngressIDs []string
+	startError          error
 }
 
 // StartRulesApply は、ID を覚えて、決めたエラーを返す。
 func (fakeStarter *fakeIngressWorkflowStarter) StartRulesApply(_ context.Context, ingressID string) error {
 	fakeStarter.appliedIngressIDs = append(fakeStarter.appliedIngressIDs, ingressID)
+	return fakeStarter.startError
+}
+
+// StartRouteReapply は、ID を覚えて、決めたエラーを返す。
+func (fakeStarter *fakeIngressWorkflowStarter) StartRouteReapply(_ context.Context, ingressID string) error {
+	fakeStarter.reappliedIngressIDs = append(fakeStarter.reappliedIngressIDs, ingressID)
 	return fakeStarter.startError
 }
 
@@ -457,6 +464,56 @@ func TestIngressAPIDelete(testingT *testing.T) {
 		environment.database.Table("ingresses").Count(&count)
 		if count != 0 {
 			subTest.Errorf("ingress も消えるはず: %d", count)
+		}
+	})
+}
+
+// TestIngressAPIAccessStats は、アクセスの集計の切り替え(PATCH)を確認する。
+func TestIngressAPIAccessStats(testingT *testing.T) {
+	testingT.Run("作成直後は有効で、無効にできる(ルールが無ければ、IngressRoute の作り直しは開始しない)", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		_, created := environment.ownerClient.call(http.MethodGet, path, "")
+		if created["accessStats"] != true {
+			subTest.Fatalf("既定は有効のはず: %v", created)
+		}
+		statusCode, body := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":false}`)
+		if statusCode != 200 || body["accessStats"] != false {
+			subTest.Fatalf("無効になるはず: %d %v", statusCode, body)
+		}
+		_, fetched := environment.ownerClient.call(http.MethodGet, path, "")
+		if fetched["accessStats"] != false || len(environment.starter.reappliedIngressIDs) != 0 {
+			subTest.Errorf("保存され、作り直しは開始しないはず: %v %v", fetched, environment.starter.reappliedIngressIDs)
+		}
+	})
+	testingT.Run("反映済みのルールがあれば、IngressRoute の作り直しを開始する(同じ値でも)", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		environment.database.Exec("UPDATE ingresses SET rules = ? WHERE id = ?", `[{"path":"/","serviceId":"`+environment.serviceID+`","port":8080}]`, ingressID)
+		for range 2 {
+			if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":true}`); statusCode != 200 {
+				subTest.Fatalf("200 のはず: %d", statusCode)
+			}
+		}
+		if len(environment.starter.reappliedIngressIDs) != 2 {
+			subTest.Errorf("2回開始するはず: %v", environment.starter.reappliedIngressIDs)
+		}
+	})
+	testingT.Run("accessStats が無いと 400、他人は 404、反映中は 409", func(subTest *testing.T) {
+		environment := newIngressTestEnvironment(subTest)
+		ingressID := createIngress(environment)
+		path := environment.basePath + "/" + ingressID
+		if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{}`); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.otherClient.call(http.MethodPatch, path, `{"accessStats":false}`); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
+		}
+		environment.database.Exec("UPDATE ingresses SET status = 'applying' WHERE id = ?", ingressID)
+		if statusCode, _ := environment.ownerClient.call(http.MethodPatch, path, `{"accessStats":false}`); statusCode != 409 {
+			subTest.Errorf("409 のはず: %d", statusCode)
 		}
 	})
 }

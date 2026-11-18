@@ -27,6 +27,9 @@ type IngressRouteDefinition struct {
 
 	// Rules は、path ごとのルール。空のときは、IngressRoute を置かない(あれば削除する)。
 	Rules []IngressRouteRule
+
+	// AccessStats は、アクセスの集計(launchs-stats の Middleware)を付けるか。プラグインが無効な環境では、無視される。
+	AccessStats bool
 }
 
 // IngressOperator は、k8s の Traefik の IngressRoute を操作するもの。

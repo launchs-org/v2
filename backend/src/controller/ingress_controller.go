@@ -21,6 +21,13 @@ type IngressUseCase interface {
 	UpdateRules(requestContext context.Context, userID string, projectID string, ingressID string, rules []model.IngressRule) error
 	DiscardRules(requestContext context.Context, userID string, projectID string, ingressID string) error
 	ApplyRules(requestContext context.Context, userID string, projectID string, ingressID string) error
+	UpdateAccessStats(requestContext context.Context, userID string, projectID string, ingressID string, enabled bool) (model.Ingress, error)
+}
+
+// UpdateIngressAccessStatsRequest は、アクセスの集計の有効・無効の切り替えのリクエスト。
+type UpdateIngressAccessStatsRequest struct {
+	// AccessStats は、有効にするなら true(必須。省略は 400)。
+	AccessStats *bool `json:"accessStats" validate:"required"`
 }
 
 // IngressRuleRequest は、ルール1つのリクエストの形。path の書式と重複は、ユースケースで確かめる。
@@ -69,6 +76,9 @@ type IngressResponse struct {
 
 	// Status は、状態(active、applying、failed、deleting)。
 	Status string `json:"status"`
+
+	// AccessStats は、アクセスの集計(launchs-stats)が有効か。
+	AccessStats bool `json:"accessStats"`
 }
 
 // IngressSummaryResponse は、一覧に含める、ingress の概要。
@@ -301,7 +311,7 @@ func newIngressResponse(ingress model.Ingress) IngressResponse {
 			pendingRules = []IngressRuleResponse{}
 		}
 	}
-	return IngressResponse{IngressID: ingress.ID, Host: ingress.Host, Rules: rules, PendingRules: pendingRules, Status: ingress.Status}
+	return IngressResponse{IngressID: ingress.ID, Host: ingress.Host, Rules: rules, PendingRules: pendingRules, Status: ingress.Status, AccessStats: ingress.AccessStats}
 }
 
 // ingressRuleResponses は、JSON のルールの一覧を、レスポンスの形にする。読めないときは nil。
@@ -323,4 +333,30 @@ func ingressRuleResponses(raw []byte) []IngressRuleResponse {
 		responses = append(responses, IngressRuleResponse{Path: rule.Path, ServiceID: rule.ServiceID, Port: rule.Port})
 	}
 	return responses
+}
+
+// UpdateAccessStats は、PATCH /projects/:projectId/ingresses/:ingressId のハンドラー。アクセスの集計の有効・無効を切り替える。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - 更新後の ingress のレスポンス(200)。形が不正なら 400、無ければ 404、反映中・削除中なら 409。
+func (ingressController *IngressController) UpdateAccessStats(echoContext *echo.Context) error {
+	// 認証されたユーザーを取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+	// リクエストの形を確かめる。
+	var request UpdateIngressAccessStatsRequest
+	if bindError := bindAndValidate(echoContext, &request); bindError != nil {
+		return bindError
+	}
+	// 切り替える。
+	ingress, updateError := ingressController.ingressUseCase.UpdateAccessStats(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"), *request.AccessStats)
+	if updateError != nil {
+		return updateError
+	}
+	return echoContext.JSON(http.StatusOK, newIngressResponse(ingress))
 }
