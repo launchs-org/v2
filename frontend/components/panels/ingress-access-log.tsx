@@ -98,6 +98,8 @@ export function IngressAccessLog({ basePath, enabled, locked, onToggle }: { base
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [auto, setAuto] = useState(true)
+  // 絞り込みの欄を開いているか(閉じても、絞り込みの条件は効いたまま)。
+  const [filtersOpen, setFiltersOpen] = useState(true)
   // 入力中の文字は、確定(Enter か、フォーカスが外れる)してから、絞り込みに使う。
   const [applied, setApplied] = useState({ ip: "", q: "" })
   const [older, setOlder] = useState<AccessLogEntry[]>([])
@@ -114,6 +116,8 @@ export function IngressAccessLog({ basePath, enabled, locked, onToggle }: { base
   if (toIso(from)) params.set("from", toIso(from))
   if (toIso(to)) params.set("to", toIso(to))
   const filterKey = params.toString()
+  // 効いている絞り込みの数(limit を除く)。
+  const activeFilters = [...params.keys()].filter((key) => key !== "limit").length
   const { data, error, isValidating, mutate } = useSWR<AccessLogsResponse>(`${basePath}/access-logs?${filterKey}`, authenticatedFetcher, { refreshInterval: auto ? LIVE_INTERVAL_MS : 0, revalidateOnFocus: true })
 
   // 絞り込みが変わったら、続きのページは捨てる。
@@ -153,19 +157,23 @@ export function IngressAccessLog({ basePath, enabled, locked, onToggle }: { base
     <div>
       <div className="alog-head">
         <h2 className="h2">アクセスログ</h2>
+        <button type="button" className={`alog-toggle ${filtersOpen ? "on" : ""}`} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}>
+          <span aria-hidden>{filtersOpen ? "▾" : "▸"}</span>絞り込み{activeFilters > 0 ? `(${activeFilters})` : ""}
+        </button>
         <label className={`alog-toggle ${auto ? "on" : ""}`}><input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} /><span className="dot" />自動更新 5 秒</label>
         <button className="btn sm" type="button" disabled={isValidating} onClick={() => { setOlder([]); setOlderCursor(undefined); void mutate() }}>{isValidating ? "更新中…" : "↻ 更新"}</button>
         <label className={`alog-toggle ${enabled ? "on" : ""}`} title="オフにすると、新しいアクセスを記録しません"><input type="checkbox" checked={enabled} disabled={locked} onChange={(event) => onToggle(event.target.checked)} /><span className="dot" />記録する</label>
       </div>
       {!enabled && <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 10px" }}>記録は止まっています。過去の分は、保存期間の間、見られます。</div>}
-      <div className="alog-filters">
+      {filtersOpen && <div className="alog-filters">
         <label className="alog-field"><span>開始</span><input className="inp" type="datetime-local" step="1" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label className="alog-field"><span>終了</span><input className="inp" type="datetime-local" step="1" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label className="alog-field wide"><span>パス(クエリも含めて検索)</span><input className="inp mono" placeholder="/api/items" value={text} onChange={(event) => setText(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} /></label>
         <label className="alog-field"><span>IP アドレス</span><input className="inp mono" placeholder="203.0.113.9" value={clientIp} onChange={(event) => setClientIp(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} /></label>
         <label className="alog-field"><span>ステータス</span><select className="inp" value={status} onChange={(event) => setStatus(event.target.value)}>{STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
         <label className="alog-field"><span>メソッド</span><select className="inp" value={method} onChange={(event) => setMethod(event.target.value)}>{METHOD_FILTERS.map((item) => <option key={item} value={item}>{item || "全て"}</option>)}</select></label>
-      </div>
+        {activeFilters > 0 && <div className="alog-field" style={{ justifyContent: "flex-end" }}><button className="btn sm" type="button" onClick={() => { setStatus(""); setMethod(""); setClientIp(""); setText(""); setFrom(""); setTo(""); setApplied({ ip: "", q: "" }) }}>条件をクリア</button></div>}
+      </div>}
       {error && !data && <div style={{ color: "var(--bad)", fontSize: 12.5, padding: "0 18px 12px" }}>アクセスログを取得できませんでした。</div>}
       <div className="alog-wrap">
         <table className="alog-table mono">
