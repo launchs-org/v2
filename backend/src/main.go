@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"launchs/backend/src/template"
+	"launchs/templates"
 	"os"
 	"os/signal"
 	"syscall"
@@ -83,7 +85,14 @@ func run() error {
 	// 認証のミドルウェアを決める(JWKS で access token を検証する。指定が無ければ、開発用の仮の認証)。
 	authentication := newAuthentication(appLogger, backendConfig)
 
+	// 同梱のテンプレートを読み込む。1つでも不正なら、起動を止める(誤った定義を、公開しない)。
+	templateRegistry, templateError := template.Load(templates.Files)
+	if templateError != nil {
+		return fmt.Errorf("テンプレートを読み込めませんでした: %w", templateError)
+	}
+
 	echoServer := server.New(appLogger, server.Dependencies{
+		TemplateRegistry:       templateRegistry,
 		Database:               appDatabase,
 		Authentication:         authentication,
 		ProjectDeletionStarter: service.NewTemporalProjectDeletionStarter(temporalClient),

@@ -25,6 +25,9 @@ type DeployUseCase interface {
 	UpdateMounts(requestContext context.Context, userID string, deployID string, mounts []model.MountSpec) error
 	DiscardMounts(requestContext context.Context, userID string, deployID string) error
 	ApplyMounts(requestContext context.Context, userID string, deployID string) error
+	UpdateFiles(requestContext context.Context, userID string, deployID string, files []model.FileSpec) error
+	DiscardFiles(requestContext context.Context, userID string, deployID string) error
+	ApplyFiles(requestContext context.Context, userID string, deployID string) error
 	Scale(requestContext context.Context, userID string, deployID string, replicas int) error
 	Delete(requestContext context.Context, userID string, deployID string) error
 }

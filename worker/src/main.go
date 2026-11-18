@@ -163,6 +163,12 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(mountsActivities.ApplyPendingMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingMountsActivityName})
 	generalWorker.RegisterActivityWithOptions(mountsActivities.RollbackDeploymentMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentMountsActivityName})
 	generalWorker.RegisterActivityWithOptions(mountsActivities.CommitMountsResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitMountsResultActivityName})
+	// deploy のファイル(ConfigMap)の反映の Workflow と Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployFilesWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployFilesWorkflowName})
+	filesActivities := activity.NewApplyDeployFilesActivities(repository.NewDeployRepository(appDatabase), operators.deploymentOperator, operators.configMapOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(filesActivities.ApplyPendingFiles, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingFilesActivityName})
+	generalWorker.RegisterActivityWithOptions(filesActivities.RollbackDeploymentFiles, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentFilesActivityName})
+	generalWorker.RegisterActivityWithOptions(filesActivities.CommitFilesResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitFilesResultActivityName})
 
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
@@ -184,6 +190,9 @@ type clusterOperators struct {
 
 	// volumeOperator は、PVC を作る・拡張する・削除する役。
 	volumeOperator activity.VolumeOperator
+
+	// configMapOperator は、deploy のファイルの置き場(ConfigMap)を作る・削除する役。
+	configMapOperator activity.ConfigMapOperator
 
 	// ingressOperator は、Traefik の IngressRoute を作る・削除する役。
 	ingressOperator activity.IngressOperator
@@ -219,6 +228,7 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 			serviceOperator:    activity.NewLoggingServiceOperator(appLogger),
 			ingressOperator:    activity.NewLoggingIngressOperator(appLogger),
 			volumeOperator:     activity.NewLoggingVolumeOperator(appLogger),
+			configMapOperator:  activity.NewLoggingConfigMapOperator(appLogger),
 		}, nil
 	}
 	// それ以外のエラーは、起動を止める。
@@ -241,5 +251,6 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 		serviceOperator:    cluster.NewKubernetesServiceOperator(clientset),
 		ingressOperator:    ingressOperator,
 		volumeOperator:     cluster.NewKubernetesVolumeOperator(clientset, volumeSettings),
+		configMapOperator:  cluster.NewKubernetesConfigMapOperator(clientset),
 	}, nil
 }
