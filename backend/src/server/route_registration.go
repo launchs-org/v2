@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"launchs/backend/src/middlewares"
 	"launchs/backend/src/template"
 	"launchs/templates"
@@ -83,6 +84,10 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PUT("/deploy/:deployId/files", deployController.UpdateFiles)
 	apiGroup.POST("/deploy/:deployId/files/apply", deployController.ApplyFiles)
 	apiGroup.POST("/deploy/:deployId/files/discard", deployController.DiscardFiles)
+	apiGroup.GET("/deploy/:deployId/configmap-mounts", deployController.GetConfigMapMounts)
+	apiGroup.PUT("/deploy/:deployId/configmap-mounts", deployController.UpdateConfigMapMounts)
+	apiGroup.POST("/deploy/:deployId/configmap-mounts/apply", deployController.ApplyConfigMapMounts)
+	apiGroup.POST("/deploy/:deployId/configmap-mounts/discard", deployController.DiscardConfigMapMounts)
 
 	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
@@ -125,7 +130,23 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PATCH("/projects/:projectId/volumes/:volumeId/size", volumeController.UpdateSize)
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/apply", volumeController.ApplySize)
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/discard", volumeController.DiscardSize)
+
+	// ConfigMap(プロジェクトで共有する設定ファイル。docs/configmap.md)。本文は、base64 や JSON のエスケープで大きくなるので、この API だけ上限を広げる。
+	configMapController := controller.NewConfigMapController(service.NewConfigMapService(repository.NewConfigMapRepository(dependencies.Database)))
+	configMapBodyLimit := middleware.BodyLimit(configMapRequestBodyLimitBytes)
+	apiGroup.POST("/projects/:projectId/configmaps", configMapController.Create, configMapBodyLimit)
+	apiGroup.GET("/projects/:projectId/configmaps", configMapController.List)
+	apiGroup.GET("/configmaps/:configMapId", configMapController.Get)
+	apiGroup.PUT("/configmaps/:configMapId", configMapController.Replace, configMapBodyLimit)
+	apiGroup.PATCH("/configmaps/:configMapId", configMapController.Rename)
+	apiGroup.DELETE("/configmaps/:configMapId", configMapController.Delete)
+	apiGroup.GET("/configmaps/:configMapId/revisions", configMapController.ListRevisions)
+	apiGroup.GET("/configmaps/:configMapId/usage", configMapController.Usage)
 }
+
+// configMapRequestBodyLimitBytes は、ConfigMap の作成と置き換えのリクエストの本文の上限(バイト)。
+// 保存する大きさの上限は 1MiB だが、text の改行や引用符は JSON で 2 文字になるため、余裕を持たせる。
+const configMapRequestBodyLimitBytes = 3 * 1024 * 1024
 
 // defaultVolumeMaxSizeMB は、volume の大きさの上限の既定値(MB)。
 const defaultVolumeMaxSizeMB = 5120
