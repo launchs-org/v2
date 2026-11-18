@@ -116,6 +116,8 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/discard", ingressController.DiscardRules)
 	accessStatsController := controller.NewAccessStatsController(service.NewAccessStatsService(ingressRepository, repository.NewAccessStatsRepository(dependencies.Database)))
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/access-stats", accessStatsController.Get)
+	accessLogController := controller.NewAccessLogController(service.NewAccessLogService(ingressRepository, repository.NewAccessStatsRepository(dependencies.Database)))
+	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/access-logs", accessLogController.List)
 
 	// volume(プロジェクトの永続ストレージ)。
 	volumeMaxSizeMB := dependencies.VolumeMaxSizeMB

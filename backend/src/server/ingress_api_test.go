@@ -558,3 +558,53 @@ func TestIngressAPIAccessStatsReport(testingT *testing.T) {
 		}
 	})
 }
+
+// TestIngressAPIAccessLogs は、アクセスログの一覧(新しい順、クエリ文字列の保持、絞り込み、ページング、持ち主の確認)を確認する。
+func TestIngressAPIAccessLogs(testingT *testing.T) {
+	environment := newIngressTestEnvironment(testingT)
+	ingressID := createIngress(environment)
+	path := environment.basePath + "/" + ingressID + "/access-logs"
+	now := time.Now().UTC()
+	for index, row := range []struct {
+		url    string
+		status int
+	}{{"/a?token=abc", 200}, {"/b", 404}, {"/c", 500}} {
+		environment.database.Exec(`INSERT INTO ingress_access_logs (ingress_id, replica, batch_start, seq, requested_at, method, url, status, duration_ms, client_ip, bytes)
+			VALUES (?, 'traefik-0', ?, ?, ?, 'GET', ?, ?, 1.5, '203.0.113.9', 10)`, ingressID, now, index, now.Add(time.Duration(index)*time.Second), row.url, row.status)
+	}
+	testingT.Run("新しい順に返り、URL は、クエリも含めて、そのまま", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
+		logs, _ := body["logs"].([]any)
+		if statusCode != 200 || len(logs) != 3 || logs[0].(map[string]any)["url"] != "/c" || logs[2].(map[string]any)["url"] != "/a?token=abc" || body["nextCursor"] != nil {
+			subTest.Fatalf("新しい順に 3 件のはず: %d %v", statusCode, body)
+		}
+		first := logs[0].(map[string]any)
+		if first["status"] != float64(500) || first["clientIp"] != "203.0.113.9" || first["method"] != "GET" {
+			subTest.Errorf("項目が違う: %v", first)
+		}
+	})
+	testingT.Run("絞り込みとページング", func(subTest *testing.T) {
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?status=4xx", ""); len(body["logs"].([]any)) != 1 {
+			subTest.Errorf("4xx は 1 件のはず: %v", body)
+		}
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?q=token%3Dabc", ""); len(body["logs"].([]any)) != 1 {
+			subTest.Errorf("クエリ文字列でも探せるはず: %v", body)
+		}
+		_, page := environment.ownerClient.call(http.MethodGet, path+"?limit=2", "")
+		cursor, _ := page["nextCursor"].(string)
+		if len(page["logs"].([]any)) != 2 || cursor == "" {
+			subTest.Fatalf("2 件と次のカーソルのはず: %v", page)
+		}
+		if _, rest := environment.ownerClient.call(http.MethodGet, path+"?limit=2&cursor="+cursor, ""); len(rest["logs"].([]any)) != 1 || rest["nextCursor"] != nil {
+			subTest.Errorf("残り 1 件のはず: %v", rest)
+		}
+	})
+	testingT.Run("不正な status は 400、他人は 404", func(subTest *testing.T) {
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?status=abc", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.otherClient.call(http.MethodGet, path, ""); statusCode != 404 {
+			subTest.Errorf("404 のはず: %d", statusCode)
+		}
+	})
+}

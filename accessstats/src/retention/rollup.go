@@ -20,6 +20,9 @@ type Store interface {
 
 	// Prune は、保存期間を過ぎた集計を削除する。
 	Prune(requestContext context.Context, minutesCutoff time.Time, hoursCutoff time.Time) error
+
+	// PruneLogs は、保存期間を過ぎたアクセスログと、ingress ごとの行数の上限を超えた古いログを削除する。
+	PruneLogs(requestContext context.Context, cutoff time.Time, maxRowsPerIngress int) error
 }
 
 // Roller は、アクセスの集計を、定期的にまとめて、古いものを削除する。
@@ -27,6 +30,8 @@ type Roller struct {
 	store           Store
 	minuteRetention time.Duration
 	hourRetention   time.Duration
+	logRetention    time.Duration
+	logMaxRows      int
 	interval        time.Duration
 	appLogger       *slog.Logger
 	// now は、現在の時刻を返す関数(試験で差し替える)。
@@ -39,14 +44,16 @@ type Roller struct {
 //   - store: DB の操作。
 //   - minuteRetention: 1 分ごとの集計を残す期間。
 //   - hourRetention: 1 時間ごとの集計を残す期間。
+//   - logRetention: アクセスログを残す期間。
+//   - logMaxRows: ingress ごとに残すアクセスログの最大の行数。
 //   - interval: 実行の間隔。
 //   - appLogger: ログの出力先。
 //
 // 戻り値:
 //   - 作成した Roller。
-func NewRoller(store Store, minuteRetention time.Duration, hourRetention time.Duration, interval time.Duration, appLogger *slog.Logger) *Roller {
+func NewRoller(store Store, minuteRetention time.Duration, hourRetention time.Duration, logRetention time.Duration, logMaxRows int, interval time.Duration, appLogger *slog.Logger) *Roller {
 	// 値と、実際の時計を持たせて返す。
-	return &Roller{store: store, minuteRetention: minuteRetention, hourRetention: hourRetention, interval: interval, appLogger: appLogger, now: time.Now}
+	return &Roller{store: store, minuteRetention: minuteRetention, hourRetention: hourRetention, logRetention: logRetention, logMaxRows: logMaxRows, interval: interval, appLogger: appLogger, now: time.Now}
 }
 
 // Run は、始めに 1 回、そのあとは interval ごとに、まとめと削除をする。ctx が終わると戻る。
@@ -80,5 +87,8 @@ func (roller *Roller) runOnce(ctx context.Context) {
 	}
 	if pruneError := roller.store.Prune(ctx, current.Add(-roller.minuteRetention), current.Add(-roller.hourRetention)); pruneError != nil && ctx.Err() == nil {
 		roller.appLogger.Warn("古いアクセスの集計を削除できませんでした", "error", pruneError)
+	}
+	if pruneError := roller.store.PruneLogs(ctx, current.Add(-roller.logRetention), roller.logMaxRows); pruneError != nil && ctx.Err() == nil {
+		roller.appLogger.Warn("古いアクセスログを削除できませんでした", "error", pruneError)
 	}
 }

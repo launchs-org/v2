@@ -167,7 +167,7 @@ func TestKubernetesIngressOperatorStats(testingT *testing.T) {
 			subTest.Fatalf("Middleware があるはず: %v", getError)
 		}
 		settings, _, _ := unstructured.NestedMap(middleware.Object, "spec", "plugin", "launchs-stats")
-		if settings["ingressId"] != testIngressName || settings["intervalSeconds"] != int64(60) {
+		if settings["ingressId"] != testIngressName || settings["intervalSeconds"] != int64(10) {
 			subTest.Errorf("プラグインの設定が違う: %v", settings)
 		}
 		route, _ := fakeClient.Resource(testIngressRouteResource).Namespace(validNamespaceName).Get(ctx, testIngressName, metav1.GetOptions{})

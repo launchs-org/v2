@@ -224,6 +224,9 @@ services:
       ACCESS_STATS_TRAEFIK_SELECTOR: ${ACCESS_STATS_TRAEFIK_SELECTOR:-app.kubernetes.io/name=traefik}
       # false にすると、クライアントの IP を保存しない(パスとメソッドの集計だけ残る)。
       ACCESS_STATS_KEEP_CLIENTS: ${ACCESS_STATS_KEEP_CLIENTS:-true}
+      # アクセスログを残す期間と、ingress ごとの行数の上限。
+      ACCESS_LOG_RETENTION: ${ACCESS_LOG_RETENTION:-24h}
+      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-5000}
       # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
       KUBERNETES_ACCESS: none
     volumes:

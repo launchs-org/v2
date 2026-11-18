@@ -92,3 +92,28 @@ func TestEmptyConfigPassesThrough(testingT *testing.T) {
 		testingT.Error("素通しのはず")
 	}
 }
+
+// TestStatsRecordsEachRequest は、1 リクエストごとの記録(URL はクエリも含む)と、上限を超えた分の数え方を確認する。
+func TestStatsRecordsEachRequest(testingT *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusAccepted) })
+	handler, _ := New(ctx, next, &Config{IngressID: "ingress-log", IntervalSeconds: 3600}, "t")
+	request := httptest.NewRequest(http.MethodPost, "/items/42?token=abc&x=1", nil)
+	request.Header.Set("X-Real-Ip", "203.0.113.5")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	current := handler.(*Stats).collector.current
+	if len(current.requests) != 1 {
+		testingT.Fatalf("1 件のはず: %+v", current.requests)
+	}
+	entry := current.requests[0]
+	if entry.M != "POST" || entry.U != "/items/42?token=abc&x=1" || entry.S != 202 || entry.IP != "203.0.113.5" || entry.T == 0 {
+		testingT.Errorf("記録が違う: %+v", entry)
+	}
+	for range maxRequestEntries + 5 {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	}
+	if len(current.requests) != maxRequestEntries || current.requestsDropped != 6 {
+		testingT.Errorf("上限で止まり、超えた分は数えるはず: %d %d", len(current.requests), current.requestsDropped)
+	}
+}

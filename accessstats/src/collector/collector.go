@@ -48,6 +48,9 @@ type Source interface {
 type Store interface {
 	// UpsertMinute は、1 分ごとの集計を保存する(同じ行は上書きする)。
 	UpsertMinute(requestContext context.Context, record accessstats.Record) error
+
+	// InsertLogs は、1 リクエストごとの記録(アクセスログ)を保存する(同じ出力は、二重にならない)。
+	InsertLogs(requestContext context.Context, record accessstats.Record) error
 }
 
 // KubernetesSource は、k8s の API を使う Source。
@@ -248,6 +251,9 @@ func (manager *Manager) ingest(ctx context.Context, podName string, stream io.Re
 		// 保存する。失敗しても、続ける(次の間隔の行は、保存できるかもしれない)。
 		if saveError := manager.store.UpsertMinute(ctx, record); saveError != nil && ctx.Err() == nil {
 			manager.appLogger.Warn("アクセスの集計を保存できませんでした", "pod", podName, "ingress_id", record.IngressID, "error", saveError)
+		}
+		if logError := manager.store.InsertLogs(ctx, record); logError != nil && ctx.Err() == nil {
+			manager.appLogger.Warn("アクセスログを保存できませんでした", "pod", podName, "ingress_id", record.IngressID, "error", logError)
 		}
 	}
 }

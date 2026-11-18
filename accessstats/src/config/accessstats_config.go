@@ -26,6 +26,10 @@ const (
 
 	// defaultReconcileInterval は、追う Pod を決め直す間隔の既定。
 	defaultReconcileInterval = 10 * time.Second
+
+	// defaultLogRetention と defaultLogMaxRows は、アクセスログを残す期間と、ingress ごとの行数の上限の既定。
+	defaultLogRetention = 24 * time.Hour
+	defaultLogMaxRows   = 5000
 )
 
 // AccessStatsConfig は、accessstats の設定。
@@ -54,6 +58,12 @@ type AccessStatsConfig struct {
 
 	// ReconcileInterval は、追う Pod を決め直す間隔(環境変数 ACCESS_STATS_RECONCILE_INTERVAL)。
 	ReconcileInterval time.Duration
+
+	// LogRetention は、アクセスログを残す期間(環境変数 ACCESS_LOG_RETENTION。既定 24 時間)。
+	LogRetention time.Duration
+
+	// LogMaxRows は、ingress ごとに残すアクセスログの最大の行数(環境変数 ACCESS_LOG_MAX_ROWS。既定 5000)。
+	LogMaxRows int
 }
 
 // LoadAccessStatsConfig は、環境変数から、accessstats の設定を読み込む。
@@ -77,6 +87,8 @@ func LoadAccessStatsConfig(reader *sharedconfig.EnvironmentReader) (AccessStatsC
 	minuteRetention := reader.OptionalDuration("ACCESS_STATS_MINUTE_RETENTION", defaultMinuteRetention)
 	hourRetention := reader.OptionalDuration("ACCESS_STATS_HOUR_RETENTION", defaultHourRetention)
 	reconcileInterval := reader.OptionalDuration("ACCESS_STATS_RECONCILE_INTERVAL", defaultReconcileInterval)
+	logRetention := reader.OptionalDuration("ACCESS_LOG_RETENTION", defaultLogRetention)
+	logMaxRows := reader.OptionalInt("ACCESS_LOG_MAX_ROWS", defaultLogMaxRows)
 	loadError := reader.Err()
 	// ログレベルと k8s の設定を確かめる。
 	logLevel, levelError := logger.ParseLevel(logLevelText)
@@ -92,7 +104,7 @@ func LoadAccessStatsConfig(reader *sharedconfig.EnvironmentReader) (AccessStatsC
 	}
 	// 期間は、正の値でなければならない(0 以下は、全てを消す・止めるなど、危険な動きになる)。
 	for name, valid := range map[string]bool{
-		"ACCESS_STATS_MINUTE_RETENTION": minuteRetention > 0, "ACCESS_STATS_HOUR_RETENTION": hourRetention > 0, "ACCESS_STATS_RECONCILE_INTERVAL": reconcileInterval > 0,
+		"ACCESS_STATS_MINUTE_RETENTION": minuteRetention > 0, "ACCESS_STATS_HOUR_RETENTION": hourRetention > 0, "ACCESS_STATS_RECONCILE_INTERVAL": reconcileInterval > 0, "ACCESS_LOG_RETENTION": logRetention > 0, "ACCESS_LOG_MAX_ROWS": logMaxRows > 0,
 	} {
 		if !valid {
 			loadError = errors.Join(loadError, fmt.Errorf("環境変数 %s は、正の値でなければなりません", name))
@@ -104,5 +116,6 @@ func LoadAccessStatsConfig(reader *sharedconfig.EnvironmentReader) (AccessStatsC
 	return AccessStatsConfig{
 		DatabaseURL: databaseURL, LogLevel: logLevel, Kubernetes: kubernetesSettings, TraefikNamespace: traefikNamespace, TraefikSelector: traefikSelector,
 		KeepClients: keepClientsText == "true", MinuteRetention: minuteRetention, HourRetention: hourRetention, ReconcileInterval: reconcileInterval,
+		LogRetention: logRetention, LogMaxRows: logMaxRows,
 	}, nil
 }

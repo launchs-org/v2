@@ -145,3 +145,13 @@ accessstats(新しいコンテナ)──(k8s の API で、ログを読む)─�
 - 適用の前後で、既存の 3 つの ingress の応答は、同じ(200、302、200)。Cloudflare 経由の公開 URL(`fancy-gold-zebra.shconn.org` は 302、`humble-amber-sparrow.shconn.org` は 200)も、同じ。Traefik のログに、プラグインの読み込みが出て、エラーは無い。
 - **まだ**: worker の `INGRESS_STATS_PLUGIN=launchs-stats`(ingress への Middleware の付与)と、accessstats の本番での起動(`ACCESS_STATS_TRAEFIK_NAMESPACE=traefik`)。worker の RBAC に `middlewares` を足し、accessstats に、Traefik の namespace の `pods` の list と `pods/log` の get を許してから、行う。code-server の WebSocket(1006)が、直ったかの確認も、まだ。
 - 戻すとき: `helm rollback traefik 1 -n traefik`(Middleware `launchs-edge` が残っても、無害)。
+
+## 13. アクセスログ(1 リクエストごと。2026-11-18 に追加)
+「アクセスの集計」だけでは、1 つずつのリクエストが見えないため、アクセスログを足した。
+- **プラグイン**: 出力の間隔の既定を、60 秒から **10 秒**に縮め(worker が作る Middleware も 10 秒)、出力の行に、`requests`(`t` ミリ秒の時刻、`m` メソッド、`u` パスとクエリ、`s` ステータス、`d` ミリ秒、`ip`、`b` バイト)を足した。**クエリ文字列も、落とさない**。1 回の出力に入れるのは、最大 200 件(`requestsDropped` に、超えた数)。URL は 1000 バイトまで。メモリは、上限で頭打ち。
+- **保存**: `ingress_access_logs`(1 リクエストにつき 1 行)。`(ingress_id, replica, batch_start, seq)` が一意で、同じ出力を読み直しても、二重にならない。accessstats が、保存期間(`ACCESS_LOG_RETENTION`。既定 24 時間)と、ingress ごとの行数(`ACCESS_LOG_MAX_ROWS`。既定 5000)で、1 分ごとに削除する。集計の行(`ingress_access_minutes`)は、出力の間隔が短くなったので、行が増える(区間の始まりの時刻は、そろえていない。API が、1 分ごとなどに足し合わせる)。
+- **API**: `GET .../ingresses/:ingressId/access-logs`(`docs/endpoints/ingresses.md`)。
+- **画面**: ingress パネルの「アクセスログ」の表(時刻、メソッド、URL、ステータス、時間、IP、サイズ)。5 秒ごとに先頭を取り直し、ステータス・メソッド・IP・URL で絞り込み、「さらに読み込む」で古い分を読む。
+- **取りこぼし**: 反映(Middleware が付く)の前のアクセスは、記録されない。WebSocket などは、接続の開始だけ(ステータス 0)。
+- **個人情報**: URL(クエリを含む)と IP を、保存期間の間、保存する。クエリに秘密が入るアプリは、ログに残る。IP だけ止めるなら `ACCESS_STATS_KEEP_CLIENTS=false`。
+

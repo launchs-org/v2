@@ -21,6 +21,10 @@ const (
 	clientCapacity = 100
 	// topLimit は、1 回の出力に入れる、パスとクライアントの数。
 	topLimit = 50
+	// maxRequestEntries は、1 回の出力に入れる、1 リクエストごとの記録の数の上限。超えた分は、件数だけ数える。
+	maxRequestEntries = 200
+	// maxURLLength は、記録する URL(パスとクエリ)の長さの上限(バイト)。
+	maxURLLength = 1000
 	// uniqueClientCap は、重複なしのクライアントを数える上限(これを超えたら、数えるのをやめる)。
 	uniqueClientCap = 10000
 )
@@ -31,11 +35,29 @@ var latencyBounds = []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 // knownMethods は、そのまま数える HTTP メソッド。それ以外は OTHER にまとめる。
 var knownMethods = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "OPTIONS": true}
 
+// requestEntry は、1 リクエストの記録(アクセスログの 1 行)。
+type requestEntry struct {
+	// T は、リクエストを受けた時刻(Unix のミリ秒)。
+	T int64 `json:"t"`
+	// M は、メソッド。
+	M string `json:"m"`
+	// U は、URL(パスとクエリ。長すぎれば、切る)。
+	U string `json:"u"`
+	// S は、ステータス(WebSocket など、包まないものは 0)。
+	S int `json:"s"`
+	// D は、応答にかかった時間(ミリ秒)。
+	D float64 `json:"d"`
+	// IP は、クライアントの IP(分からなければ空)。
+	IP string `json:"ip"`
+	// B は、応答の大きさ(バイト)。
+	B int64 `json:"b"`
+}
+
 // Config は、プラグインの設定。
 type Config struct {
 	// IngressID は、集計の宛先の ingress の ID(必須)。
 	IngressID string `json:"ingressId,omitempty"`
-	// IntervalSeconds は、出力の間隔(秒)。既定は 60。
+	// IntervalSeconds は、出力の間隔(秒)。既定は 10。
 	IntervalSeconds int `json:"intervalSeconds,omitempty"`
 	// ClientIPHeader は、クライアントの IP を読むヘッダー。既定は X-Real-Ip。
 	ClientIPHeader string `json:"clientIPHeader,omitempty"`
@@ -44,7 +66,7 @@ type Config struct {
 // CreateConfig は、既定の設定を作る(Traefik が呼ぶ)。
 func CreateConfig() *Config {
 	// 間隔とヘッダーの既定を入れる。
-	return &Config{IntervalSeconds: 60, ClientIPHeader: "X-Real-Ip"}
+	return &Config{IntervalSeconds: 10, ClientIPHeader: "X-Real-Ip"}
 }
 
 // bucket は、1 つの間隔の集計。
@@ -60,6 +82,9 @@ type bucket struct {
 	clients    *topCounter
 	uniqueSeen map[string]struct{}
 	uniqueFull bool
+	// requests は、1 リクエストごとの記録(上限まで)。requestsDropped は、上限を超えて記録しなかった数。
+	requests        []requestEntry
+	requestsDropped int64
 }
 
 // newBucket は、空の集計を作る。
@@ -148,25 +173,27 @@ func (target *collector) flush(ingressID string) {
 func (finished *bucket) snapshot(ingressID string, interval time.Duration) map[string]any {
 	// 応答時間の区切りを、数と並べる。
 	return map[string]any{
-		"ingressId":     ingressID,
-		"start":         finished.start.UTC().Format(time.RFC3339),
-		"intervalSec":   int(interval / time.Second),
-		"count":         finished.count,
-		"status":        map[string]int64{"1xx": finished.status[0], "2xx": finished.status[1], "3xx": finished.status[2], "4xx": finished.status[3], "5xx": finished.status[4]},
-		"methods":       finished.methods,
-		"bytes":         finished.bytes,
-		"latencyBounds": latencyBounds,
-		"latency":       finished.latency,
-		"sumMs":         finished.sumMs,
-		"paths":         finished.paths.top(topLimit),
-		"clients":       finished.clients.top(topLimit),
-		"uniqueClients": len(finished.uniqueSeen),
-		"uniqueCapped":  finished.uniqueFull,
+		"ingressId":       ingressID,
+		"start":           finished.start.UTC().Format(time.RFC3339),
+		"intervalSec":     int(interval / time.Second),
+		"count":           finished.count,
+		"status":          map[string]int64{"1xx": finished.status[0], "2xx": finished.status[1], "3xx": finished.status[2], "4xx": finished.status[3], "5xx": finished.status[4]},
+		"methods":         finished.methods,
+		"bytes":           finished.bytes,
+		"latencyBounds":   latencyBounds,
+		"latency":         finished.latency,
+		"sumMs":           finished.sumMs,
+		"paths":           finished.paths.top(topLimit),
+		"clients":         finished.clients.top(topLimit),
+		"uniqueClients":   len(finished.uniqueSeen),
+		"uniqueCapped":    finished.uniqueFull,
+		"requests":        finished.requests,
+		"requestsDropped": finished.requestsDropped,
 	}
 }
 
 // record は、1 回のアクセスを集計に足す。
-func (target *collector) record(method, path, client string, status int, written int64, elapsed time.Duration) {
+func (target *collector) record(method, path, rawURL, client string, started time.Time, status int, written int64, elapsed time.Duration) {
 	// 集計は排他で触る。
 	target.mutex.Lock()
 	defer target.mutex.Unlock()
@@ -176,11 +203,12 @@ func (target *collector) record(method, path, client string, status int, written
 	if status >= 100 && status < 600 {
 		current.status[status/100-1]++
 	}
-	// メソッドは、知っているものだけ。
-	if !knownMethods[method] {
-		method = "OTHER"
+	// メソッドは、知っているものだけ(それ以外は、集計では OTHER)。
+	aggregateMethod := method
+	if !knownMethods[aggregateMethod] {
+		aggregateMethod = "OTHER"
 	}
-	current.methods[method]++
+	current.methods[aggregateMethod]++
 	current.bytes += written
 	// 応答時間を、区切りに入れる。
 	milliseconds := float64(elapsed) / float64(time.Millisecond)
@@ -193,6 +221,15 @@ func (target *collector) record(method, path, client string, status int, written
 		}
 	}
 	current.latency[slot]++
+	// 1 リクエストの記録を残す(上限を超えたら、数だけ数える)。
+	if len(current.requests) < maxRequestEntries {
+		if len(rawURL) > maxURLLength {
+			rawURL = rawURL[:maxURLLength]
+		}
+		current.requests = append(current.requests, requestEntry{T: started.UnixMilli(), M: method, U: rawURL, S: status, D: float64(int64(milliseconds*100)) / 100, IP: client, B: written})
+	} else {
+		current.requestsDropped++
+	}
 	// パスを数える。
 	current.paths.add(normalizePath(path))
 	// クライアントを数える(IP が分からなければ、数えない)。
@@ -224,7 +261,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	// 間隔とヘッダーの既定を補う。
 	seconds := config.IntervalSeconds
 	if seconds <= 0 {
-		seconds = 60
+		seconds = 10
 	}
 	header := config.ClientIPHeader
 	if header == "" {
@@ -241,20 +278,20 @@ func (stats *Stats) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// WebSocket と、イベントストリームは、包まない(Yaegi の包みが Flush を通さないため)。接続の開始だけ数える。
 	if isUpgrade(req) || strings.Contains(req.Header.Get("Accept"), "text/event-stream") {
 		stats.next.ServeHTTP(rw, req)
-		stats.safeRecord(req, client, 0, 0, time.Since(started))
+		stats.safeRecord(req, client, started, 0, 0, time.Since(started))
 		return
 	}
 	// 応答を包んで、ステータスと大きさを知る。
 	wrapped := &recorder{ResponseWriter: rw, status: http.StatusOK}
 	stats.next.ServeHTTP(wrapped, req)
-	stats.safeRecord(req, client, wrapped.status, wrapped.bytes, time.Since(started))
+	stats.safeRecord(req, client, started, wrapped.status, wrapped.bytes, time.Since(started))
 }
 
 // safeRecord は、panic を握りつぶして、集計に足す。
-func (stats *Stats) safeRecord(req *http.Request, client string, status int, written int64, elapsed time.Duration) {
+func (stats *Stats) safeRecord(req *http.Request, client string, started time.Time, status int, written int64, elapsed time.Duration) {
 	// 集計の失敗で、アクセスを止めない。
 	defer func() { _ = recover() }()
-	stats.collector.record(req.Method, req.URL.Path, client, status, written, elapsed)
+	stats.collector.record(req.Method, req.URL.Path, req.URL.RequestURI(), client, started, status, written, elapsed)
 }
 
 // clientOf は、設定のヘッダーからクライアントの IP を読む。無ければ、接続元の IP。
