@@ -3,7 +3,7 @@ package controller
 import (
 	"testing"
 
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 )
 
 // TestNewTemplateResponse は、レスポンスの組み立て(秘密の既定値を返さない、空の配列、必須かどうか)を、表形式で確認する。

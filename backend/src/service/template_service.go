@@ -1,8 +1,8 @@
 package service
 
 import (
-	"launchs/backend/src/template"
 	"launchs/shared/apperror"
+	"launchs/shared/template"
 )
 
 // TemplateService は、テンプレート(docs/templates.md)の一覧と取得の、ビジネスルールを担当する。
