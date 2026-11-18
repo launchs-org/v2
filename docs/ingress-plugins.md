@@ -94,9 +94,9 @@ accessstats(新しいコンテナ)──(k8s の API で、ログを読む)─�
 - **既存の ingress に、自動では、Middleware を足さない**(プラグインが無い Traefik で、既存のルートを壊さないため)。有効にして、次に、その ingress を反映したとき(または、切り替えたとき)に足す。
 
 ## 8. 導入(運用者がすること)
-1. プラグインのソースを、Traefik に渡す(Helm の `experimental.localPlugins` の `inlinePlugin`)。values の例を、`traefik-plugins/helm-values.example.yaml` に置く。
-2. `ports.web.http.middlewares` に、launchs-edge の Middleware を指定する(Traefik の namespace に、Middleware を 1 つ作る)。`trustedCIDRs` は、cloudflared の Pod の範囲。
-3. Traefik を再起動する(Helm の upgrade)。
+1. launchs-edge の Middleware を、Traefik の namespace に作る(`traefik-plugins/edge-middleware.example.yaml`。`trustedCIDRs` は、cloudflared の Pod の範囲)。**先に作る**(Traefik が起動するとき、entryPoint が参照する Middleware が、必要なため)。
+2. `python3 traefik-plugins/render_helm_values.py > plugins-values.json` で、Helm の values(`experimental.localPlugins` の `inlinePlugin` と、`ports.web.http.middlewares`)を作る。今の values と重ねて、`helm upgrade traefik traefik/traefik --version <今の版> -n traefik -f <今の values> -f plugins-values.json --atomic` を行う(chart の ConfigMap にソースが入り、Traefik が再起動する。失敗したら、自動で戻る)。ソースを変えたときも、同じ手順。
+3. `helm template` の差分で、変わるのが、ConfigMap(2 つ)と、Deployment の引数・マウントだけであることを、先に確かめる。
 4. worker の環境変数 `INGRESS_STATS_PLUGIN` を指定し、accessstats を起動する。
 
 ## 9. リスクと対策
@@ -133,9 +133,15 @@ accessstats(新しいコンテナ)──(k8s の API で、ログを読む)─�
 - プラットフォームで作った ingress(deploy + service + ingress、ルールの反映)が、Middleware(`<ingress の ID>-stats`)と、それを参照する IngressRoute になり、通信が、集計された。accessstats が、DB に保存し、API が、件数、ステータス、メソッド、パス(UUID と数字は `:id`、クエリは除去)、クライアントの IP を返した。
 - `PATCH` で `accessStats` を false にすると、Middleware が消えて、route の参照が外れ(通信は、200 のまま)、true に戻すと、再び付いた。
 - 確認が終わったあと、検証用のプロジェクトと namespace を、全て削除した。
-- **本番の Traefik への適用は、未実施**(あなたの判断。手順は §8 と `traefik-plugins/helm-values.example.yaml`)。code-server の WebSocket(1006)が、直ったかの確認は、本番の Traefik に、launchs-edge を入れたあと。
+- 本番の Traefik への適用は、§12。
 
 ### 運用の注意
 - 検証では、`task up:k8s` のあと、別の `docker compose run` で、環境変数(`INGRESS_STATS_PLUGIN`、`ACCESS_STATS_TRAEFIK_NAMESPACE`、`ACCESS_STATS_TRAEFIK_SELECTOR`)が、コンテナに残らないことがあった。`.env` に書く(`.env.example` に、例を置いた)か、毎回、指定する。
 - 試験用の Traefik には、Traefik の namespace 以外の Pod が、プロジェクトの namespace に入るための、NetworkPolicy(`docs/network-isolation.md`)の許可が要る。本番の Traefik は、`INGRESS_NAMESPACE` で、許可済み。
 - プラグインが入っていない Traefik に、`INGRESS_STATS_PLUGIN` を指定すると、ルートが、壊れる。必ず、先に Traefik にプラグインを入れる。
+
+## 12. 本番の Traefik への適用(2026-11-18)
+- 手順は §8。chart `traefik-42.3.2`(アプリ v3.7.17)の release `traefik`(namespace `traefik`)を、revision 1 → 2 に upgrade した(`--atomic`)。`trustedCIDRs` は `10.240.0.0/16`(Pod の範囲。cloudflared は、この中にいる。プロジェクトの namespace は、NetworkPolicy で、Traefik 以外からの通信を受けないので、他の Pod が、Cf-* を偽装して、直接つなぐことはできない)。
+- 適用の前後で、既存の 3 つの ingress の応答は、同じ(200、302、200)。Cloudflare 経由の公開 URL(`fancy-gold-zebra.shconn.org` は 302、`humble-amber-sparrow.shconn.org` は 200)も、同じ。Traefik のログに、プラグインの読み込みが出て、エラーは無い。
+- **まだ**: worker の `INGRESS_STATS_PLUGIN=launchs-stats`(ingress への Middleware の付与)と、accessstats の本番での起動(`ACCESS_STATS_TRAEFIK_NAMESPACE=traefik`)。worker の RBAC に `middlewares` を足し、accessstats に、Traefik の namespace の `pods` の list と `pods/log` の get を許してから、行う。code-server の WebSocket(1006)が、直ったかの確認も、まだ。
+- 戻すとき: `helm rollback traefik 1 -n traefik`(Middleware `launchs-edge` が残っても、無害)。
