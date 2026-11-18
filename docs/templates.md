@@ -163,6 +163,54 @@ resources:
 4. 進み具合を、`GET /projects/:projectId/template-applies/:applyId` で返す(部品ごとに、待機中/作成中/完了/失敗)。
 5. **途中で失敗したら**: 作れたものは、**そのまま残す**(自動では消さない)。失敗した部品と理由を返す。利用者は、画面で、残りを手で直すか、消す。(自動のロールバックは、別の部品を、利用者の知らないうちに消すので、しない。)
 
+## 段階 C の細部(2026-11-18 に決めた)
+
+### 進行の状態は、DB に持つ(他のリソースと同じ作り)
+
+- テーブル `template_applies`(1 回の適用につき 1 行): `id`(`apply-` + UUID)、`project_id`、`user_id`、`template_id`、`status`(`running` / `succeeded` / `failed`)、`error`(失敗の理由。成功なら空)、`created_at`、`finished_at`。
+- テーブル `template_apply_items`(部品ごとに 1 行): `apply_id`、`name`(YAML の `name`。ingress は `ingress`)、`kind`(volume / deploy / service / files / ingress)、`status`(`waiting` / `running` / `done` / `failed`)、`resource_id`(作った volume・deploy・service・ingress の ID。作る前は空)、`error`、`position`(作る順)。
+- **変数の値は、保存しない**(パスワードを、DB に、残さないため)。展開した値は、deploy の env などに、普通に入る。適用の行には、`template_id` と、変数の**名前**(値は無し)だけを、残す。
+- 保存期間は、30 日(プロジェクトを削除すると、一緒に消える)。
+
+### API
+
+- `POST /api/v1/projects/:projectId/templates/:templateId/apply`、Body `{ "values": { "database": "app", ... } }` → 200 `{ "applyId": "apply-..." }`。非同期。
+  - 検査(400): 変数の値(`ValidateValues`)、未知の変数、必須の欠け。404: テンプレートが無い、プロジェクトが無い(他人のもの)。409: プロジェクトが削除中、**クォータが足りない**(下)。
+- `GET /api/v1/projects/:projectId/template-applies/:applyId` → `{ applyId, templateId, status, error, items: [{ name, kind, status, resourceId, error }], createdAt, finishedAt }`。画面は、これをポーリングする。
+- 一覧(`GET /projects/:projectId/template-applies`)は、作らない(必要になってから)。
+
+### クォータ(事前の、まとめた確認)
+
+- 適用の受付のとき、`QuotaService` の上限と使用量から、テンプレートが作る数(deploy の数、volume の数と合計の大きさ、スペックごとの deploy の数)が、**全て収まる**ことを確かめる。収まらなければ、**何も作らず、409**(足りない項目と、数を、メッセージで返す)。
+- これは**事前の確認**で、厳密ではない(確認から、作成までの間に、他の操作で、使用量が増えることがある)。**厳密な判定は、各リソースの作成が、これまでどおり、行う**。事前の確認を通っても、途中で、作成が 409 になることがある(その場合は、下の「失敗」)。
+
+### Workflow(薄いもの)
+
+1. 適用の行と、部品の行を、**受付のときに、全部作る**(`waiting`)。
+2. 部品を、`position` の順に、1 つずつ、処理する。部品ごとに Activity:
+   - **volume**: `VolumeService.Create`(既存)。
+   - **deploy**: `DeployService.Create`(既存)→ env、command、args、mounts、files を、**既存の API と同じ処理**で、保存して、適用(`UpdateConfig` → `ApplyConfig`、`UpdateMounts` → `ApplyMounts`、`UpdateFiles` → `ApplyFiles`。**deploy が `active` になるのを、待ってから**、次の適用を行う。env、mounts、files は、1 つの Deployment の更新に、まとめたいので、deploy の作成の前に、これらの値を、deploy の行に、**直接、書く**(下の「deploy を作る方法」))。
+   - **service**: `ServiceService.Create`(既存)→ `active` を待つ。`${service.X.dns}` の値が、ここで決まる。
+   - **ingress**: `IngressService.Create` → ルールを保存 → 適用。
+3. 部品の状態を、都度、DB に書く。全部が `done` なら、`succeeded`。
+
+### deploy を作る方法(env、mounts、files を、最初から入れる)
+
+既存の `DeployService.Create` は、env が空の deploy を作り、起動する。env、mounts、files を、あとから、適用すると、deploy が、**起動 → 再起動**を、繰り返してしまう(PostgreSQL などは、初回の起動に、環境変数が要るので、**初回の起動が、失敗する**)。そのため、テンプレート用に、次の 2 つを足す。
+
+1. **`DeployService.CreateWithSettings`**(新規): deploy の行を、**env、command、args、mounts、files を、最初から、入れて**、`pending` で保存し、起動の Workflow を開始する。`DeployService.Create` は、その、設定が空のもの、として、同じ処理を使う(重複させない)。検査は、既存の更新と同じ(`ValidateFiles`、`ValidateMounts`、volume が同じプロジェクトにあること)。
+2. **起動の Workflow(`CreateDeployWorkflow`)に、「PVC と ConfigMap を用意する」Activity を足す**(namespace の用意のあと、Deployment の作成の前)。確認したところ、今の起動の Workflow は、**namespace と Deployment だけ**を作り、PVC と ConfigMap は、マウントやファイルを「適用」するときに、作っている。設定が最初から入った deploy では、これらが無いと、Pod が、起動できない。マウントやファイルが、空の deploy では、何もしない(既存の deploy の作成は、変わらない)。この Activity は、マウントの適用の `ensureClaims` と、ファイルの適用の ConfigMap の作成を、**共通の関数にして**、使い回す。
+
+### 失敗したとき
+
+- 部品が失敗したら、その部品を `failed`、適用を `failed`(`error` に理由)にして、**止まる**。残りの部品は、`waiting` のまま。
+- **作れた部品は、残す(自動では消さない)**。画面に、「ここまでは、できています。失敗した理由は、…」と出し、利用者が、手で、直すか、消す。
+- 失敗の理由は、API のエラーのメッセージ(「deploy の数が、上限を超えます」など)を、そのまま、入れる。パスワードなどの値は、含めない(エラーのメッセージに、値を、入れない)。
+
+### 二重の実行を、避ける
+
+- 同じプロジェクトで、同じテンプレートの適用が、`running` のとき、もう一度の受付は、409(連打で、二重に作らないため)。
+
 ## deploy のファイル(段階 A)
 
 - モデル: deploy に `files`(`[{ path, content }]`、JSON の列)と、`pending_files` を持たせる。env、command、args、mounts と同じ「pending → 適用」。
