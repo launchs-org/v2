@@ -48,12 +48,30 @@ export type DeployConfig = {
   args: string[] | null
   pending_args: string[] | null
 }
+/** deploy が、共有の ConfigMap の 1 ファイルを、1 つの path にマウントする指定(docs/endpoints/deploys.md)。 */
+export type ConfigMapMount = {
+  configMapId: string
+  /** 固定している版。保存するとき、省略(0)なら、サーバーが決める。 */
+  revision: number
+  key: string
+  path: string
+  /** 権限(8 進数 4 桁の文字列)。 */
+  mode: string
+  /** ConfigMap の名前(GET .../configmap-mounts だけ)。 */
+  configMapName?: string
+  /** ConfigMap の今の最新の版(GET .../configmap-mounts だけ)。 */
+  latestRevision?: number
+}
+export type ConfigMapMountsState = { mounts: ConfigMapMount[]; pending_mounts: ConfigMapMount[] | null }
+
 export type DeployDetail = DeployListItem & {
   projectId: string
   pods: PodInfo[]
   logPods: LogPodInfo[]
   config: DeployConfig
   volumes: { mounts: MountItem[]; pending_mounts: MountItem[] | null }
+  /** 共有の ConfigMap のマウント(名前と最新の版は含まない)。 */
+  configmapMounts?: ConfigMapMountsState
   service: ServiceInfo | null
 }
 export type DeployLogsResponse = { logs: string; nextSince: number }
@@ -116,3 +134,34 @@ export type ProjectEvent = {
   lastSeenAt: string
 }
 export type ProjectEventListResponse = { events: ProjectEvent[]; nextCursor: string | null }
+
+/** ConfigMap のファイル 1 つ。encoding が text なら内容はそのままの文字列、base64 なら base64 の文字列。 */
+export type ConfigMapFile = { key: string; encoding: "text" | "base64"; content: string }
+/** 取得のレスポンスのファイル(size は、元のバイト数)。 */
+export type ConfigMapFileView = ConfigMapFile & { size: number }
+/** GET /api/v1/configmaps/:configMapId(docs/endpoints/configmaps.md)。 */
+export type ConfigMapDetail = {
+  configMapId: string
+  projectId: string
+  name: string
+  currentRevision: number
+  /** files が、どの版の中身か。 */
+  revision: number
+  files: ConfigMapFileView[]
+  createdAt: string
+  updatedAt: string
+}
+export type ConfigMapListItem = {
+  configMapId: string
+  name: string
+  currentRevision: number
+  fileCount: number
+  /** 保存する大きさの合計(バイト)。 */
+  totalBytes: number
+  /** 使っている deploy の数(pending も含む)。 */
+  usedBy: number
+  updatedAt: string
+}
+export type ConfigMapListResponse = { configmaps: ConfigMapListItem[]; nextCursor: string | null }
+export type ConfigMapRevisionItem = { revision: number; fileCount: number; totalBytes: number; createdAt: string }
+export type ConfigMapUsage = { deployId: string; revision: number; key: string; path: string; pending: boolean }
