@@ -1,4 +1,7 @@
 import type {
+  Template,
+  TemplateApplyProgress,
+  TemplateApplyStep,
   BuildListItem,
   ConfigMapFile,
   ConfigMapMount,
@@ -197,6 +200,72 @@ function checkConfigMapFiles(input: unknown): ConfigMapFile[] {
   return files.sort((left, right) => left.key.localeCompare(right.key))
 }
 
+/** モックのテンプレート(API の形)。steps は、作る部品(モックで、実際に作る内容も持つ)。 */
+type MockTemplate = Template & { steps: { kind: TemplateApplyStep["kind"]; name: string; image?: string; spec?: "small" | "medium" | "large"; sizeMB?: number }[] }
+const passwordVariable = { name: "password", label: "パスワード", type: "password" as const, default: null, required: false, generate: true, options: [], min: null, max: null, minLength: null, maxLength: null, pattern: null }
+const mockTemplates: MockTemplate[] = [
+  {
+    id: "postgres", name: "PostgreSQL", description: "データベース(PostgreSQL 16)。データはボリュームに保存され、設定ファイルは ConfigMap で編集できます。", icon: "database", category: "database",
+    summary: { deploys: 1, volumes: 1, ingress: false, files: 1, configmaps: 1 },
+    variables: [
+      { name: "database", label: "データベース名", type: "string", default: "app", required: false, generate: false, options: [], min: null, max: null, minLength: null, maxLength: null, pattern: "^[a-z][a-z0-9_]{0,30}$" },
+      passwordVariable,
+      { name: "storage", label: "ボリュームの大きさ(MB)", type: "integer", default: "1024", required: false, generate: false, options: [], min: 256, max: 5120, minLength: null, maxLength: null, pattern: null },
+      { name: "log_statement", label: "SQL のログ", type: "choice", default: "none", required: false, generate: false, options: [{ value: "none", label: "出さない" }, { value: "ddl", label: "定義の変更だけ" }, { value: "all", label: "全て" }], min: null, max: null, minLength: null, maxLength: null, pattern: null },
+    ],
+    steps: [{ kind: "volume", name: "data", sizeMB: 1024 }, { kind: "configmap", name: "pgconf" }, { kind: "deploy", name: "db", image: "postgres:16", spec: "medium" }, { kind: "service", name: "db" }],
+  },
+  {
+    id: "nginx", name: "nginx(静的なページ)", description: "nginx で、簡単なページを公開します。設定ファイルとページは、ConfigMap で管理され、あとから編集できます。", icon: "globe", category: "web",
+    summary: { deploys: 1, volumes: 0, ingress: true, files: 0, configmaps: 1 },
+    variables: [
+      { name: "title", label: "ページの題", type: "string", default: "Hello, Launchs!", required: false, generate: false, options: [], min: null, max: null, minLength: null, maxLength: 100, pattern: null },
+      { name: "gzip", label: "圧縮(gzip)", type: "choice", default: "on", required: false, generate: false, options: [{ value: "on", label: "有効" }, { value: "off", label: "無効" }], min: null, max: null, minLength: null, maxLength: null, pattern: null },
+    ],
+    steps: [{ kind: "configmap", name: "site" }, { kind: "deploy", name: "web", image: "nginx:alpine", spec: "small" }, { kind: "service", name: "web" }, { kind: "ingress", name: "ingress" }],
+  },
+  {
+    id: "wordpress", name: "WordPress", description: "ブログ・サイトを作れる WordPress。データベース(MariaDB)と、アップロードしたファイルは、ボリュームに保存されます。", icon: "globe", category: "web",
+    summary: { deploys: 2, volumes: 2, ingress: true, files: 0, configmaps: 0 },
+    variables: [
+      { ...passwordVariable, name: "db_password", label: "データベースのパスワード" },
+      { name: "db_storage", label: "データベースの大きさ(MB)", type: "integer", default: "1024", required: false, generate: false, options: [], min: 256, max: 5120, minLength: null, maxLength: null, pattern: null },
+    ],
+    steps: [{ kind: "volume", name: "dbdata", sizeMB: 1024 }, { kind: "volume", name: "content", sizeMB: 1024 }, { kind: "deploy", name: "db", image: "mariadb:11", spec: "medium" }, { kind: "service", name: "db" }, { kind: "deploy", name: "web", image: "wordpress:6", spec: "medium" }, { kind: "service", name: "web" }, { kind: "ingress", name: "ingress" }],
+  },
+]
+/** モックの、テンプレートの実行(開始時刻から、進み具合を計算する。1 ステップ 1.2 秒)。 */
+type MockApply = { applyId: string; projectId: string; template: MockTemplate; values: Record<string, string>; startedAt: number; created: boolean }
+const mockApplies: Record<string, MockApply> = {}
+const MOCK_STEP_MS = 1200
+
+/** モックの実行の、いまの進み具合を作る。全て終わったら、プロジェクトに、部品を実際に足す(1 回だけ)。 */
+function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
+  const elapsed = Date.now() - apply.startedAt
+  const steps: TemplateApplyStep[] = apply.template.steps.map((step, index) => ({
+    kind: step.kind, name: step.name, resourceId: elapsed >= index * MOCK_STEP_MS ? `${step.kind}_${apply.applyId}_${index}` : "",
+    status: elapsed >= (index + 1) * MOCK_STEP_MS ? "done" : elapsed >= index * MOCK_STEP_MS ? "creating" : "waiting", error: null,
+  }))
+  const finished = steps.every((step) => step.status === "done")
+  if (finished && !apply.created) {
+    apply.created = true
+    for (const step of apply.template.steps) {
+      if (step.kind === "volume") getVolumeList(apply.projectId).unshift({ volumeId: newId("vol"), name: `${apply.template.id}-${step.name}`, status: "active", sizeMB: step.sizeMB ?? 1024, pending_sizeMB: null, createdAt: now() })
+      if (step.kind === "ingress") getIngressList(apply.projectId).unshift({ ingressId: newId("ing"), host: `${apply.template.id}-demo.launchs.dev`, rules: [], pending_rules: null, status: "active" })
+      if (step.kind === "deploy") {
+        const deployId = newId("dep")
+        const deploy: DeployDetail = {
+          projectId: apply.projectId, deployId, status: "active", spec: step.spec ?? "small", replicas: 1, imageRef: step.image ?? "example", createdAt: now(), pods: [], logPods: [],
+          config: { env: {}, pending_env: null, command: null, pending_command: null, args: null, pending_args: null }, volumes: { mounts: [], pending_mounts: null }, service: null,
+        }
+        makePods(deploy)
+        deployDetails[deployId] = deploy
+      }
+    }
+  }
+  return { applyId: apply.applyId, templateId: apply.template.id, status: finished ? "succeeded" : "running", values: apply.values, steps, error: null, createdAt: new Date(apply.startedAt).toISOString(), updatedAt: now() }
+}
+
 let nextId = 1
 const newId = (prefix: string) => `${prefix}_${nextId++}_${Math.random().toString(36).slice(2, 7)}`
 const clone = <T,>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T
@@ -263,6 +332,12 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
         volumeTotalMB: { used: volumeUsed, limit: 102400 },
         specs: { small: { used: 3, limit: 20 }, medium: { used: 1, limit: 10 }, large: { used: 0, limit: 4 } },
       }
+    } else if (segments[2] === "templates") {
+      if (segments[3]) {
+        const found = mockTemplates.find((template) => template.id === segments[3])
+        if (!found) throw new Error("テンプレートが見つかりません")
+        result = (({ steps: _steps, ...template }) => template)(found)
+      } else result = { templates: mockTemplates.map(({ steps: _steps, ...template }) => template) }
     } else if (segments[2] === "projects") {
       const projectId = segments[3]
       const resource = segments[4]
@@ -331,6 +406,25 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           configMapsById[item.configMapId] = item
           result = configMapView(item)
         }
+      } else if (resource === "templates" && segments[6] === "apply" && method === "POST") {
+        const found = mockTemplates.find((template) => template.id === segments[5])
+        if (!found) throw new Error("テンプレートが見つかりません")
+        // 入力を検査して(整数の範囲)、補う(自動生成の password は、英数字 24 文字)。
+        const input = (payload.values ?? {}) as Record<string, string>
+        const values: Record<string, string> = {}
+        for (const variable of found.variables) {
+          let value = input[variable.name] ?? ""
+          if (value === "") value = variable.type === "password" && variable.generate ? Array.from({ length: 24 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"[Math.floor(Math.random() * 57)]).join("") : variable.default ?? ""
+          if (variable.type === "integer" && (!/^\d+$/.test(value) || (variable.min !== null && Number(value) < variable.min) || (variable.max !== null && Number(value) > variable.max))) throw new Error(`${variable.label}(${variable.name}): ${variable.min}〜${variable.max} の整数で入力してください`)
+          values[variable.name] = value
+        }
+        const applyId = newId("apply")
+        mockApplies[applyId] = { applyId, projectId, template: found, values, startedAt: Date.now(), created: false }
+        result = { applyId, values }
+      } else if (resource === "template-applies" && method === "GET") {
+        const apply = mockApplies[segments[5]]
+        if (!apply) throw new Error("テンプレートの実行が見つかりません")
+        result = mockApplyProgress(apply)
       } else if (resource === "builds" && method === "GET") result = { builds: clone(getBuildList(projectId)), nextCursor: null }
       else if (resource === "ingresses") {
         const list = getIngressList(projectId)
