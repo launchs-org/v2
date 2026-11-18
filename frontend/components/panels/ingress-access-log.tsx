@@ -22,17 +22,26 @@ const STATUS_FILTERS = [
 const METHOD_FILTERS = ["", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 /**
- * ステータスの色(2xx は通常、3xx は控えめ、4xx は注意、5xx は警告)。
+ * ステータスの表示用のクラス名(2xx は緑、3xx は灰、4xx は橙、5xx は赤、0 は記録なし)。
  *
  * @param status ステータス(0 は、記録できなかったもの)。
- * @returns CSS の色。
+ * @returns CSS のクラス名の後半。
  */
-function statusColor(status: number): string {
+function statusClass(status: number): string {
   // 百の位で決める。
-  if (status >= 500) return "var(--bad)"
-  if (status >= 400) return "var(--warn, #b7791f)"
-  if (status >= 300) return "var(--mut)"
-  return "inherit"
+  return status >= 100 ? `s${Math.floor(status / 100)}` : "s0"
+}
+
+/**
+ * URL を、パスとクエリに分ける(クエリは、薄く表示するため)。
+ *
+ * @param url パスとクエリ。
+ * @returns パスと、「?」から始まるクエリ(無ければ空)。
+ */
+function splitUrl(url: string): { path: string; query: string } {
+  // 最初の「?」で分ける。
+  const index = url.indexOf("?")
+  return index < 0 ? { path: url, query: "" } : { path: url.slice(0, index), query: url.slice(index) }
 }
 
 /**
@@ -142,52 +151,53 @@ export function IngressAccessLog({ basePath, enabled, locked, onToggle }: { base
 
   return (
     <div>
-      <div className="row pad" style={{ paddingBottom: 8, gap: 10, flexWrap: "wrap" }}>
-        <h2 className="h2 grow">アクセスログ</h2>
-        <label className="row" style={{ gap: 6, fontSize: 12.5 }}><input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} />自動更新(5 秒)</label>
-        <button className="btn sm" type="button" disabled={isValidating} onClick={() => { setOlder([]); setOlderCursor(undefined); void mutate() }}>{isValidating ? "更新中…" : "更新"}</button>
-        <label className="row" style={{ gap: 6, fontSize: 12.5 }}><input type="checkbox" checked={enabled} disabled={locked} onChange={(event) => onToggle(event.target.checked)} />記録する</label>
+      <div className="alog-head">
+        <h2 className="h2">アクセスログ</h2>
+        <label className={`alog-toggle ${auto ? "on" : ""}`}><input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} /><span className="dot" />自動更新 5 秒</label>
+        <button className="btn sm" type="button" disabled={isValidating} onClick={() => { setOlder([]); setOlderCursor(undefined); void mutate() }}>{isValidating ? "更新中…" : "↻ 更新"}</button>
+        <label className={`alog-toggle ${enabled ? "on" : ""}`} title="オフにすると、新しいアクセスを記録しません"><input type="checkbox" checked={enabled} disabled={locked} onChange={(event) => onToggle(event.target.checked)} /><span className="dot" />記録する</label>
       </div>
-      {!enabled && <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 8px" }}>記録は止まっています。過去の分は、保存期間の間、見られます。</div>}
-      <div className="row" style={{ gap: 8, padding: "0 18px 10px", flexWrap: "wrap" }}>
-        <input className="inp" type="datetime-local" step="1" value={from} onChange={(event) => setFrom(event.target.value)} aria-label="開始の日時" title="開始の日時" />
-        <span className="mut">〜</span>
-        <input className="inp" type="datetime-local" step="1" value={to} onChange={(event) => setTo(event.target.value)} aria-label="終了の日時" title="終了の日時" />
-        <input className="inp mono" style={{ flex: 1, minWidth: 160 }} placeholder="パス(URL に含まれる文字。クエリも)" value={text} onChange={(event) => setText(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} aria-label="パス" />
-        <input className="inp mono" style={{ width: 150 }} placeholder="IP アドレス" value={clientIp} onChange={(event) => setClientIp(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} aria-label="IP アドレス" />
-        <select className="inp" value={status} onChange={(event) => setStatus(event.target.value)} aria-label="ステータス">{STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-        <select className="inp" value={method} onChange={(event) => setMethod(event.target.value)} aria-label="メソッド">{METHOD_FILTERS.map((item) => <option key={item} value={item}>{item || "全てのメソッド"}</option>)}</select>
+      {!enabled && <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 10px" }}>記録は止まっています。過去の分は、保存期間の間、見られます。</div>}
+      <div className="alog-filters">
+        <label className="alog-field"><span>開始</span><input className="inp" type="datetime-local" step="1" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+        <label className="alog-field"><span>終了</span><input className="inp" type="datetime-local" step="1" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <label className="alog-field wide"><span>パス(クエリも含めて検索)</span><input className="inp mono" placeholder="/api/items" value={text} onChange={(event) => setText(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} /></label>
+        <label className="alog-field"><span>IP アドレス</span><input className="inp mono" placeholder="203.0.113.9" value={clientIp} onChange={(event) => setClientIp(event.target.value)} onBlur={applyText} onKeyDown={(event) => { if (event.key === "Enter") applyText() }} /></label>
+        <label className="alog-field"><span>ステータス</span><select className="inp" value={status} onChange={(event) => setStatus(event.target.value)}>{STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+        <label className="alog-field"><span>メソッド</span><select className="inp" value={method} onChange={(event) => setMethod(event.target.value)}>{METHOD_FILTERS.map((item) => <option key={item} value={item}>{item || "全て"}</option>)}</select></label>
       </div>
-      {error && <div style={{ color: "var(--bad)", fontSize: 12.5, padding: "0 18px 12px" }}>アクセスログを取得できませんでした。</div>}
-      <div style={{ overflowX: "auto" }}>
-        <table className="mono" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, whiteSpace: "nowrap" }}>
+      {error && !data && <div style={{ color: "var(--bad)", fontSize: 12.5, padding: "0 18px 12px" }}>アクセスログを取得できませんでした。</div>}
+      <div className="alog-wrap">
+        <table className="alog-table mono">
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--mut)" }}>
-              {["日時", "メソッド", "パス", "ステータス", "時間", "IP", "サイズ"].map((label) => <th key={label} style={{ padding: "6px 10px", fontWeight: 500, borderBottom: "1px solid var(--line2)" }}>{label}</th>)}
+            <tr>
+              <th>日時</th><th>メソッド</th><th>パス</th><th>ステータス</th><th className="num">時間</th><th>IP</th><th className="num">サイズ</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((entry, index) => (
-              <tr key={`${entry.time}-${index}`} style={{ borderBottom: "1px solid var(--line2)" }}>
-                <td style={{ padding: "5px 10px" }} title={new Date(entry.time).toLocaleString("ja-JP")}>{formatTime(entry.time)}</td>
-                <td style={{ padding: "5px 10px" }}>{entry.method}</td>
-                <td style={{ padding: "5px 10px", maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis" }} title={entry.url}>{entry.url}</td>
-                <td style={{ padding: "5px 10px", color: statusColor(entry.status) }}>{entry.status || "—"}</td>
-                <td style={{ padding: "5px 10px" }}>{entry.durationMs.toFixed(1)} ms</td>
-                <td style={{ padding: "5px 10px" }}>{entry.clientIp || "—"}</td>
-                <td style={{ padding: "5px 10px" }}>{formatBytes(entry.bytes)}</td>
-              </tr>
-            ))}
+            {rows.map((entry, index) => {
+              const { path: urlPath, query } = splitUrl(entry.url)
+              return (
+                <tr key={`${entry.time}-${index}`}>
+                  <td title={new Date(entry.time).toLocaleString("ja-JP")}>{formatTime(entry.time)}</td>
+                  <td><span className="alog-method">{entry.method}</span></td>
+                  <td className="alog-url" title={entry.url}>{urlPath}<span className="q">{query}</span></td>
+                  <td><span className={`alog-status ${statusClass(entry.status)}`}>{entry.status || "—"}</span></td>
+                  <td className="num">{entry.durationMs.toFixed(1)} ms</td>
+                  <td>{entry.clientIp || "—"}</td>
+                  <td className="num">{formatBytes(entry.bytes)}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
+        {data && rows.length === 0 && <div className="alog-empty">該当するアクセスログがありません(記録を有効にしたあとのアクセスだけが残ります)。</div>}
       </div>
-      {data && rows.length === 0 && <div className="mut" style={{ fontSize: 12.5, padding: "12px 18px" }}>該当するアクセスログがありません(記録を有効にしたあとのアクセスだけが残ります)。</div>}
-      {(nextCursor || moreError) && (
-        <div className="row" style={{ padding: "10px 18px 14px", gap: 10 }}>
-          {nextCursor && <button className="btn sm" type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "読み込み中…" : "さらに読み込む"}</button>}
-          {moreError && <span style={{ color: "var(--bad)", fontSize: 12.5 }}>{moreError}</span>}
-        </div>
-      )}
+      <div className="alog-foot">
+        <span>{rows.length} 件を表示{nextCursor ? "(さらに古いログがあります)" : ""}</span>
+        {nextCursor && <button className="btn sm" type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "読み込み中…" : "さらに読み込む"}</button>}
+        {moreError && <span style={{ color: "var(--bad)" }}>{moreError}</span>}
+      </div>
     </div>
   )
 }
