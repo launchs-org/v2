@@ -31,6 +31,10 @@ const (
 
 	// containerName は、deploy の Pod の中の、ユーザーのコンテナの名前。
 	containerName = k8s.AppContainerName
+
+	// filesVolumeName は、deploy のファイル(ConfigMap)を、Pod のボリュームとして付けるときの名前。
+	// PVC のボリューム(名前は volume の ID: "volume-…")と、ぶつからない名前にする。
+	filesVolumeName = "files"
 )
 
 // deploymentNamePattern は、削除してよい Deployment の名前の形("deploy-" + UUID v4)。
@@ -177,6 +181,11 @@ func (operator *KubernetesDeploymentOperator) DeleteDeployment(requestContext co
 	if deleteError != nil && !apierrors.IsNotFound(deleteError) {
 		return fmt.Errorf("Deployment %s を削除できませんでした: %w", deploymentName, deleteError)
 	}
+	// deploy のファイル(ConfigMap。名前は deploy の ID)も、一緒に消す(namespace は残るので、ここで消さないと、残ってしまう)。無ければ、何もしない。
+	configMapError := operator.clientset.CoreV1().ConfigMaps(namespaceName).Delete(requestContext, deploymentName, metav1.DeleteOptions{})
+	if configMapError != nil && !apierrors.IsNotFound(configMapError) {
+		return fmt.Errorf("ConfigMap %s を削除できませんでした: %w", deploymentName, configMapError)
+	}
 	return nil
 }
 
@@ -298,6 +307,18 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		})
 		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: mount.ClaimName, MountPath: mount.MountPath})
 	}
+	// ファイルがあれば、ConfigMap を、1 つのボリュームとして足し、ファイルごとに、subPath でマウントする(ボリュームのマウントと、共存できる)。
+	if len(definition.Files) > 0 {
+		items := make([]corev1.KeyToPath, 0, len(definition.Files))
+		for _, file := range definition.Files {
+			items = append(items, corev1.KeyToPath{Key: file.Key, Path: file.Key})
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: filesVolumeName, MountPath: file.Path, SubPath: file.Key, ReadOnly: true})
+		}
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name:         filesVolumeName,
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: definition.Name}, Items: items, DefaultMode: int32Pointer(0o644)}},
+		})
+	}
 	if operator.runtimeClassName != "" {
 		podSpec.RuntimeClassName = &operator.runtimeClassName
 	}
@@ -306,7 +327,8 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 	replicas := definition.Replicas
 	// ボリュームを持つときは、古い Pod を止めてから、新しい Pod を起動する(RWO の PVC は、古い Pod が持ったままだと、別のノードの新しい Pod が使えないため)。
 	strategy := appsv1.DeploymentStrategy{}
-	if len(definition.Mounts) > 0 {
+	// ファイルを持つときも、同じ方式にする(subPath のマウントは、ConfigMap を更新しても、動いている Pod には反映されない。Pod を作り直して、確実に反映する)。
+	if len(definition.Mounts) > 0 || len(definition.Files) > 0 {
 		strategy.Type = appsv1.RecreateDeploymentStrategyType
 	}
 	return &appsv1.Deployment{
@@ -321,6 +343,18 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 			},
 		},
 	}
+}
+
+// int32Pointer は、int32 値へのポインタを返す(k8s の型が、ポインタで受け取るため)。
+//
+// 引数:
+//   - value: 値。
+//
+// 戻り値:
+//   - 値へのポインタ。
+func int32Pointer(value int32) *int32 {
+	// 引数のコピーのアドレスを返す。
+	return &value
 }
 
 // boolPointer は、bool 値へのポインタを返す(k8s の型が、ポインタで受け取るため)。

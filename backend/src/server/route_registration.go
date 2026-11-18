@@ -3,6 +3,8 @@ package server
 import (
 	"github.com/labstack/echo/v5"
 	"launchs/backend/src/middlewares"
+	"launchs/backend/src/template"
+	"launchs/templates"
 
 	"launchs/backend/src/controller"
 	"launchs/backend/src/service"
@@ -50,6 +52,18 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService, service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy", deployController.Create)
 	apiGroup.GET("/projects/:projectId/deploys", deployController.ListByProject)
+	// テンプレート(同梱の YAML を、起動時に読み込んだもの)の一覧と取得。データベースには触らない。
+	templateRegistry := dependencies.TemplateRegistry
+	if templateRegistry == nil {
+		loaded, loadError := template.Load(templates.Files)
+		if loadError != nil {
+			panic("同梱のテンプレートを読み込めません: " + loadError.Error())
+		}
+		templateRegistry = loaded
+	}
+	templateController := controller.NewTemplateController(service.NewTemplateService(templateRegistry))
+	apiGroup.GET("/templates", templateController.List)
+	apiGroup.GET("/templates/:templateId", templateController.Get)
 	// プロジェクトの namespace の k8s の Event の一覧(watcher が、DB に保存したものを読む)。
 	eventController := controller.NewProjectEventController(service.NewProjectEventService(repository.NewProjectEventRepository(dependencies.Database)))
 	apiGroup.GET("/projects/:projectId/events", eventController.List)
@@ -65,6 +79,10 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PUT("/deploy/:deployId/mounts", deployController.UpdateMounts)
 	apiGroup.POST("/deploy/:deployId/mounts/apply", deployController.ApplyMounts)
 	apiGroup.POST("/deploy/:deployId/mounts/discard", deployController.DiscardMounts)
+	apiGroup.GET("/deploy/:deployId/files", deployController.GetFiles)
+	apiGroup.PUT("/deploy/:deployId/files", deployController.UpdateFiles)
+	apiGroup.POST("/deploy/:deployId/files/apply", deployController.ApplyFiles)
+	apiGroup.POST("/deploy/:deployId/files/discard", deployController.DiscardFiles)
 
 	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
