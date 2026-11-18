@@ -1,9 +1,301 @@
 services:
+  # API サーバー。ホストには公開せず、コンテナネットワークの中だけに置く。入り口は nginx。
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/dockerfile
       target: Develop
     tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
+      auth:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # access token を検証する公開鍵(auth の JWKS)。auth を起動せずに backend だけを試すときは、これを消して、DEV_USER_ID=user-dev にする。
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      # ingress に払い出すホスト名の、ベースドメインと、払い出さないサブドメイン(カンマ区切り。指定すると既定の一覧を置き換える)。
+      # volume 1つの大きさの上限(MB)。アカウントごとの上限は、認証のコンテナを作るときに設ける。
+      VOLUME_MAX_SIZE_MB: ${VOLUME_MAX_SIZE_MB:-5120}
+      INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-shconn.org}
+      INGRESS_RESERVED_SUBDOMAINS: ${INGRESS_RESERVED_SUBDOMAINS:-www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard}
+      # テストが、使い捨てのデータベースを作るための接続先。
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
     volumes:
-      - ./backend/src:/app/src
-  
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # フロントエンド(React + Vite)。開発用は、Vite の開発サーバー(HMR つき)。ブラウザは nginx(https://localhost:18443)につなぐ。
+  # node_modules は、ホストのファイルと混ざらないよう、名前つきのボリュームに置く。
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/dockerfile
+      target: Develop
+    environment:
+      # 本物の API につなぐ(live)。
+      NEXT_PUBLIC_LAUNCHS_API_MODE: live
+      # 開発サーバーに、別のホスト名のブラウザからつなぐことを許す(.env で、HTTPS_BIND_ADDRESS と同じ IP を指定する。カンマ区切り)。
+      DEV_ALLOWED_ORIGINS: ${HTTPS_BIND_ADDRESS:-127.0.0.1},localhost
+    volumes:
+      - .:/app
+      - frontend-node-modules:/app/frontend/node_modules
+
+  # 認証のコンテナ。ユーザーの登録・ログイン・トークンの発行と、公開鍵(JWKS)の配信(docs/auth.md)。
+  auth:
+    build:
+      context: .
+      dockerfile: auth/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth?sslmode=disable
+      # 署名鍵(<kid>.pem)を置く場所。開発用は、無ければ作る(本番は、Secret をマウントして、AUTO_GENERATE を使わない)。
+      AUTH_KEYS_DIR: /keys
+      AUTH_KEYS_AUTOGENERATE: "true"
+      # 人間であることの確認(Cloudflare Turnstile)。.env に、サイトキーとシークレットキーを、両方書くと、ログインとサインアップで必要になる(空なら、無効)。
+      AUTH_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      AUTH_TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      AUTH_TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
+      AUTH_TURNSTILE_VERIFY_URL: ${TURNSTILE_VERIFY_URL:-}
+      # サインアップの公開範囲(open か invite)。
+      AUTH_SIGNUP_MODE: ${AUTH_SIGNUP_MODE:-open}
+      # X-Forwarded-For を信頼するプロキシ(開発用は、同じ Docker のネットワークの nginx)。
+      AUTH_TRUSTED_PROXY_CIDRS: ${AUTH_TRUSTED_PROXY_CIDRS:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+      - auth-keys:/keys
+
+  # 開発環境の PostgreSQL。1つのサーバーの中に、app、auth、temporal の各データベースを作る。
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./dev/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Temporal のデータベースにスキーマを作る。1回だけ実行して終わる。
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/dev-temporal/setup-schema.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  temporal:
+    image: temporalio/server:1.32.2
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /dev-temporal/config.yaml
+      # 開発環境では認証を使わない。
+      TEMPORAL_ALLOW_NO_AUTH: "true"
+    ports:
+      - "127.0.0.1:7233:7233"
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  # Temporal に default の namespace を作る。1回だけ実行して終わる。
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      - temporal
+    entrypoint: ["/bin/sh", "/dev-temporal/create-namespace.sh"]
+    volumes:
+      - ./dev/temporal:/dev-temporal:ro
+
+  temporal-ui:
+    image: temporalio/ui:2.58.1
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8233:8080"
+
+
+  # Temporal のワーカー。削除などの、時間のかかる処理を非同期に実行する。
+  worker:
+    build:
+      context: .
+      dockerfile: worker/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      # 既定では k8s につながず、namespace を削除しない。k8s につなぐときは、
+      # docker-compose.kubernetes.yaml を重ねる(docs/coding-conventions.md を参照)。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # k8s の Pod と Deployment を観測し、実際の状態を DB に反映する。書き手は、このコンテナだけ。
+  # 複数起動しても、advisory lock で、リーダーになった1つだけが観測する。
+  watcher:
+    build:
+      context: .
+      dockerfile: watcher/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # 異常な状態が続く deploy を止める Workflow の開始に使う。
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      # 異常な状態が続く deploy を止める上限。試すときだけ、短くする(安定の判定の5分より長く。例: 6m)。
+      CRASH_LOOP_UNHEALTHY_FOR: ${CRASH_LOOP_UNHEALTHY_FOR:-10m}
+      # 既定では k8s につながず、何も観測しない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # deploy のコンテナの出力ログを、Pod ごとに購読して DB に保存する(docs/logs.md)。同時に動くのは1つ(advisory lock でリーダーを決める)。
+  logcollector:
+    build:
+      context: .
+      dockerfile: logcollector/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # ログを残す期間、Pod ごとの上限(バイト)、1行の長さの上限(バイト)、書き込みの速さの上限(バイト/秒。Pod ごと)。
+      LOG_RETENTION: ${LOG_RETENTION:-168h}
+      LOG_MAX_BYTES_PER_POD: ${LOG_MAX_BYTES_PER_POD:-52428800}
+      LOG_MAX_LINE_BYTES: ${LOG_MAX_LINE_BYTES:-16384}
+      LOG_INGEST_BYTES_PER_SEC: ${LOG_INGEST_BYTES_PER_SEC:-1048576}
+      # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # ingress のアクセスの集計(Traefik のプラグイン launchs-stats の出力)を、Traefik の Pod のログから読み取り、DB に保存する(docs/ingress-plugins.md)。同時に動くのは1つ。
+  accessstats:
+    build:
+      context: .
+      dockerfile: accessstats/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # Traefik の Pod がいる namespace と、Pod を選ぶラベル。
+      ACCESS_STATS_TRAEFIK_NAMESPACE: ${ACCESS_STATS_TRAEFIK_NAMESPACE:-traefik}
+      ACCESS_STATS_TRAEFIK_SELECTOR: ${ACCESS_STATS_TRAEFIK_SELECTOR:-app.kubernetes.io/name=traefik}
+      # false にすると、クライアントの IP を保存しない(パスとメソッドの集計だけ残る)。
+      ACCESS_STATS_KEEP_CLIENTS: ${ACCESS_STATS_KEEP_CLIENTS:-true}
+      # アクセスログを残す期間と、ingress ごとの行数の上限。
+      ACCESS_LOG_RETENTION: ${ACCESS_LOG_RETENTION:-24h}
+      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-5000}
+      # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
+  migrate-app:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/app?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations/app:/migrations:ro
+
+  # auth データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
+  migrate-auth:
+    image: migrate/migrate:v4.19.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/auth?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations/auth:/migrations:ro
+
+  # 開発用の自己署名の証明書を作る。1回だけ実行して終わる(すでにあれば何もしない)。
+  nginx-certificate:
+    image: alpine/openssl:3.5.9
+    entrypoint: ["/bin/sh", "/dev-nginx/generate-certificate.sh"]
+    environment:
+      # 証明書を有効にする、追加の IP(公開するアドレス。127.0.0.1 は、いつも含める)。
+      CERTIFICATE_EXTRA_IP: ${HTTPS_BIND_ADDRESS:-127.0.0.1}
+    volumes:
+      - ./dev/nginx:/dev-nginx:ro
+      - nginx-certificates:/certs
+
+  # HTTPS を終端するリバースプロキシ。コンテナネットワークの中で、バックエンドへ HTTP でプロキシする。
+  nginx:
+    image: nginx:1.31.8-alpine
+    depends_on:
+      nginx-certificate:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+      auth:
+        condition: service_started
+      frontend:
+        condition: service_started
+    ports:
+      # 手元から呼ぶためのポート。他のものと重なることがあるので、既定は 18443 にして、
+      # HTTPS_HOST_PORT で変えられるようにしてある。公開するアドレスは、既定は手元だけ(127.0.0.1)。
+      # 別のアドレスで公開するときは、.env に HTTPS_BIND_ADDRESS=<ホストの IP> を書く(証明書も、その IP で有効になる)。
+      - "${HTTPS_BIND_ADDRESS:-127.0.0.1}:${HTTPS_HOST_PORT:-18443}:443"
+    volumes:
+      - ./dev/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-certificates:/etc/nginx/certs:ro
+
+volumes:
+  frontend-node-modules:
+  auth-keys:
+  go-module-cache:
+  postgres-data:
+  nginx-certificates:

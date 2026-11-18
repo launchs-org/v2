@@ -1,0 +1,435 @@
+[← エンドポイント一覧](README.md)
+
+## デプロイ・起動設定関連 (/deploy)
+
+パス、エラー形式、ID、日時などの共通ルールは [共通ルール](common.md) を参照。このグループのパスは `/api/v1` を省いて書いている(実際の URL は `/api/v1/deploy` など)。
+
+### デプロイ (イメージから起動)
+- Post: /deploy
+- Header
+```json
+{
+  "Content-Type": "application/json",
+  "Authorization": "Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJsYXVuY2hzLW9yZyIsInN1YiI6InVzZXJpZC04MGIwYjI5Yy03NTE0LTQwZGQtYTBiNC04ZjIyZjA5MzI5ZDgiLCJuYW1lIjoidXNlcjEiLCJpYXQiOjE1MTYyMzkwMjIsImV4cCI6IjE1MTYyMzkwMjIiLCJqdGkiOiJ0b2tlbmlkLWQ5Y2M2NGFiLTIxNmUtNDYwYy1iNThjLTRiNWNmMzZhODI5NSIsInR5cGUiOiJhY2Nlc3MifQ.EO1DFWzMQfJJf66tm897rDFMN2GbeSPT8-Q1jw5wE1HgNaeD_rgctCJ5J2ZHSTPo4Ar7KzcH2fdyLEawkCC9Hw"
+}
+```
+- Body
+```json
+{
+  "projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
+  "spec": "small"
+}
+```
+- Response (200)
+```json
+{"deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}
+```
+- Note: sourceType(asset/git)には関知せず、常に imageRef のみを受け取ってデプロイする。詳細は未設計(別途)
+- Note: deploy も projectId に属する。指定した projectId 配下の履歴として記録される
+- Note: spec は "small" | "medium" | "large" のいずれかで必須。省略した場合は 400(仮)。スペックはアカウント管理グループで定義するマスターデータ(CPU・メモリ)に対応する。アカウントのクォータ(deploy の合計の数、スペックごとの数)を超える場合は 409。詳細は [クォータ](quota.md)。作成後のスペック変更は未対応(将来対応)
+- Note: deleting 中のプロジェクトに deploy を作成しようとした場合は 409 を返す
+
+### デプロイ詳細取得
+- Get: /deploy/:deployId
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "projectId": "project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "status": "active",
+  "spec": "small",
+  "replicas": 1,
+  "pods": [
+    {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "status": "running"}
+  ],
+  "logPods": [
+    {"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "running": true, "startedAt": "2026-09-16T09:00:00+09:00", "endedAt": null},
+    {"podId": "pod-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy", "running": false, "startedAt": "2026-09-16T08:00:00+09:00", "endedAt": "2026-09-16T08:55:00+09:00"}
+  ],
+  "imageRef": "registry.launchs-org.internal/project-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:build-xxxxxxxx",
+  "createdAt": "2026-09-16T09:00:00+09:00",
+  "config": {
+    "env": {"PORT": "8080", "DATABASE_URL": "postgres://..."},
+    "pending_env": null,
+    "command": "/app/server",
+    "pending_command": null,
+    "args": ["--config", "/app/config.yaml"],
+    "pending_args": null
+  },
+  "volumes": {
+    "mounts": [{"volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "mountPath": "/data"}],
+    "pending_mounts": null
+  },
+  "files": {
+    "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+    "pending_files": null
+  },
+  "service": {
+    "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "ports": [
+      {"name": "web", "port": 8080, "protocol": "tcp"}
+    ],
+    "pending_ports": null,
+    "status": "active",
+    "dnsName": "web.svc.cluster.local",
+    "clusterIP": "10.43.12.7"
+  }
+}
+```
+- Response (200、pending が存在する場合の抜粋)
+```json
+{
+  "config": {
+    "env": {"PORT": "8080"},
+    "pending_env": {"PORT": "8081"},
+    "command": "/app/server",
+    "pending_command": null,
+    "args": ["--config", "/app/config.yaml"],
+    "pending_args": null
+  },
+  "volumes": {
+    "mounts": [{"volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "mountPath": "/data"}],
+    "pending_mounts": [
+      {"volumeId": "volume-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "mountPath": "/data"},
+      {"volumeId": "volume-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy", "mountPath": "/logs"}
+    ]
+  },
+  "service": {
+    "serviceId": "service-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "ports": [
+      {"name": "web", "port": 8080, "protocol": "tcp"}
+    ],
+    "pending_ports": [
+      {"name": "web", "port": 8080, "protocol": "tcp"},
+      {"name": "game", "port": 27015, "protocol": "udp"}
+    ],
+    "status": "active",
+    "dnsName": "web.svc.cluster.local",
+    "clusterIP": "10.43.12.7"
+  }
+}
+```
+- Note: projectId は、deploy が属するプロジェクトの ID(画面が、そのプロジェクトの volume の一覧などを引くために使う)
+- Note: status は "pending" | "active" | "applying" | "failed" | "scaled_zero" | "deleting" のいずれか。"停止"という状態はなく、replicas を 0 にスケールすることで表現する
+- Note: "active" の deploy でも、Pod が異常な状態(CrashLoopBackOff など)のまま、安定して動かない状態が上限(10分)を超えて続くと、自動で止まる。k8s のレプリカが 0 になり、status は "failed" になる(replicas の値は、希望する数のまま変わらない)。同じ数でスケールし直すか、設定を直して適用すると、やり直せる。他に安定して動いている Pod がある間は、止めない
+- Note: "起動指示が完了したか"はこの status で確認する(別途ヘルスチェック専用endpointは用意しない)
+- Note: config/volumes/service いずれかの apply を呼ぶと、コンテナの再起動が完了するまで status は "applying" になる。再起動が成功すれば "active" に、失敗すれば "failed" に遷移する(applyの呼び出し自体は即時応答するが、反映の完了はこの status のポーリングで確認する)
+- Note: applying→running/failed の判定は、バックエンドが Kubernetes の Deployment/Pod の conditions(Progressing, Ready など)を監視して行う(実装詳細は別途)
+- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)
+- Note: config は [起動設定取得](#デプロイ-起動設定取得-環境変数起動コマンド引数)、volumes は [ボリュームマウント取得](volumes.md#デプロイ-ボリュームマウント取得)、service は [サービス取得](services.md#サービス取得) と同じ内容をこのレスポンスに埋め込んだもの。個別に叩かなくても、この1回のGETで全ての pending_* を確認できる
+- Note: service の status(pending / active / failed / deleting)は Service 自体の払い出し状態で、deploy の status とは別。config/volumes/service いずれかの apply 中に変化するのは deploy の status だけで、service の status は変わらない
+- Note: service はまだ作成されていない(サービス未作成の)deployでは null になる。作成済みなら、[サービス取得](services.md#サービス取得)と同じ内容が入る(作成中の "pending" も含む)(1 deploy = 1 service で、作成は任意)
+- Note: pods は現在稼働している Pod の一覧(replicas が希望レプリカ数という数値であるのに対し、pods は実際の Pod 1つ1つの識別子と状態を返す)。[デプロイ ログ取得](#デプロイ-ログ取得) で特定の Pod のログを取得する際に、ここで取得した podId を指定する。status は "pending" | "running" | "terminating" のいずれか。status が "pending" の場合 deploy の status が "applying"(起動中)であることが多い
+- Note: logPods は、**ログが1行以上保存されている Pod**の一覧で、**既に終了・再作成された Pod も含む**(pods には、稼働中の Pod だけが出る)。新しい Pod(startedAt)が先で、最大 50 件(それより古い Pod も、podId を知っていれば、ログは取れる)。running は、ログの収集が続いている(Pod が稼働中の)か、endedAt は収集が終わった時刻(稼働中は null)。ロールアウトで消えた Pod や、スケールダウンした Pod のログを見るときの podId は、ここから取る。ログが無い Pod(起動前に落ちた、出力が無かった、保持期間で全て削除された)は載らない。logPods の podId は、必ず、ログ取得が 200 で返る
+
+### デプロイ スケーリング
+- Post: /deploy/:deployId/scale
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{"replicas": 0}
+```
+- Response (200)
+```json
+{"deployId": "deploy-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "replicas": 0}
+```
+- Note: replicas を 0 にすると status は "scaled_zero" になる。1以上にすると "active" に戻る("停止"/"再開"という別APIは用意しない)
+- Note: deploy の status が "applying" または "deleting" の間は 409 を返す(他の apply 操作と同様に排他制御する)
+- Note: replicas は 0〜5(全体で同じ上限。スペックやクォータとは関係ない。[クォータ](quota.md)も参照)。範囲外や未指定は 400
+- Note: 呼び出すと replicas を新しい値にして、status は "applying" になり、反映(Pod の増減)の完了は status のポーリングで確認する。完了すると "active"(0 のときは "scaled_zero")になり、300秒で完了しなければ "failed" になる。replicas は「希望する数」なので、失敗しても元には戻さない。"failed" の deploy は、同じ数でもスケーリングし直せる
+- Note: 今と同じ replicas(failed 以外)なら、何も変えずに 200 を返す。起動中("pending")の間と "delete_failed" の間は 409 を返す
+- Note: 未適用の起動設定(pending_*)は、スケーリングでは反映されない
+
+### デプロイ削除
+- Delete: /deploy/:deployId
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: replicas や status に関わらず、稼働中の deploy に対してもそのまま削除を受け付ける。事前にスケーリングで replicas を 0 にする必要はなく、削除処理の内部でコンテナの停止まで行う
+- Note: 呼び出すと即座に応答し、status は直ちに "deleting" になる。実体の削除は Workflow で非同期に行い、完了するとレコード自体が削除される(以後の GET は 404 を返す)
+- Note: deleting の間は、変更系の操作と再度の削除は 409 を返す。GET は status が "deleting" の状態を返す
+- Note: deploy の status が "applying" の間は 409 を返す(進行中の apply を中断して削除することはしない)
+- Note: 配下の service も連鎖して削除される(service は "deleting" になる)。ボリュームのマウント設定も削除されるが、マウントされていた volume 自体は残る(volume は project に属するため)
+- Note: deploy のログも deploy の削除と一緒に削除される
+- Note: 起動中("pending")の間も 409 を返す。削除に失敗した("delete_failed")deploy は、もう一度削除を呼んでやり直せる(リトライの期限は 15 分で、超えると "delete_failed" になる)
+
+### デプロイ ログ取得
+- Get: /deploy/:deployId/logs
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Query (必須: podId、任意: since)
+```json
+{"podId": "pod-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "since": 128}
+```
+- Response (200)
+```json
+{"logs": "2026-09-16T09:00:01.123+09:00 [INFO] server started on :8080\n2026-09-16T09:00:02.456+09:00 [INFO] ready\n", "nextSince": 256}
+```
+- Note: ストリーミングではなくポーリング前提。`since` は、ログの行の通し番号(`nextSince` の値。不透明な整数として扱う)。`since` を省略すると**先頭から、最大 1000 行(または 1MiB。先に達した方)**を返し、レスポンスの `nextSince` を `since` に渡すと、続きを返す。`logs` が空になったら、いまの末尾まで読んだことになる(`nextSince` は変わらない)
+- Note: `logs` は、各行を「JST の時刻(ミリ秒まで。k8s のログの時刻) + 空白 + 本文 + 改行」にして、つなげた文字列。1行は、16KiB を超えると、切り詰められ、末尾に `…(truncated)` が付く。標準出力と標準エラーは、区別されない
+- Note: podId は必須(無い、または `pod-` で始まらない場合は 400)。[デプロイ詳細取得](#デプロイ詳細取得) の pods 配列(稼働中の Pod)か、logPods(ログのある Pod。終了した Pod も含む)から取得した podId を指定し、その Pod 1つのログのみを返す(replicas が複数ある場合、全replica分をまとめて返す機能は無い。複数replicaのログを見たい場合はpodIdを変えて複数回呼び出す)
+- Note: ログは収集コンテナが Pod のログを購読して DB に保存する。保持期間は7日で、Pod ごとに上限(50MB)があり、超えたら古い行から削除される
+- Note: 保持期間内なら、既に終了・再作成された Pod の podId でもログを取得できる。podId が、その deploy に属したことがない、またはログが保持期間を過ぎて削除済みの場合は 404 を返す。pods 配列は現在稼働している Pod だけを返す(終了した Pod は含まない)
+- Note: ログは DB に書き込まれた分を返すので、Pod の出力から少し遅れる(収集コンテナの切り替え中は遅れが大きくなりうる)(仮)
+- Note: 削除した deploy のログは、deploy の削除と一緒に削除される
+- Note: since に現在のログ末尾を超える値を指定した場合はエラーにせず、logs は空文字列、nextSince は現在のログ末尾の位置を返す。since が整数でない、または負の場合は 400
+- Note: ストリームはあるが、保存したログが全て削除されている(上限を超えた、保持期間が過ぎた)Pod は、200 で、logs は空文字列、nextSince は 0
+
+### デプロイ 起動設定取得 (環境変数・起動コマンド・引数)
+- Get: /deploy/:deployId/config
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、デプロイ作成直後の初期状態)
+```json
+{
+  "env": {},
+  "pending_env": null,
+  "command": null,
+  "pending_command": null,
+  "args": null,
+  "pending_args": null
+}
+```
+- Response (200、起動設定を1度適用した後、pending が無い場合)
+```json
+{
+  "env": {"PORT": "8080", "DATABASE_URL": "postgres://..."},
+  "pending_env": null,
+  "command": "/app/server",
+  "pending_command": null,
+  "args": ["--config", "/app/config.yaml"],
+  "pending_args": null
+}
+```
+- Response (200、pending が存在する場合)
+```json
+{
+  "env": {"PORT": "8080", "DATABASE_URL": "postgres://..."},
+  "pending_env": {"PORT": "8081", "DATABASE_URL": "postgres://..."},
+  "command": "/app/server",
+  "pending_command": null,
+  "args": ["--config", "/app/config.yaml"],
+  "pending_args": ["--config", "/app/config.v2.yaml"]
+}
+```
+- Note: env/command/args は現在コンテナに反映されている値。pending_env/pending_command/pending_args はそれぞれ /config に PUT した後、まだ /apply されていない変更内容(変更が無ければ null)
+- Note: command/args が null の場合、コンテナイメージ自身が持つデフォルトの起動コマンド(DockerfileのCMD/ENTRYPOINT等)がそのまま使われる。デプロイ作成直後は command/args ともに null であり、起動設定更新/適用を一度も行っていなければデフォルト起動コマンドのまま稼働する
+- Note: env/command/args は常に3つセットで一括更新するため(部分更新はしない)、いずれか1つでも変更があれば pending_env/pending_command/pending_args の全てに値が入る(変更していないフィールドも直前にPUTした内容がそのまま入る)
+
+### デプロイ 起動設定更新 (一括置き換え、pendingとして保存)
+- Put: /deploy/:deployId/config
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{
+  "env": {"PORT": "8080", "DATABASE_URL": "postgres://..."},
+  "command": "/app/server",
+  "args": ["--config", "/app/config.yaml"]
+}
+```
+- Response (200)
+```json
+{}
+```
+- Note: env/command/args は個別key単位のCRUDではなく、常に全件を送って置き換える方式(部分更新はしない)
+- Note: この時点ではまだコンテナには反映されない。pending_env/pending_command/pending_args として保存され、/apply を呼ぶまで env/command/args(現在反映されている値)は変わらない
+- Note: 送った内容が現在の env/command/args と同じ(変更が無い)場合は、pending_* を保存せず null にする(以前の pending_* も消える)。そのため、同じ設定を apply し直すことはできない(409)
+- Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す(applying中はconfigに対する変更・apply・discardを排他制御する)。"deleting" の間も 409 を返す
+
+### デプロイ 起動設定 適用
+- Post: /deploy/:deployId/config/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_env/pending_command/pending_args の内容を env/command/args に反映するため、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ env/command/args は更新されていない。pending_env/pending_command/pending_args が全て null(何も更新していない)の場合は 409 を返す
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_env/pending_command/pending_args はまだ消費されず、適用しようとしている内容を保持したままとなる。バックエンドは pending_* の値を使って先に Kubernetes 側への反映(コンテナ再起動)を試み、その結果が確定した時点で、成功なら env/command/args を pending_* の内容に更新して pending_* を null に戻す。成功すれば status は "active" に、失敗すれば status は "failed" になる。env/command/args は常に「いま動いている値」を表すので、成功したときだけ pending_* の内容に更新し、pending_* を null に戻す。失敗したときは、Kubernetes の Deployment を元の値(env/command/args)に戻した上で、env/command/args も pending_* も変えず(試して失敗した値は pending_* に残る)、status だけを "failed" にする。利用者は pending_* を直して PUT し直すか、そのまま再度 apply するか、discard で破棄できる([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
+- Note: 既に status が "applying" の場合(別のconfig/volumes/services applyが進行中、またはこのapply自体が既に実行中)は 409 を返す(多重apply不可)。"deleting" の間も 409 を返す
+- Note: deploy の replicas が 0(status が "scaled_zero")のときは、再起動する Pod が無いのですぐに完了し、成功しても status は "active" ではなく "scaled_zero" に戻る。
+- Note: applying には 300秒(5分) のタイムアウトを設ける。この時間内に起動完了(Ready)が確認できない場合、強制的に status を "failed" に遷移させる(再起動処理がハングしても "applying" のまま無期限に固まらないようにするため)
+
+### デプロイ 起動設定 破棄
+- Post: /deploy/:deployId/config/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_env/pending_command/pending_args の内容を適用せずに破棄する(env/command/args には影響しない)。全て null の場合は 409 を返す
+- Note: deploy の status が "applying" の間は 409 を返す(applying中はconfigに対する操作を排他制御する)。"deleting" の間も 409 を返す
+
+### デプロイ ファイル取得 (設定ファイルなど)
+- Get: /deploy/:deployId/files
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+  "pending_files": null
+}
+```
+- Response (200、pending が存在する場合)
+```json
+{
+  "files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}],
+  "pending_files": [
+    {"path": "/etc/app/app.conf", "content": "key=value2\n"},
+    {"path": "/etc/app/extra.conf", "content": "x=1\n"}
+  ]
+}
+```
+- Note: ファイルは、deploy のコンテナの中に、指定した path で置かれる設定ファイル(k8s の ConfigMap として、1 ファイルずつマウントする)。files は現在コンテナに反映されているもの(無ければ空の配列)。pending_files は、まだ適用していない変更(変更が無ければ null。空の配列は「全て外す」変更)
+- Note: [デプロイ詳細取得](#デプロイ詳細取得) のレスポンスにも、同じ内容が `files` として入る(`files.files` と `files.pending_files`)
+- Note: 内容は UTF-8 のテキストだけ。**秘密(パスワードなど)を含めても、環境変数と同じく、平文で保存され、そのまま返る**
+
+### デプロイ ファイル設定 (一括置き換え、pendingとして保存)
+- Put: /deploy/:deployId/files
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{"files": [{"path": "/etc/app/app.conf", "content": "key=value\n"}]}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 個別のファイル単位の CRUD ではなく、常に全件を送って置き換える(env、mounts と同じ)。空の配列は、全て外す変更
+- Note: この時点では、まだコンテナには反映されない。pending_files として保存され、適用するまで files は変わらない
+- Note: 送った内容が現在の files と同じ(JSON の書式ではなく、中身で比べる。現在がファイル無しのときは、空の配列と同じ)なら、pending_files は保存せず null にする(以前の pending_files も消える)。そのため、同じ内容を適用し直すことはできない(409)
+- Note: path は、「/」で始まり、英数字と `. _ - /` だけの 200 文字以内。「/」だけ、「..」、「//」、「./」、末尾の「/」は不可。同じ path の重複は不可。不正は 400
+- Note: 内容は 1 ファイル 64KiB まで、1 deploy に 20 ファイルまで、合計 256KiB まで。UTF-8 でないもの、NUL 文字を含むものは不可。超過と不正は 400
+- Note: **ボリュームのマウント先と、まったく同じ path は 400**(ファイルが、ボリュームを覆ってしまうため)。照らすマウントは、pending のマウントがあればそれ、無ければ現在のもの。マウント先の**下**(例: ボリュームを `/data` に、ファイルを `/data/init.sql` に)は許す。逆向きに、pending のファイルと、まったく同じ path のマウントを [マウント設定](volumes.md#デプロイへのボリュームマウント設定-pendingとして保存) で保存しようとしても、400
+- Note: deploy の status が "applying" の間はこの操作を受け付けず 409 を返す。"deleting" の間も 409 を返す。deploy が無い(他のユーザーのものを含む)なら 404
+
+### デプロイ ファイル 適用
+- Post: /deploy/:deployId/files/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_files の内容を files に反映するため、k8s の ConfigMap(名前は deploy の ID)を作り(または更新し)、コンテナの再起動を開始する。呼び出し自体は即座に応答するが、この時点ではまだ files は更新されていない。pending_files が null の場合は 409 を返す
+- Note: 呼び出し直後、deploy の status は "applying" になる。この間 pending_files は消費されず、適用しようとしている内容を保持する。成功すれば files を pending_files の内容に更新して pending_files を null に戻し、status は "active"(replicas が 0 のときは "scaled_zero")に戻る。失敗すれば、ConfigMap と Deployment を元のファイルに戻し、files も pending_files も変えず(試して失敗した値は pending_files に残る)、status を "failed" にする([デプロイ詳細取得](#デプロイ詳細取得) でポーリングして確認する)
+- Note: 全て外す(空の配列)ときは、Deployment からファイルを外してから、ConfigMap を削除する
+- Note: ファイルを持つ deploy は、更新のとき、古い Pod を止めてから新しい Pod を起動する(Recreate)。ConfigMap の 1 ファイルを `subPath` でマウントすると、ConfigMap を更新しても、動いている Pod には反映されないため、Pod を作り直して、確実に反映する。そのぶん、適用の間、短い停止がある
+- Note: 起動設定やマウントを適用しても、現在のファイルは、そのまま、Deployment に残る
+- Note: 既に status が "applying" の場合は 409 を返す(多重 apply 不可)。"deleting" の間、起動中("pending")の間も 409 を返す。適用の時点で、ファイルの path が、現在のマウント先と、まったく同じになっていたら 409
+- Note: applying には 300 秒(5 分)のタイムアウトを設ける(他の apply と同じ)
+
+### デプロイ ファイル 破棄
+- Post: /deploy/:deployId/files/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_files の内容を適用せずに破棄する(files には影響しない)。pending_files が null の場合は 409 を返す
+- Note: deploy の status が "applying" の間は 409 を返す。"deleting" の間も 409 を返す
+
+### デプロイ ConfigMap マウント取得 (共有の ConfigMap のファイル)
+- Get: /deploy/:deployId/configmap-mounts
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "mounts": [
+    {"configMapId": "configmap-xxxxxxxx-...", "configMapName": "app-config", "revision": 1, "latestRevision": 3, "key": "app.conf", "path": "/etc/app/app.conf", "mode": "0644"}
+  ],
+  "pending_mounts": null
+}
+```
+- Note: 共有の ConfigMap([../configmap.md](../configmap.md)、[configmaps.md](configmaps.md))の 1 ファイルを、1 つの path に置く(subPath でマウントする)。同じファイルを、別の path に 2 か所置いてもよい
+- Note: `revision` は、deploy が固定している版。**ConfigMap を編集しても、deploy には届かない**。`latestRevision` が `revision` より大きければ、新しい版がある(画面が「更新あり」を出す)。新しい版にするには、`revision` を明示して PUT し、適用する
+- Note: `configMapName` と `latestRevision` は、このエンドポイントだけが返す(deploy の詳細の `configmapMounts` には含めない)
+- Note: 現在マウントしているものは `mounts`、まだ適用していないものは `pending_mounts`(変更が無ければ null。空の配列は「全て外す」変更)
+
+### デプロイ ConfigMap マウント設定 (一括置き換え、pendingとして保存)
+- Put: /deploy/:deployId/configmap-mounts
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Body (`revision` と `mode` は省略できる)
+```json
+{"mounts": [{"configMapId": "configmap-xxxxxxxx-...", "revision": 3, "key": "app.conf", "path": "/etc/app/app.conf", "mode": "0600"}]}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 空の配列は「全て外す」変更。`mounts` の省略は 400。最大 30 件
+- Note: `revision` を省略すると、サーバーが決める。deploy が(pending があれば pending、無ければ現在)すでに同じ ConfigMap の同じ key をマウントしていれば、**その版を保つ**。無ければ、ConfigMap の最新の版
+- Note: `mode` は、8 進数の 4 桁の文字列(`"0000"` から `"0777"`)。省略は `"0644"`
+- Note: `path` の書式は、files と同じ(`/` で始まる、英数字と `. _ - /`、200 文字まで、`..`、`//`、末尾の `/` は不可)
+- Note: 400: 書式が不正、ConfigMap が無い・別のプロジェクトのもの、key がその版に無い、版が残っていない、path が同じマウント構成の中で重複、または files の path・ボリュームのマウント先と**まったく同じ**(マウント先の**下**は許す)、(ConfigMap のマウント + files)が 40 個を超える
+- Note: 逆向きも同じ。`PUT /deploy/:deployId/files` と `PUT /deploy/:deployId/mounts` も、ConfigMap のマウントの path と、まったく同じだと 400
+- Note: 現在と同じ内容(版も含む)なら、pending は保存せず、以前の pending も消える
+- Note: 404: deploy が無い、または他のユーザーのもの。409: deploy の status が "applying"、"deleting" の間
+
+### デプロイ ConfigMap マウント 適用
+- Post: /deploy/:deployId/configmap-mounts/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 非同期で反映する。status は "applying" になり、完了すると、成功なら `mounts` が pending の内容になり、失敗なら "failed" になる(`mounts` と `pending_mounts` は、そのまま)
+- Note: 反映の流れ: 使う版ごとに、k8s の ConfigMap(名前 `<configMapId>-r<revision>`、immutable)を作る → Deployment を更新する(再起動を伴う) → 起動を待つ → 失敗なら Deployment を元に戻す → 結果を確定 → 成功なら、どの deploy も使っていない版の k8s の ConfigMap を消す
+- Note: 409: pending が無い、deploy の status が "applying"、"deleting"、起動中("pending")、適用の時点で ConfigMap・版・key が無くなっている、path が反映されているファイルやマウントと重なる
+
+### デプロイ ConfigMap マウント 破棄
+- Post: /deploy/:deployId/configmap-mounts/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_mounts の内容を適用せずに破棄する(mounts には影響しない)。pending が null の場合は 409。deploy の status が "applying"、"deleting" の間も 409

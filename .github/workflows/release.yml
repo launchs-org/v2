@@ -1,0 +1,94 @@
+# main に push(= develop → main の PR をマージ)されたら、8 つのイメージを、ビルドして、GHCR に push する。
+# イメージ: backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate(ghcr.io/<リポジトリ>/<名前>)。
+# タグ: sha-<コミットの短い SHA> と latest。
+name: release
+
+on:
+  push:
+    branches: [main]
+  # 手動でも、実行できる(失敗したときの、やり直しなど)。
+  workflow_dispatch:
+
+# 同じブランチで、新しい実行が始まっても、途中のものは止めない(push が途中で切れて、半端なタグが残らないようにする)。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# 既定は、読み取りだけ。push するジョブにだけ、packages: write を与える。
+permissions:
+  contents: read
+
+jobs:
+  # 先に、整形・静的解析・テストを通す(壊れたものを、イメージにしない)。
+  test:
+    uses: ./.github/workflows/test.yml
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # 1つが失敗しても、他のイメージの push は続ける(失敗したものだけ、やり直せる)。
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            dockerfile: backend/dockerfile
+          - name: worker
+            dockerfile: worker/dockerfile
+          - name: watcher
+            dockerfile: watcher/dockerfile
+          - name: auth
+            dockerfile: auth/dockerfile
+          - name: logcollector
+            dockerfile: logcollector/dockerfile
+          - name: accessstats
+            dockerfile: accessstats/dockerfile
+          - name: frontend
+            dockerfile: frontend/dockerfile
+          - name: migrate
+            dockerfile: migrations/dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR のイメージ名は、小文字でなければならない(リポジトリの所有者に、大文字があっても大丈夫なようにする)。
+      - name: イメージ名を決める
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # このワークフローに付く GITHUB_TOKEN で、ログインする(専用のトークンは要らない)。
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=${{ matrix.name }}
+
+      # Production の段を、リポジトリルートを、コンテキストにして、ビルドする。キャッシュは GitHub Actions のものを使う。
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: Production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          # ビルドの証明(provenance)は、付ける(どのコミットから作ったか、確かめられる)。
+          provenance: true

@@ -1,1 +1,5 @@
-backend/src/tmp/
+tmp/
+.env
+node_modules
+.pnpm-store
+
