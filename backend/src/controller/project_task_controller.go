@@ -1,0 +1,176 @@
+package controller
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/labstack/echo/v5"
+
+	"launchs/backend/src/middlewares"
+	"launchs/shared/model"
+	"launchs/shared/pagination"
+	"launchs/shared/repository"
+)
+
+// ProjectTaskUseCase は、ProjectTaskController が使う、タスクのユースケース。
+type ProjectTaskUseCase interface {
+	List(requestContext context.Context, userID string, projectID string, filter repository.TaskFilter, limit int, after *pagination.Position) ([]model.ProjectTask, *pagination.Position, repository.TaskCounts, time.Time, error)
+	Get(requestContext context.Context, userID string, projectID string, taskID string) (model.ProjectTask, []model.ProjectTask, time.Time, error)
+}
+
+// ProjectTaskResponse は、タスク 1 件のレスポンス。
+type ProjectTaskResponse struct {
+	// TaskID は、タスクの ID。
+	TaskID string `json:"taskId"`
+
+	// Kind は、種類(deploy_create、ingress_apply など)。
+	Kind string `json:"kind"`
+
+	// ResourceID は、対象のリソースの ID(deploy、service、ingress、volume、テンプレートの適用、プロジェクトの ID)。
+	ResourceID string `json:"resourceId"`
+
+	// Status は、状態(running、succeeded、failed、canceled、lost)。
+	Status string `json:"status"`
+
+	// Error は、失敗の理由(失敗したときだけ。秘密を含みうる部分は伏せてある)。
+	Error string `json:"error"`
+
+	// StartedAt と FinishedAt は、開始と終了の日時(実行中は、終了が null)。
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt"`
+
+	// DurationMs は、かかった時間(ミリ秒。実行中は、いままでの時間)。
+	DurationMs int64 `json:"durationMs"`
+
+	// WorkflowID は、Temporal の Workflow の ID(運用で、Temporal の画面を探すときに使う)。
+	WorkflowID string `json:"workflowId"`
+
+	// Children は、子の Workflow のタスク(詳細のときだけ)。
+	Children []ProjectTaskResponse `json:"children,omitempty"`
+}
+
+// TaskCountsResponse は、タスクの数(上のバーの表示に使う)。
+type TaskCountsResponse struct {
+	// Running は、実行中の数。
+	Running int64 `json:"running"`
+
+	// FailedRecent は、直近 24 時間に失敗した数。
+	FailedRecent int64 `json:"failedRecent"`
+}
+
+// ListProjectTasksResponse は、タスクの一覧のレスポンス。
+type ListProjectTasksResponse struct {
+	// Tasks は、このページのタスク(新しい順)。
+	Tasks []ProjectTaskResponse `json:"tasks"`
+
+	// NextCursor は、次のページを取る位置。最後のページなら null。
+	NextCursor *string `json:"nextCursor"`
+
+	// Counts は、プロジェクトのタスクの数。
+	Counts TaskCountsResponse `json:"counts"`
+}
+
+// ProjectTaskController は、プロジェクトのタスクの API のハンドラー。
+type ProjectTaskController struct {
+	projectTaskUseCase ProjectTaskUseCase
+}
+
+// NewProjectTaskController は、ProjectTaskController を作る。
+//
+// 引数:
+//   - projectTaskUseCase: タスクのユースケース。
+//
+// 戻り値:
+//   - 作成した ProjectTaskController。
+func NewProjectTaskController(projectTaskUseCase ProjectTaskUseCase) *ProjectTaskController {
+	// ユースケースを持たせて返す。
+	return &ProjectTaskController{projectTaskUseCase: projectTaskUseCase}
+}
+
+// newProjectTaskResponse は、タスクを、レスポンスの形にする。
+//
+// 引数:
+//   - task: タスク。
+//   - now: 現在の日時(状態と、実行中の時間の計算に使う)。
+//
+// 戻り値:
+//   - レスポンス。
+func newProjectTaskResponse(task model.ProjectTask, now time.Time) ProjectTaskResponse {
+	// 終わっていれば、終わりまでの時間。実行中なら、いままでの時間。
+	end := now
+	if task.FinishedAt != nil {
+		end = *task.FinishedAt
+	}
+	return ProjectTaskResponse{TaskID: task.ID, Kind: task.Kind, ResourceID: task.ResourceID, Status: task.EffectiveStatus(now), Error: task.Error,
+		StartedAt: task.StartedAt, FinishedAt: task.FinishedAt, DurationMs: end.Sub(task.StartedAt).Milliseconds(), WorkflowID: task.WorkflowID}
+}
+
+// List は、GET /projects/:projectId/tasks のハンドラー。タスクを、新しい順に返す。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。クエリ limit、cursor、status、kind を読む。
+//
+// 戻り値:
+//   - 一覧のレスポンス(200)。クエリが不正なら 400、プロジェクトが無ければ 404。
+func (projectTaskController *ProjectTaskController) List(echoContext *echo.Context) error {
+	// 認証されたユーザーを取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+	// limit と cursor を読む。
+	limit, limitError := pagination.ParseLimit(echoContext.QueryParam("limit"))
+	if limitError != nil {
+		return limitError
+	}
+	var after *pagination.Position
+	if cursorText := echoContext.QueryParam("cursor"); cursorText != "" {
+		position, cursorError := pagination.DecodeCursor(cursorText)
+		if cursorError != nil {
+			return cursorError
+		}
+		after = &position
+	}
+	// 取得して、レスポンスにする。
+	filter := repository.TaskFilter{Status: echoContext.QueryParam("status"), Kind: echoContext.QueryParam("kind")}
+	tasks, nextPosition, counts, now, listError := projectTaskController.projectTaskUseCase.List(echoContext.Request().Context(), userID, echoContext.Param("projectId"), filter, limit, after)
+	if listError != nil {
+		return listError
+	}
+	response := ListProjectTasksResponse{Tasks: make([]ProjectTaskResponse, 0, len(tasks)), Counts: TaskCountsResponse{Running: counts.Running, FailedRecent: counts.FailedRecent}}
+	for _, task := range tasks {
+		response.Tasks = append(response.Tasks, newProjectTaskResponse(task, now))
+	}
+	if nextPosition != nil {
+		nextCursor := pagination.EncodeCursor(*nextPosition)
+		response.NextCursor = &nextCursor
+	}
+	return echoContext.JSON(http.StatusOK, response)
+}
+
+// Get は、GET /projects/:projectId/tasks/:taskId のハンドラー。タスクと、その子のタスクを返す。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - タスクのレスポンス(200)。無ければ 404。
+func (projectTaskController *ProjectTaskController) Get(echoContext *echo.Context) error {
+	// 認証されたユーザーを取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+	// 取得して、レスポンスにする。
+	task, children, now, getError := projectTaskController.projectTaskUseCase.Get(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("taskId"))
+	if getError != nil {
+		return getError
+	}
+	response := newProjectTaskResponse(task, now)
+	response.Children = make([]ProjectTaskResponse, 0, len(children))
+	for _, child := range children {
+		response.Children = append(response.Children, newProjectTaskResponse(child, now))
+	}
+	return echoContext.JSON(http.StatusOK, response)
+}

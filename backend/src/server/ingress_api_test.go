@@ -618,3 +618,66 @@ func TestIngressAPIAccessLogs(testingT *testing.T) {
 		}
 	})
 }
+
+// TestProjectTasksAPI は、タスクの一覧(子を除く、新しい順、絞り込み、数)、詳細(子つき)、持ち主の確認を確認する。
+func TestProjectTasksAPI(testingT *testing.T) {
+	environment := newIngressTestEnvironment(testingT)
+	now := time.Now().UTC()
+	insert := func(id string, workflowID string, parent string, status string, reason string, started time.Time) {
+		environment.database.Exec(`INSERT INTO project_tasks (id, project_id, kind, workflow_type, resource_id, workflow_id, run_id, parent_workflow_id, status, error, started_at, finished_at)
+			VALUES (?, ?, 'deploy_create', 'CreateDeployWorkflow', 'deploy-1', ?, 'run-1', ?, ?, ?, ?, ?)`, id, environment.projectID, workflowID, parent, status, reason, started, now)
+	}
+	insert("task-1", "wf-1", "", "succeeded", "", now.Add(-10*time.Minute))
+	insert("task-2", "wf-2", "wf-1", "succeeded", "", now.Add(-9*time.Minute))
+	insert("task-3", "wf-3", "", "failed", "イメージを取得できません", now.Add(-5*time.Minute))
+	insert("task-4", "wf-4", "", "running", "", now.Add(-time.Minute))
+	insert("task-5", "wf-5", "", "running", "", now.Add(-5*time.Hour))
+	path := "/projects/" + environment.projectID + "/tasks"
+
+	testingT.Run("一覧は、トップのタスクを新しい順に返し、数も返す(長く実行中のものは lost)", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path, "")
+		tasks, _ := body["tasks"].([]any)
+		counts, _ := body["counts"].(map[string]any)
+		if statusCode != 200 || len(tasks) != 4 || tasks[0].(map[string]any)["taskId"] != "task-4" || tasks[3].(map[string]any)["status"] != "lost" {
+			subTest.Fatalf("子を除く 4 件が新しい順で、最後は lost のはず: %d %v", statusCode, body)
+		}
+		if counts["running"] != float64(1) || counts["failedRecent"] != float64(1) {
+			subTest.Errorf("実行中 1、失敗 1 のはず: %v", counts)
+		}
+		failed := tasks[1].(map[string]any)
+		if failed["status"] != "failed" || failed["error"] != "イメージを取得できません" || failed["workflowId"] != "wf-3" {
+			subTest.Errorf("失敗の理由が入るはず: %v", failed)
+		}
+	})
+	testingT.Run("絞り込みと、不正な指定", func(subTest *testing.T) {
+		if _, body := environment.ownerClient.call(http.MethodGet, path+"?status=failed", ""); len(body["tasks"].([]any)) != 1 {
+			subTest.Errorf("失敗は 1 件のはず: %v", body)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?status=bad", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"?kind=bad", ""); statusCode != 400 {
+			subTest.Errorf("400 のはず: %d", statusCode)
+		}
+		if _, page := environment.ownerClient.call(http.MethodGet, path+"?limit=2", ""); len(page["tasks"].([]any)) != 2 || page["nextCursor"] == nil {
+			subTest.Errorf("2 件と次のカーソルのはず: %v", page)
+		}
+	})
+	testingT.Run("詳細は、子のタスクを含む", func(subTest *testing.T) {
+		statusCode, body := environment.ownerClient.call(http.MethodGet, path+"/task-1", "")
+		children, _ := body["children"].([]any)
+		if statusCode != 200 || len(children) != 1 || children[0].(map[string]any)["taskId"] != "task-2" {
+			subTest.Errorf("子が 1 つのはず: %d %v", statusCode, body)
+		}
+	})
+	testingT.Run("他人は 404", func(subTest *testing.T) {
+		for _, url := range []string{path, path + "/task-1"} {
+			if statusCode, _ := environment.otherClient.call(http.MethodGet, url, ""); statusCode != 404 {
+				subTest.Errorf("%s: 404 のはず: %d", url, statusCode)
+			}
+		}
+		if statusCode, _ := environment.ownerClient.call(http.MethodGet, path+"/task-none", ""); statusCode != 404 {
+			subTest.Errorf("存在しないタスクは 404 のはず: %d", statusCode)
+		}
+	})
+}
