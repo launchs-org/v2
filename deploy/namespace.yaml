@@ -1,0 +1,5 @@
+# launchs 自身が動く namespace(プロジェクトの namespace とは別)。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: launchs

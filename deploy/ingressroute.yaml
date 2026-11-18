@@ -1,0 +1,27 @@
+# launchs 自身の公開(Traefik の IngressRoute)。ホスト名を、自分のものに変える(下の match の 3 か所)。
+# /api/ と /healthz は backend、/auth/ は auth、それ以外は frontend へ、パスを書き換えずに渡す。
+# 長いパスが、短いパスより先に評価される(Traefik は、式が長いルールを優先する)。
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: launchs
+  namespace: launchs
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`launchs.example.com`) && (PathPrefix(`/api/`) || Path(`/healthz`))
+      services:
+        - name: backend
+          port: 8080
+    - kind: Rule
+      match: Host(`launchs.example.com`) && PathPrefix(`/auth/`)
+      services:
+        - name: auth
+          port: 8080
+    - kind: Rule
+      match: Host(`launchs.example.com`)
+      services:
+        - name: frontend
+          port: 3000
