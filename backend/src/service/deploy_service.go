@@ -30,6 +30,10 @@ type DeployStore interface {
 	SavePendingFiles(requestContext context.Context, userID string, deployID string, files []model.FileSpec) error
 	DiscardPendingFiles(requestContext context.Context, userID string, deployID string) error
 	BeginFilesApply(requestContext context.Context, userID string, deployID string) (string, error)
+	SavePendingConfigMapMounts(requestContext context.Context, userID string, deployID string, mounts []model.ConfigMapMountSpec) error
+	DiscardPendingConfigMapMounts(requestContext context.Context, userID string, deployID string) error
+	BeginConfigMapMountsApply(requestContext context.Context, userID string, deployID string) (string, error)
+	FindConfigMapLatestRevisions(requestContext context.Context, projectID string, configMapIDs []string) (map[string]model.ConfigMap, error)
 	BeginScale(requestContext context.Context, userID string, deployID string, replicas int) (repository.ScaleStart, error)
 	RevertScale(requestContext context.Context, deployID string, start repository.ScaleStart) error
 	MarkDeleting(requestContext context.Context, userID string, deployID string) (string, error)
@@ -59,6 +63,9 @@ type DeployWorkflowStarter interface {
 
 	// StartFilesApply は、ファイルの反映の Workflow を開始する。
 	StartFilesApply(requestContext context.Context, deployID string) error
+
+	// StartConfigMapMountsApply は、ConfigMap のマウントの反映の Workflow を開始する。
+	StartConfigMapMountsApply(requestContext context.Context, deployID string) error
 
 	// StartScale は、レプリカ数を反映する処理を開始する。完了は待たない。
 	StartScale(requestContext context.Context, deployID string) error

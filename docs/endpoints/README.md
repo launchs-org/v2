@@ -15,6 +15,7 @@
 - [サービス関連](services.md) (/deploy/:deployId/service)
 - [イングレス関連](ingresses.md) (/projects/:projectId/ingresses)
 - [ボリューム関連](volumes.md) (/projects/:projectId/volumes, /deploy/:deployId/mounts)
+- [ConfigMap 関連](configmaps.md) (/projects/:projectId/configmaps, /configmaps/:configMapId)
 - [クォータ(アカウントごとの上限)](quota.md) (/quota)
 - [テンプレート](templates.md) (/templates)
 

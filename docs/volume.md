@@ -31,7 +31,7 @@ API の仕様は [endpoints/volumes.md](endpoints/volumes.md)、呼び出しの�
 
 worker に、`persistentvolumeclaims` の get / create / update / delete を許す。
 
-deploy のファイル(設定ファイルなど。[templates.md](templates.md) の段階 A)のため、worker に、`configmaps` の get / create / update / delete も許す(`core` の API グループ)。
+deploy のファイル(設定ファイルなど。[templates.md](templates.md) の段階 A)のため、worker に、`configmaps` の get / create / update / delete も許す(`core` の API グループ)。共有の ConfigMap の版([configmap.md](configmap.md))を、ラベルで探して消すため、**list** も要る。
 
 ## 開発用のクラスター(Talos)での確認
 

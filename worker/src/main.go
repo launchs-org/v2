@@ -170,6 +170,14 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(filesActivities.RollbackDeploymentFiles, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentFilesActivityName})
 	generalWorker.RegisterActivityWithOptions(filesActivities.CommitFilesResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitFilesResultActivityName})
 
+	// deploy の ConfigMap のマウント(共有の ConfigMap の版を固定してマウントする)の反映の Workflow と Activity を登録する。
+	generalWorker.RegisterWorkflowWithOptions(workflow.ApplyDeployConfigMapMountsWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.ApplyDeployConfigMapMountsWorkflowName})
+	configMapMountsActivities := activity.NewApplyDeployConfigMapMountsActivities(repository.NewDeployRepository(appDatabase), repository.NewConfigMapRepository(appDatabase), operators.deploymentOperator, operators.configMapRevisionOperator, appLogger)
+	generalWorker.RegisterActivityWithOptions(configMapMountsActivities.ApplyPendingConfigMapMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.ApplyPendingConfigMapMountsActivityName})
+	generalWorker.RegisterActivityWithOptions(configMapMountsActivities.RollbackDeploymentConfigMapMounts, sdkactivity.RegisterOptions{Name: sharedworkflow.RollbackDeploymentConfigMapMountsActivityName})
+	generalWorker.RegisterActivityWithOptions(configMapMountsActivities.CommitConfigMapMountsResult, sdkactivity.RegisterOptions{Name: sharedworkflow.CommitConfigMapMountsResultActivityName})
+	generalWorker.RegisterActivityWithOptions(configMapMountsActivities.CleanupConfigMapRevisions, sdkactivity.RegisterOptions{Name: sharedworkflow.CleanupConfigMapRevisionsActivityName})
+
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
@@ -193,6 +201,9 @@ type clusterOperators struct {
 
 	// configMapOperator は、deploy のファイルの置き場(ConfigMap)を作る・削除する役。
 	configMapOperator activity.ConfigMapOperator
+
+	// configMapRevisionOperator は、共有の ConfigMap の版(immutable な ConfigMap)を作る・削除する役。
+	configMapRevisionOperator activity.ConfigMapRevisionOperator
 
 	// ingressOperator は、Traefik の IngressRoute を作る・削除する役。
 	ingressOperator activity.IngressOperator
@@ -223,12 +234,13 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 	if errors.Is(clientsetError, k8s.ErrNotConnected) {
 		appLogger.Warn("KUBERNETES_ACCESS=none のため、k8s は操作されません(namespace は削除されず、deploy は起動を確かめずに active になります。開発用)")
 		return clusterOperators{
-			namespaceDeleter:   activity.NewLoggingNamespaceDeleter(appLogger),
-			deploymentOperator: activity.NewLoggingDeploymentOperator(appLogger),
-			serviceOperator:    activity.NewLoggingServiceOperator(appLogger),
-			ingressOperator:    activity.NewLoggingIngressOperator(appLogger),
-			volumeOperator:     activity.NewLoggingVolumeOperator(appLogger),
-			configMapOperator:  activity.NewLoggingConfigMapOperator(appLogger),
+			namespaceDeleter:          activity.NewLoggingNamespaceDeleter(appLogger),
+			deploymentOperator:        activity.NewLoggingDeploymentOperator(appLogger),
+			serviceOperator:           activity.NewLoggingServiceOperator(appLogger),
+			ingressOperator:           activity.NewLoggingIngressOperator(appLogger),
+			volumeOperator:            activity.NewLoggingVolumeOperator(appLogger),
+			configMapOperator:         activity.NewLoggingConfigMapOperator(appLogger),
+			configMapRevisionOperator: activity.NewLoggingConfigMapRevisionOperator(appLogger),
 		}, nil
 	}
 	// それ以外のエラーは、起動を止める。
@@ -246,11 +258,12 @@ func chooseClusterOperators(kubernetesSettings k8s.Settings, operatorSettings cl
 	}
 	// 本物のクライアントで、実際に操作する実装を使う。
 	return clusterOperators{
-		namespaceDeleter:   cluster.NewKubernetesNamespaceDeleter(clientset),
-		deploymentOperator: cluster.NewKubernetesDeploymentOperator(clientset, operatorSettings),
-		serviceOperator:    cluster.NewKubernetesServiceOperator(clientset),
-		ingressOperator:    ingressOperator,
-		volumeOperator:     cluster.NewKubernetesVolumeOperator(clientset, volumeSettings),
-		configMapOperator:  cluster.NewKubernetesConfigMapOperator(clientset),
+		namespaceDeleter:          cluster.NewKubernetesNamespaceDeleter(clientset),
+		deploymentOperator:        cluster.NewKubernetesDeploymentOperator(clientset, operatorSettings),
+		serviceOperator:           cluster.NewKubernetesServiceOperator(clientset),
+		ingressOperator:           ingressOperator,
+		volumeOperator:            cluster.NewKubernetesVolumeOperator(clientset, volumeSettings),
+		configMapOperator:         cluster.NewKubernetesConfigMapOperator(clientset),
+		configMapRevisionOperator: cluster.NewKubernetesConfigMapRevisionOperator(clientset),
 	}, nil
 }

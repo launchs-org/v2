@@ -364,3 +364,72 @@
 ```
 - Note: pending_files の内容を適用せずに破棄する(files には影響しない)。pending_files が null の場合は 409 を返す
 - Note: deploy の status が "applying" の間は 409 を返す。"deleting" の間も 409 を返す
+
+### デプロイ ConfigMap マウント取得 (共有の ConfigMap のファイル)
+- Get: /deploy/:deployId/configmap-mounts
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200、pending が無い場合)
+```json
+{
+  "mounts": [
+    {"configMapId": "configmap-xxxxxxxx-...", "configMapName": "app-config", "revision": 1, "latestRevision": 3, "key": "app.conf", "path": "/etc/app/app.conf", "mode": "0644"}
+  ],
+  "pending_mounts": null
+}
+```
+- Note: 共有の ConfigMap([../configmap.md](../configmap.md)、[configmaps.md](configmaps.md))の 1 ファイルを、1 つの path に置く(subPath でマウントする)。同じファイルを、別の path に 2 か所置いてもよい
+- Note: `revision` は、deploy が固定している版。**ConfigMap を編集しても、deploy には届かない**。`latestRevision` が `revision` より大きければ、新しい版がある(画面が「更新あり」を出す)。新しい版にするには、`revision` を明示して PUT し、適用する
+- Note: `configMapName` と `latestRevision` は、このエンドポイントだけが返す(deploy の詳細の `configmapMounts` には含めない)
+- Note: 現在マウントしているものは `mounts`、まだ適用していないものは `pending_mounts`(変更が無ければ null。空の配列は「全て外す」変更)
+
+### デプロイ ConfigMap マウント設定 (一括置き換え、pendingとして保存)
+- Put: /deploy/:deployId/configmap-mounts
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Body (`revision` と `mode` は省略できる)
+```json
+{"mounts": [{"configMapId": "configmap-xxxxxxxx-...", "revision": 3, "key": "app.conf", "path": "/etc/app/app.conf", "mode": "0600"}]}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 空の配列は「全て外す」変更。`mounts` の省略は 400。最大 30 件
+- Note: `revision` を省略すると、サーバーが決める。deploy が(pending があれば pending、無ければ現在)すでに同じ ConfigMap の同じ key をマウントしていれば、**その版を保つ**。無ければ、ConfigMap の最新の版
+- Note: `mode` は、8 進数の 4 桁の文字列(`"0000"` から `"0777"`)。省略は `"0644"`
+- Note: `path` の書式は、files と同じ(`/` で始まる、英数字と `. _ - /`、200 文字まで、`..`、`//`、末尾の `/` は不可)
+- Note: 400: 書式が不正、ConfigMap が無い・別のプロジェクトのもの、key がその版に無い、版が残っていない、path が同じマウント構成の中で重複、または files の path・ボリュームのマウント先と**まったく同じ**(マウント先の**下**は許す)、(ConfigMap のマウント + files)が 40 個を超える
+- Note: 逆向きも同じ。`PUT /deploy/:deployId/files` と `PUT /deploy/:deployId/mounts` も、ConfigMap のマウントの path と、まったく同じだと 400
+- Note: 現在と同じ内容(版も含む)なら、pending は保存せず、以前の pending も消える
+- Note: 404: deploy が無い、または他のユーザーのもの。409: deploy の status が "applying"、"deleting" の間
+
+### デプロイ ConfigMap マウント 適用
+- Post: /deploy/:deployId/configmap-mounts/apply
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: 非同期で反映する。status は "applying" になり、完了すると、成功なら `mounts` が pending の内容になり、失敗なら "failed" になる(`mounts` と `pending_mounts` は、そのまま)
+- Note: 反映の流れ: 使う版ごとに、k8s の ConfigMap(名前 `<configMapId>-r<revision>`、immutable)を作る → Deployment を更新する(再起動を伴う) → 起動を待つ → 失敗なら Deployment を元に戻す → 結果を確定 → 成功なら、どの deploy も使っていない版の k8s の ConfigMap を消す
+- Note: 409: pending が無い、deploy の status が "applying"、"deleting"、起動中("pending")、適用の時点で ConfigMap・版・key が無くなっている、path が反映されているファイルやマウントと重なる
+
+### デプロイ ConfigMap マウント 破棄
+- Post: /deploy/:deployId/configmap-mounts/discard
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{}
+```
+- Note: pending_mounts の内容を適用せずに破棄する(mounts には影響しない)。pending が null の場合は 409。deploy の status が "applying"、"deleting" の間も 409
