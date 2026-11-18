@@ -12,7 +12,7 @@ import { DeployPanel } from "@/components/panels/deploy-panel"
 import { IngressPanel } from "@/components/panels/ingress-panel"
 import { VolumePanel } from "@/components/panels/volume-panel"
 import { ResizeHandle, usePanelWidth } from "@/components/panels/resize-handle"
-import { DeployWizard } from "@/components/wizard/deploy-wizard"
+import { WizardLauncher } from "@/components/wizard/wizard-launcher"
 import { ErrorState, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import type { DeployTab } from "@/lib/nav"
 
@@ -29,7 +29,7 @@ type CanvasViewProps = ProjectViewProps & {
 
 /** 「+ 追加」メニューの項目。 */
 const ADD_ITEMS: { key: "deploy" | "volume" | "ingress"; kind: Kind; title: string; description: string }[] = [
-  { key: "deploy", kind: "deploy", title: "デプロイ", description: "イメージから、アプリを起動する" },
+  { key: "deploy", kind: "deploy", title: "デプロイ", description: "テンプレート、またはイメージから、アプリを作る" },
   { key: "volume", kind: "volume", title: "ボリューム", description: "消えないデータの置き場所" },
   { key: "ingress", kind: "ingress", title: "Ingress", description: "インターネットに公開する入口" },
 ]
@@ -111,7 +111,7 @@ export function CanvasView(props: CanvasViewProps) {
         </aside>
       )}
 
-      {props.wizardOpen && <DeployWizard project={project} nav={nav} onClose={props.onWizardClose} />}
+      {props.wizardOpen && <WizardLauncher project={project} nav={nav} onClose={props.onWizardClose} />}
       {volumeModal && <CreateVolumeModal projectId={project.projectId} onClose={() => setVolumeModal(false)} onCreated={async (volumeId) => { setVolumeModal(false); await pending.refresh(); nav.select({ kind: "volume", id: volumeId }) }} />}
       {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
     </div>
