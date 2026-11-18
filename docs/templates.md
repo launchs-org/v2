@@ -316,6 +316,8 @@ nginx(静的な公開)、PostgreSQL、MariaDB、Redis、WordPress(web + DB)、No
 
 ### 分かったこと
 - deploy が「完了」になるのは、Deployment が Ready になったとき。**readiness probe を持たないイメージ**(PostgreSQL など)は、データベースが、接続を受け付ける前でも「完了」になる(PostgreSQL は、ボリュームの接続が遅く、`initdb` が終わるまで、さらに約 1 分かかった)。テンプレートに、起動の確認(probe)を足す機能は、まだ無い。
+- **code-server のテンプレートの不具合**(修正済み): イメージの `ENTRYPOINT` が `--bind-addr 0.0.0.0:8080 .` を含むため、`args` だけに同じ引数を書くと、引数が重複して起動していた(動きはしていた)。`command: /usr/bin/entrypoint.sh` で `ENTRYPOINT` を置き換えて、開くフォルダを 1 つだけ渡す形に直し、Pod の起動引数と応答を、実機で確認した。
+- code-server は、**Cloudflare などで HTTPS を手前で終端すると、WebSocket が切れる**([ingress.md](ingress.md) の「既知の問題」。原因は特定済みで、別の修正として実装する)。
 - 開発環境の `air` の監視に、`templates/` を足した(テンプレートを編集しても、backend が再ビルドされなかったため)。
 
 ## 画面の確認(段階 D。実際のスタックとブラウザ。2026-11-18)
