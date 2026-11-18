@@ -2,8 +2,11 @@ package template
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"launchs/shared/model"
 )
 
 // ExpandContext は、展開のときに、変数の他に、参照できる値。
@@ -37,8 +40,20 @@ type ExpandedDeploy struct {
 	// Files は、設定ファイル(内容は、展開済み)。
 	Files []File
 
+	// ConfigMaps は、configmap のファイルのマウント(configmap は、テンプレートの中の name。mode は、省略が 0644 に埋まっている)。
+	ConfigMaps []ConfigMapMount
+
 	// Service は、ポートの公開(無ければ nil)。
 	Service *Service
+}
+
+// ExpandedConfigMap は、展開したあとの configmap 1つ。
+type ExpandedConfigMap struct {
+	// Name は、テンプレートの中の name。
+	Name string
+
+	// Files は、ファイル(key の昇順。text の内容は、展開済み)。
+	Files []model.ConfigMapFile
 }
 
 // ExpandedVolume は、展開したあとの volume 1つ。
@@ -52,9 +67,10 @@ type ExpandedVolume struct {
 
 // ExpandedResources は、展開したあとの、全ての部品(元の順)。
 type ExpandedResources struct {
-	// Volumes、Deploys は、元の順。
-	Volumes []ExpandedVolume
-	Deploys []ExpandedDeploy
+	// Volumes、ConfigMaps、Deploys は、元の順。
+	Volumes    []ExpandedVolume
+	ConfigMaps []ExpandedConfigMap
+	Deploys    []ExpandedDeploy
 
 	// Rules は、ingress のルール(無ければ、nil。ingress を作らない)。
 	Rules []Rule
@@ -96,11 +112,53 @@ func Expand(template Template, values map[string]string, context ExpandContext) 
 				return ExpandedResources{}, fmt.Errorf("deploy %s: %w", resource.Name, deployError)
 			}
 			expanded.Deploys = append(expanded.Deploys, deploy)
+		case ResourceConfigMap:
+			configMap, configMapError := expandConfigMap(resource, replace)
+			if configMapError != nil {
+				return ExpandedResources{}, fmt.Errorf("configmap %s: %w", resource.Name, configMapError)
+			}
+			expanded.ConfigMaps = append(expanded.ConfigMaps, configMap)
 		case ResourceIngress:
 			expanded.Rules = append([]Rule(nil), resource.Rules...)
 		}
 	}
 	return expanded, nil
+}
+
+// expandConfigMap は、configmap 1つの、text のファイルの内容を展開し、展開したあとの形(大きさ、NUL)を、改めて確かめる。
+//
+// 引数:
+//   - resource: configmap の定義。
+//   - replace: 文字列の ${...} を置き換える関数。
+//
+// 戻り値:
+//   - 展開した configmap(ファイルは key の昇順)。
+//   - 置き換えに失敗したとき、または展開したあとのファイルが、規則(大きさの上限、NUL を含まない)に合わないときのエラー。
+func expandConfigMap(resource Resource, replace func(string) (string, error)) (ExpandedConfigMap, error) {
+	// text だけを展開する(base64 は、そのまま)。encoding の省略は text。
+	files := make([]model.ConfigMapFile, 0, len(resource.Files))
+	for _, file := range resource.Files {
+		encoding := file.Encoding
+		if encoding == "" {
+			encoding = model.ConfigMapEncodingText
+		}
+		content := file.Content
+		if encoding == model.ConfigMapEncodingText {
+			replaced, replaceError := replace(file.Content)
+			if replaceError != nil {
+				return ExpandedConfigMap{}, fmt.Errorf("files %s: %w", file.Key, replaceError)
+			}
+			content = replaced
+		}
+		files = append(files, model.ConfigMapFile{Key: file.Key, Encoding: encoding, Content: content})
+	}
+	// 変数の値で、大きくなったり、NUL が入ったりしていないかを、確かめる。
+	sorted, validateError := model.ValidateConfigMapFiles(files)
+	if validateError != nil {
+		return ExpandedConfigMap{}, validateError
+	}
+	sort.Slice(sorted, func(left int, right int) bool { return sorted[left].Key < sorted[right].Key })
+	return ExpandedConfigMap{Name: resource.Name, Files: sorted}, nil
 }
 
 // expandDeploy は、deploy 1つの、文字列の値を展開する。
@@ -119,6 +177,13 @@ func expandDeploy(resource Resource, replace func(string) (string, error)) (Expa
 		replicas = *resource.Replicas
 	}
 	deploy := ExpandedDeploy{Name: resource.Name, Spec: resource.Spec, Replicas: replicas, Mounts: append([]Mount(nil), resource.Mounts...), Service: resource.Service}
+	// configmap のマウントは、そのまま写す(mode の省略は、0644 にする)。
+	for _, mount := range resource.ConfigMaps {
+		if mount.Mode == "" {
+			mount.Mode = model.DefaultConfigMapMountMode
+		}
+		deploy.ConfigMaps = append(deploy.ConfigMaps, mount)
+	}
 	var replaceError error
 	if deploy.Image, replaceError = replace(resource.Image); replaceError != nil {
 		return ExpandedDeploy{}, replaceError

@@ -1,6 +1,6 @@
 # テンプレート(設計)
 
-**状態: 設計(未実装)。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
+**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)は実装済み。C(テンプレートから作る)、D(画面)は、これから。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
 
 利用者が、「PostgreSQL」「WordPress」のような、**よく使う構成**を、入力欄を埋めるだけで作れるようにする。構成は、YAML のファイルで定義する。初期設定の**設定ファイル**も、コンテナに渡せる。
 
@@ -24,6 +24,7 @@
 | **B. テンプレートの定義と検証** | `templates/*.yaml` の形(スキーマ)、読み込み、検証、変数の展開(純粋関数)。`GET /templates`、`GET /templates/:id` | なし |
 | **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認 | A、B |
 | **D. 画面** | ウィザードに「テンプレートから」を足す。入力欄、自動生成のパスワード、進み具合 | C |
+| **B2. ConfigMap の部品**(実装済み) | テンプレートに、共有の ConfigMap([configmap.md](configmap.md))を足す。`kind: configmap` と、deploy の `configmaps`。テキストと、base64 のバイナリ、権限(mode)に対応する | B |
 | **E. 同梱のテンプレート** | nginx、PostgreSQL、Redis、MariaDB、WordPress など、数個 | B |
 
 A と B は、独立しているので、並行して作れる。
@@ -123,6 +124,38 @@ resources:
         deploy: web          # この deploy の service
         port: 80
 ```
+
+### ConfigMap の部品(`kind: configmap`)
+
+共有の設定ファイルの組。**複数の deploy が、同じファイルを使える**。バイナリ(base64)も、ファイルごとの権限(mode)も扱える(deploy 自身の `files` は、1 つの deploy だけの、テキストのファイル)。
+
+```yaml
+resources:
+  - kind: configmap
+    name: conf                # 他の部品と同じ name の規則。volume、deploy とも、重複できない
+    files:
+      - key: nginx.conf       # ConfigMap の中のファイル名(`/` は使えない)
+        content: |
+          server { listen 80; server_name ${project.name}; }
+      - key: logo.png
+        encoding: base64      # バイナリ。省略は text
+        content: iVBORw0KGgo...
+  - kind: deploy
+    name: web
+    image: nginx:alpine
+    spec: small
+    configmaps:               # どのファイルを、どこに置くか(ファイル名は、変えられる)
+      - configmap: conf
+        key: nginx.conf
+        path: /etc/nginx/conf.d/default.conf
+        mode: "0644"          # 省略は 0644
+```
+
+- 保存する大きさは、1 つの configmap で 1 MiB まで、ファイルは 50 個まで([configmap.md](configmap.md) §4)。
+- `text` の内容には、変数と `${project.name}` を書ける。`${service.X.dns}` は、**書けない**(configmap は、deploy より先に作るため)。`base64` の内容には、`${...}` を書けない(展開で、壊れるため)。
+- 展開した**あと**の内容も、改めて検査する(変数の値で、1 MiB を超える、NUL 文字が入る、は断る)。
+- deploy の `configmaps` の path は、その deploy の `files` と、`mounts` のマウント先と、**まったく同じにならない**(下は、よい)。`configmaps` と `files` を合わせて、40 個まで。
+- 作るとき(段階 C)は、**版 1** の ConfigMap を作り、deploy は、その版を固定してマウントする。
 
 ### 変数の型
 
