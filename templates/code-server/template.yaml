@@ -52,6 +52,9 @@ resources:
     image: codercom/code-server:latest
     spec: large
     replicas: 1
+    # イメージの ENTRYPOINT は「--bind-addr 0.0.0.0:8080 .」を含むので、args だけを足すと、引数が重複する。
+    # command で ENTRYPOINT を置き換えて、開くフォルダを、1 つだけ渡す。
+    command: /usr/bin/entrypoint.sh
     args: ["--bind-addr", "0.0.0.0:8080", "/home/coder/project"]
     env:
       PASSWORD: ${password}
