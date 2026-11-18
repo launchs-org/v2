@@ -1,0 +1,44 @@
+# k8s の Pod と Deployment を観測し、実際の状態を DB に書く(書き手は、watcher だけ)。同時に動くのは 1 つ(advisory lock)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watcher
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: watcher
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: watcher
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      serviceAccountName: watcher
+      containers:
+        - name: watcher
+          image: ghcr.io/launchs-org/v2/watcher:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            # 同じクラスターの中の k8s に、ServiceAccount でつなぐ。
+            - name: KUBERNETES_ACCESS
+              value: in-cluster
+            # 異常な状態が続く deploy を止める上限。
+            - name: CRASH_LOOP_UNHEALTHY_FOR
+              value: 10m
+          envFrom:
+            - configMapRef:
+                name: launchs-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}

@@ -1,5 +1,5 @@
-# main に push(= develop → main の PR をマージ)されたら、7 つのイメージを、ビルドして、GHCR に push する。
-# イメージ: backend、worker、watcher、auth、logcollector、accessstats、frontend(ghcr.io/<リポジトリ>/<名前>)。
+# main に push(= develop → main の PR をマージ)されたら、8 つのイメージを、ビルドして、GHCR に push する。
+# イメージ: backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate(ghcr.io/<リポジトリ>/<名前>)。
 # タグ: sha-<コミットの短い SHA> と latest。
 name: release
 
@@ -49,6 +49,8 @@ jobs:
             dockerfile: accessstats/dockerfile
           - name: frontend
             dockerfile: frontend/dockerfile
+          - name: migrate
+            dockerfile: migrations/dockerfile
 
     steps:
       - uses: actions/checkout@v4

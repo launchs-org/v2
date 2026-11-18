@@ -1,0 +1,41 @@
+# deploy のコンテナの出力ログを、Pod ごとに購読して DB に保存する。同時に動くのは 1 つ(advisory lock)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logcollector
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: logcollector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: logcollector
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      serviceAccountName: logcollector
+      containers:
+        - name: logcollector
+          image: ghcr.io/launchs-org/v2/logcollector:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            # 同じクラスターの中の k8s に、ServiceAccount でつなぐ。
+            - name: KUBERNETES_ACCESS
+              value: in-cluster
+          envFrom:
+            - configMapRef:
+                name: launchs-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}
