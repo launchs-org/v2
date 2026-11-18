@@ -120,7 +120,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/access-logs", accessLogController.List)
 
 	// プロジェクトのタスク(Workflow の履歴。worker が記録する)。
-	projectTaskController := controller.NewProjectTaskController(service.NewProjectTaskService(repository.NewProjectTaskRepository(dependencies.Database)))
+	projectTaskController := controller.NewProjectTaskController(service.NewProjectTaskService(repository.NewProjectTaskRepository(dependencies.Database)).WithActivityObserver(dependencies.ActivityObserver))
 	apiGroup.GET("/tasks", projectTaskController.ListAll)
 	apiGroup.GET("/projects/:projectId/tasks", projectTaskController.List)
 	apiGroup.GET("/projects/:projectId/tasks/:taskId", projectTaskController.Get)

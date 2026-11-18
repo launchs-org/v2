@@ -1,6 +1,7 @@
 package server
 
 import (
+	"launchs/shared/projecttask"
 	"time"
 
 	"context"
@@ -41,6 +42,23 @@ func (fakeStarter *fakeIngressWorkflowStarter) StartRouteReapply(_ context.Conte
 func (fakeStarter *fakeIngressWorkflowStarter) StartIngressDeletion(_ context.Context, ingressID string) error {
 	fakeStarter.deletedIngressIDs = append(fakeStarter.deletedIngressIDs, ingressID)
 	return fakeStarter.startError
+}
+
+// fakeActivityObserver は、試験用の、Activity の様子の読み取り。Workflow の ID ごとに、決めた様子を返す。
+type fakeActivityObserver struct{}
+
+// Observe は、wf-4 は途中(起動待ちの 2 回目の試行)、wf-3 は失敗(Deployment の作成)の様子を返す。
+func (fakeActivityObserver) Observe(_ context.Context, workflowID string, _ string) ([]projecttask.ObservedActivity, error) {
+	switch workflowID {
+	case "wf-4":
+		return []projecttask.ObservedActivity{
+			{Name: "ApplyDeployment", Completed: 1}, {Name: "EnsureProjectNamespace", Completed: 1}, {Name: "PrepareDeployDependencies", Completed: 1},
+			{Name: "WaitDeploymentReady", Pending: true, Attempt: 2, Error: "not ready"},
+		}, nil
+	case "wf-3":
+		return []projecttask.ObservedActivity{{Name: "EnsureProjectNamespace", Completed: 1}, {Name: "ApplyDeployment", Failed: 1, Error: "api down"}}, nil
+	}
+	return nil, errors.New("履歴がありません")
 }
 
 // fakeHostGenerator は、テスト用のホスト名の払い出し。決めた順にホスト名を返し、尽きたら最後のものを返し続ける。
@@ -85,7 +103,7 @@ func newIngressTestEnvironment(testingT *testing.T) *ingressTestEnvironment {
 	generator := &fakeHostGenerator{hosts: []string{"brave-blue-fox.launchs.org"}}
 	dependencies := Dependencies{
 		Database: database, DeployWorkflowStarter: &fakeDeployWorkflowStarter{}, ServiceWorkflowStarter: &fakeServiceWorkflowStarter{},
-		IngressWorkflowStarter: starter, IngressHostGenerator: generator,
+		IngressWorkflowStarter: starter, IngressHostGenerator: generator, ActivityObserver: fakeActivityObserver{},
 	}
 	ownerClient := newProjectAPIClient(testingT, "user-a", dependencies)
 	otherClient := newProjectAPIClient(testingT, "user-b", dependencies)
@@ -671,6 +689,33 @@ func TestProjectTasksAPI(testingT *testing.T) {
 		children, _ := body["children"].([]any)
 		if statusCode != 200 || len(children) != 1 || children[0].(map[string]any)["taskId"] != "task-2" {
 			subTest.Errorf("子が 1 つのはず: %d %v", statusCode, body)
+		}
+	})
+	testingT.Run("実行中のタスクには、進み具合(手順の総数、終わった数、いま動いている手順)が付く。一覧には、手順の一覧は付かない", func(subTest *testing.T) {
+		_, body := environment.ownerClient.call(http.MethodGet, path, "")
+		for _, item := range body["tasks"].([]any) {
+			task := item.(map[string]any)
+			progress, hasProgress := task["progress"].(map[string]any)
+			if task["taskId"] == "task-4" {
+				if !hasProgress || progress["total"] != float64(5) || progress["done"] != float64(3) || progress["current"] != "起動を待つ" || progress["steps"] != nil {
+					subTest.Errorf("実行中は、5 つのうち 3 つが終わり、起動待ちのはず: %v", progress)
+				}
+			} else if hasProgress {
+				subTest.Errorf("実行中でないものには、進み具合は付かないはず: %v %v", task["taskId"], progress)
+			}
+		}
+	})
+	testingT.Run("詳細には、手順の一覧が付く(失敗した手順、成功したタスクは全て終わり)", func(subTest *testing.T) {
+		_, failed := environment.ownerClient.call(http.MethodGet, path+"/task-3", "")
+		progress, _ := failed["progress"].(map[string]any)
+		steps, _ := progress["steps"].([]any)
+		if len(steps) != 5 || steps[2].(map[string]any)["state"] != "failed" || steps[2].(map[string]any)["error"] != "api down" || steps[0].(map[string]any)["state"] != "done" {
+			subTest.Errorf("3 つ目(Deployment の作成)が失敗のはず: %v", progress)
+		}
+		_, succeeded := environment.ownerClient.call(http.MethodGet, path+"/task-1", "")
+		done, _ := succeeded["progress"].(map[string]any)
+		if done["done"] != float64(5) || done["total"] != float64(5) || len(done["steps"].([]any)) != 5 {
+			subTest.Errorf("成功したタスクは、全て終わりのはず: %v", done)
 		}
 	})
 	testingT.Run("全てのプロジェクトのタスク(GET /tasks)は、削除されたプロジェクトのものを含み、他のユーザーのものを含まない", func(subTest *testing.T) {

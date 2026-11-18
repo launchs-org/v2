@@ -84,3 +84,42 @@ func TestErrorMessageTimeout(testingT *testing.T) {
 		testingT.Errorf("時間切れは、処理の名前を添えるはず: %q", got)
 	}
 }
+
+// TestBuildProgress は、定義した手順の状態づけ(終わった・動いている・待っている・失敗)と、後始末の Activity の扱いを確認する。
+func TestBuildProgress(testingT *testing.T) {
+	testingT.Run("途中: 終わった手順、動いている手順(やり直し中)、待っている手順", func(subTest *testing.T) {
+		progress := BuildProgress(workflow.CreateDeployWorkflowName, []ObservedActivity{
+			{Name: workflow.EnsureProjectNamespaceActivityName, Completed: 1},
+			{Name: workflow.PrepareDeployDependenciesActivityName, Completed: 1},
+			{Name: workflow.ApplyDeploymentActivityName, Completed: 1},
+			{Name: workflow.WaitDeploymentReadyActivityName, Pending: true, Attempt: 2, Error: "not ready: password=abc"},
+		})
+		if progress.Total != 5 || progress.Done != 3 || progress.Current != "起動を待つ" {
+			subTest.Fatalf("5 つのうち 3 つが終わり、起動待ちが動いているはず: %+v", progress)
+		}
+		wait := progress.Steps[3]
+		if wait.State != StepRunning || wait.Attempt != 2 || wait.Error != "not ready: password=***" || progress.Steps[4].State != StepWaiting {
+			subTest.Errorf("やり直し中の理由は、秘密を伏せて出し、最後は待ちのはず: %+v %+v", wait, progress.Steps[4])
+		}
+	})
+	testingT.Run("失敗: 失敗した手順と、後始末の手順が出る", func(subTest *testing.T) {
+		progress := BuildProgress(workflow.ApplyIngressRulesWorkflowName, []ObservedActivity{
+			{Name: workflow.ApplyIngressRulesActivityName, Failed: 1, Error: "api down"},
+			{Name: workflow.RollbackIngressRulesActivityName, Completed: 1},
+			{Name: workflow.CommitIngressRulesResultActivityName, Completed: 1},
+		})
+		if progress.Total != 2 || progress.Done != 1 || progress.Steps[0].State != StepFailed || progress.Steps[0].Error != "api down" {
+			subTest.Fatalf("1 つ目が失敗、結果の確定は終わりのはず: %+v", progress)
+		}
+		last := progress.Steps[len(progress.Steps)-1]
+		if len(progress.Steps) != 3 || !last.Extra || last.Activity != workflow.RollbackIngressRulesActivityName || last.State != StepDone {
+			subTest.Errorf("後始末が、追加の手順として、後ろに出るはず: %+v", progress.Steps)
+		}
+	})
+	testingT.Run("定義が無い Workflow は、総数が 0 で、動いたものだけを出す", func(subTest *testing.T) {
+		progress := BuildProgress(workflow.ApplyTemplateWorkflowName, []ObservedActivity{{Name: workflow.LoadTemplateStepsActivityName, Completed: 1}, {Name: workflow.CreateTemplateDeployActivityName, Pending: true, Attempt: 1}})
+		if progress.Total != 0 || len(progress.Steps) != 2 || progress.Current != workflow.CreateTemplateDeployActivityName {
+			subTest.Errorf("総数 0 で、2 つ出るはず: %+v", progress)
+		}
+	})
+}

@@ -10,6 +10,7 @@ import (
 	"launchs/backend/src/middlewares"
 	"launchs/shared/model"
 	"launchs/shared/pagination"
+	"launchs/shared/projecttask"
 	"launchs/shared/repository"
 )
 
@@ -18,6 +19,7 @@ type ProjectTaskUseCase interface {
 	List(requestContext context.Context, userID string, projectID string, filter repository.TaskFilter, limit int, after *pagination.Position) ([]model.ProjectTask, *pagination.Position, repository.TaskCounts, time.Time, error)
 	ListAll(requestContext context.Context, userID string, filter repository.TaskFilter, limit int, after *pagination.Position) ([]model.ProjectTask, *pagination.Position, repository.TaskCounts, time.Time, error)
 	Get(requestContext context.Context, userID string, projectID string, taskID string) (model.ProjectTask, []model.ProjectTask, time.Time, error)
+	ProgressFor(requestContext context.Context, tasks []model.ProjectTask, withSteps bool, runningOnly bool) map[string]projecttask.Progress
 }
 
 // ProjectTaskResponse は、タスク 1 件のレスポンス。
@@ -50,6 +52,9 @@ type ProjectTaskResponse struct {
 
 	// WorkflowID は、Temporal の Workflow の ID(運用で、Temporal の画面を探すときに使う)。
 	WorkflowID string `json:"workflowId"`
+
+	// Progress は、進み具合(手順の総数と、終わった数、いま動いている手順。詳細では、手順の一覧も)。実行中のタスクと、詳細のときだけ。
+	Progress *projecttask.Progress `json:"progress,omitempty"`
 
 	// Children は、子の Workflow のタスク(詳細のときだけ)。
 	Children []ProjectTaskResponse `json:"children,omitempty"`
@@ -136,11 +141,15 @@ func readListQuery(echoContext *echo.Context) (int, *pagination.Position, reposi
 }
 
 // listResponse は、タスクの一覧を、レスポンスの形にする。
-func listResponse(tasks []model.ProjectTask, nextPosition *pagination.Position, counts repository.TaskCounts, now time.Time) ListProjectTasksResponse {
+func listResponse(tasks []model.ProjectTask, nextPosition *pagination.Position, counts repository.TaskCounts, now time.Time, progress map[string]projecttask.Progress) ListProjectTasksResponse {
 	// 1 件ずつ、レスポンスにする(空でも、配列にする)。
 	response := ListProjectTasksResponse{Tasks: make([]ProjectTaskResponse, 0, len(tasks)), Counts: TaskCountsResponse{Running: counts.Running, FailedRecent: counts.FailedRecent}}
 	for _, task := range tasks {
-		response.Tasks = append(response.Tasks, newProjectTaskResponse(task, now))
+		item := newProjectTaskResponse(task, now)
+		if taskProgress, found := progress[task.ID]; found {
+			item.Progress = &taskProgress
+		}
+		response.Tasks = append(response.Tasks, item)
 	}
 	if nextPosition != nil {
 		nextCursor := pagination.EncodeCursor(*nextPosition)
@@ -171,7 +180,7 @@ func (projectTaskController *ProjectTaskController) List(echoContext *echo.Conte
 	if listError != nil {
 		return listError
 	}
-	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now))
+	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now, projectTaskController.projectTaskUseCase.ProgressFor(echoContext.Request().Context(), tasks, false, true)))
 }
 
 // ListAll は、GET /tasks のハンドラー。ユーザーの全てのプロジェクトのタスクを、新しい順に返す(削除されたプロジェクトのタスクも含む)。
@@ -196,7 +205,7 @@ func (projectTaskController *ProjectTaskController) ListAll(echoContext *echo.Co
 	if listError != nil {
 		return listError
 	}
-	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now))
+	return echoContext.JSON(http.StatusOK, listResponse(tasks, nextPosition, counts, now, projectTaskController.projectTaskUseCase.ProgressFor(echoContext.Request().Context(), tasks, false, true)))
 }
 
 // Get は、GET /projects/:projectId/tasks/:taskId のハンドラー。タスクと、その子のタスクを返す。
@@ -217,10 +226,19 @@ func (projectTaskController *ProjectTaskController) Get(echoContext *echo.Contex
 	if getError != nil {
 		return getError
 	}
+	// 本人と子の、進み具合(手順の一覧つき)を読み取る。
+	progress := projectTaskController.projectTaskUseCase.ProgressFor(echoContext.Request().Context(), append([]model.ProjectTask{task}, children...), true, false)
 	response := newProjectTaskResponse(task, now)
+	if taskProgress, found := progress[task.ID]; found {
+		response.Progress = &taskProgress
+	}
 	response.Children = make([]ProjectTaskResponse, 0, len(children))
 	for _, child := range children {
-		response.Children = append(response.Children, newProjectTaskResponse(child, now))
+		item := newProjectTaskResponse(child, now)
+		if childProgress, found := progress[child.ID]; found {
+			item.Progress = &childProgress
+		}
+		response.Children = append(response.Children, item)
 	}
 	return echoContext.JSON(http.StatusOK, response)
 }
