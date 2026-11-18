@@ -1,0 +1,8 @@
+# Traefik のプラグインの、目録(ローカルプラグインでも、この形が要る)。
+displayName: launchs-edge
+type: middleware
+import: github.com/launchs-org/launchs-edge
+summary: 信頼する接続元(cloudflared など)から来たとき、本当のクライアント IP と、正しい X-Forwarded-Proto/Port を、アプリに届ける。信頼しない接続元の Cf-* は、捨てる。
+testData:
+  trustedCIDRs:
+    - 10.240.0.0/16

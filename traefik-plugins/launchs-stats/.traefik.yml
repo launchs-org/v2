@@ -1,0 +1,8 @@
+displayName: launchs-stats
+type: middleware
+import: github.com/launchs-org/launchs-stats
+summary: ingress ごとのアクセスを集計し、一定の間隔で、標準出力に 1 行の JSON(LAUNCHS_STATS)として出す。
+testData:
+  ingressId: ingress-test
+  intervalSeconds: 60
+  clientIPHeader: X-Real-Ip
