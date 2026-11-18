@@ -1,6 +1,6 @@
 # テンプレート(設計)
 
-**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)は実装済み。C(テンプレートから作る)、D(画面)は、これから。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
+**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)、B3(フォルダ形式と `from:`)は実装済み。C(テンプレートから作る)は、土台(計画の型、計画を作る処理、クォータのまとめての確認)まで。D(画面)は、これから。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
 
 利用者が、「PostgreSQL」「WordPress」のような、**よく使う構成**を、入力欄を埋めるだけで作れるようにする。構成は、YAML のファイルで定義する。初期設定の**設定ファイル**も、コンテナに渡せる。
 
@@ -9,7 +9,7 @@
 | 項目 | 決定 | 理由 |
 |---|---|---|
 | 設定ファイルの渡し方 | **deploy に「ファイル」を持たせる**(新しい機能)。k8s の ConfigMap として、コンテナにマウントする | 初期設定だけでなく、あとから編集(pending → 適用)もできる。テンプレートは、この機能の上に乗る |
-| テンプレートの定義の置き場 | **リポジトリの `templates/*.yaml`**。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
+| テンプレートの定義の置き場 | **リポジトリの `templates/<id>/`**(フォルダ形式。B3)。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
 | 作れる人 | 管理者が、リポジトリに追加する。利用者は、選んで使うだけ | 安全(利用者が、任意の構成を、流し込まない) |
 | 範囲 | **複数の部品**(deploy、volume、service、ingress、ファイル)を、1 つのテンプレートで | WordPress = web + DB(ボリューム付き)+ ingress、が書ける |
 | 変数 | **ある**。YAML の中に `${名前}` と書き、画面に入力欄を出す。パスワードは、**自動生成**の型を用意する | 初心者が、弱いパスワードを使わない |
@@ -24,6 +24,7 @@
 | **B. テンプレートの定義と検証** | `templates/*.yaml` の形(スキーマ)、読み込み、検証、変数の展開(純粋関数)。`GET /templates`、`GET /templates/:id` | なし |
 | **C. テンプレートから作る** | `POST /projects/:projectId/templates/:id/apply`(変数を受けて、部品を、順に作る Workflow)。進み具合の確認。起動前の準備(PVC、ファイルの ConfigMap)を、`CreateDeployWorkflow` に足す | A、B、B2 |
 | **D. 画面** | ウィザードに「テンプレートから」を足す。入力欄、自動生成のパスワード、進み具合 | C |
+| **B3. フォルダ形式と `from:`**(実装済み) | テンプレートを、1 つにつき 1 つのフォルダ(`<id>/template.yaml` と `files/`)にする。YAML から、フォルダのファイルを読み込む(`from:`)。テキスト・バイナリを自動判定 | B |
 | **B2. ConfigMap の部品**(実装済み) | テンプレートに、共有の ConfigMap([configmap.md](configmap.md))を足す。`kind: configmap` と、deploy の `configmaps`。テキストと、base64 のバイナリ、権限(mode)に対応する | B |
 | **E. 同梱のテンプレート** | nginx、PostgreSQL、Redis、MariaDB、WordPress など、数個 | B |
 
@@ -124,6 +125,47 @@ resources:
         deploy: web          # この deploy の service
         port: 80
 ```
+
+## フォルダ形式(段階 B3)
+
+テンプレートは、**1 つにつき 1 つのフォルダ**。git で管理でき、エディタ、CI、他のツールが、そのまま扱える。
+
+```
+templates/
+  nginx/
+    template.yaml        # 本体(必須)。フォルダ名は、metadata.id と同じ
+    files/               # from: で読み込むファイル(任意。置き場所は自由)
+      default.conf
+      index.html
+      favicon.gif        # バイナリも、そのまま置ける
+```
+
+- 読み込み(`template.Load`)は、`templates/` の直下のフォルダを、名前の順に、全て読む。フォルダでないもの(README など)は、無視する。`template.yaml` の無いフォルダは、エラー。**直下の `*.yaml`(単一ファイル形式)は、読まない。**
+- ファイルの内容は、`content:` に直接書くか、`from:` で、フォルダのファイルを指す(同時には書けない)。
+
+```yaml
+- kind: configmap
+  name: site
+  files:
+    - key: default.conf
+      from: files/default.conf    # テキスト: ${変数} を展開する
+    - key: favicon.gif
+      from: files/favicon.gif     # バイナリ: 自動で判定して、base64 にする
+    - key: note.txt
+      encoding: base64            # テキストでも、バイナリとして扱いたいとき(変数は展開しない)
+      from: files/note.txt
+- kind: deploy
+  name: db
+  files:
+    - path: /docker-entrypoint-initdb.d/init.sql
+      from: files/init.sql        # deploy の files は、テキストだけ
+```
+
+- `from` は、そのテンプレートのフォルダの中の、**相対パス**だけ(`/` で始まる、`..` を含むものは、エラー。フォルダの外は、読めない)。
+- 自動判定: UTF-8 で、NUL 文字を含まなければ、**テキスト**。それ以外は、**バイナリ**(base64)。`encoding: text` を指定したのに、バイナリなら、エラー。
+- 1 ファイルは、1 MiB まで(ConfigMap の上限)。
+- 読み込んだあと、`from` は、内容(`content` と `encoding`)に置き換わる。検証と展開は、`content` だけを見るので、**今までの規則(変数、参照、大きさ)が、そのまま、同じように働く**。
+- ファイルが、そのままでは、正しい形式でないことがある(例: JSON の数に、`${font_size}` を書く)。変数を展開したあとに、正しくなればよい。
 
 ### ConfigMap の部品(`kind: configmap`)
 

@@ -294,6 +294,9 @@ func validateConfigMap(where string, resource Resource, variables map[string]Var
 	}
 	files := make([]model.ConfigMapFile, 0, len(resource.Files))
 	for _, file := range resource.Files {
+		if file.From != "" {
+			return fmt.Errorf("%s: files の from(%s)が、読み込まれていません(フォルダから Load してください)", where, file.From)
+		}
 		if file.Path != "" {
 			return fmt.Errorf("%s: configmap の files には、path ではなく、key を書きます(%q)", where, file.Path)
 		}
@@ -422,6 +425,9 @@ func validateDeploy(where string, resource Resource, volumes map[string]bool, co
 	// ファイル: path と内容の規則(マウント先と、まったく同じ path は不可)。
 	fileSpecs := make([]model.FileSpec, 0, len(resource.Files))
 	for _, file := range resource.Files {
+		if file.From != "" {
+			return fmt.Errorf("%s: files の from(%s)が、読み込まれていません(フォルダから Load してください)", where, file.From)
+		}
 		fileSpecs = append(fileSpecs, model.FileSpec{Path: file.Path, Content: file.Content})
 	}
 	if fileError := model.ValidateFiles(fileSpecs, mountSpecs); fileError != nil {

@@ -57,10 +57,7 @@ resources:
     name: pgconf
     files:
       - key: postgresql.conf
-        content: |
-          listen_addresses = '*'
-          max_connections = ${max_connections}
-          log_statement = '${log_statement}'
+        from: files/postgresql.conf
 
   - kind: deploy
     name: db
@@ -82,8 +79,7 @@ resources:
         path: /etc/postgresql/postgresql.conf
     files:
       - path: /docker-entrypoint-initdb.d/init.sql
-        content: |
-          CREATE EXTENSION IF NOT EXISTS pgcrypto;
+        from: files/init.sql
     service:
       ports:
         - name: postgres
