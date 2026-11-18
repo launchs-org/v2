@@ -157,3 +157,41 @@
 ```
 - Note: pending_rules の内容を適用せずに破棄する(rules には影響しない)。pending_rules が null の場合は 409 を返す
 - Note: ingress の status が "applying" または "deleting" の間は 409 を返す
+
+### イングレス アクセスの集計の切り替え
+- Patch: /projects/:projectId/ingresses/:ingressId
+- Header
+```json
+{"Content-Type": "application/json", "Authorization": "Bearer <accessToken>"}
+```
+- Body
+```json
+{"accessStats": true}
+```
+- Response (200): [イングレス取得](#イングレス取得)と同じ形(`accessStats` を含む)
+- Note: `accessStats`(必須。省略は 400)は、Traefik のプラグイン launchs-stats による、アクセスの集計を使うか。既定は true。取得とレスポンスにも `accessStats` を含む
+- Note: pending ではなく、即時に保存する。反映済みのルールがあれば、IngressRoute を作り直す Workflow を開始する(Middleware の付け外し。同じ値でも開始する)
+- Note: worker の環境変数 `INGRESS_STATS_PLUGIN` が空の環境では、保存だけで、IngressRoute には何も付かない
+- Note: 他人の ingress は 404、applying / deleting は 409
+
+### イングレス アクセスの集計の取得
+- Get: /projects/:projectId/ingresses/:ingressId/access-stats?range=1h
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Query: `range` は `1h`(既定。1 分ごと)、`24h`(15 分ごと)、`7d`(1 時間ごと)、`30d`(1 日ごと)。それ以外は 400
+- Response (200)
+```json
+{
+  "enabled": true, "range": "1h", "from": "2026-11-18T09:00:00Z", "to": "2026-11-18T10:00:30Z", "bucketSeconds": 60,
+  "totals": {"count": 10, "status": {"1xx": 0, "2xx": 9, "3xx": 0, "4xx": 0, "5xx": 1}, "methods": {"GET": 10}, "bytes": 500, "avgMs": 2, "p50Ms": 5, "p95Ms": 5, "p99Ms": 5},
+  "series": [{"start": "2026-11-18T09:00:00Z", "count": 0, "status": {}, "methods": {}, "bytes": 0, "avgMs": 0, "p50Ms": 0, "p95Ms": 0, "p99Ms": 0}],
+  "paths": [{"key": "/api/:id", "count": 10}],
+  "clients": [{"key": "203.0.113.9", "count": 10}],
+  "uniqueClients": 1
+}
+```
+- Note: 集計は accessstats コンテナが、Traefik のログから保存する。1 分ごとの行は 24 時間、1 時間ごとの行は 30 日残る。`ACCESS_STATS_KEEP_CLIENTS=false` では、clients は空
+- Note: 応答時間の p50/p95/p99 は、区切り(5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 ms)の上限での見積もり。パスは、数字・UUID・長い 16 進の区間を `:id` にまとめ、上位だけを残す
+- Note: 無効にした後も、過去の集計は読める。他人の ingress は 404
