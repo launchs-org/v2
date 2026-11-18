@@ -27,6 +27,14 @@ spec:
         app.kubernetes.io/name: frontend
         admission.datadoghq.com/enabled: "false"
     spec:
+      # 3 つのノードに、ばらけさせる(同じノードに偏らない。ノードが足りないときは、偏ってもよい)。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend
       containers:
         - name: frontend
           image: ghcr.io/launchs-org/v2/frontend:latest
@@ -42,6 +50,8 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 50m, memory: 96Mi}

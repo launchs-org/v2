@@ -27,6 +27,14 @@ spec:
         app.kubernetes.io/name: auth
         admission.datadoghq.com/enabled: "false"
     spec:
+      # 3 つのノードに、ばらけさせる(同じノードに偏らない。ノードが足りないときは、偏ってもよい)。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: auth
       initContainers:
         # auth データベースのマイグレーション(up だけ。何度流しても、変わらない)。
         - name: migrate
@@ -69,6 +77,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 50m, memory: 64Mi}

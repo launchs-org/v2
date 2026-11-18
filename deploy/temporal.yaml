@@ -1,18 +1,20 @@
-# Temporal(単一ノード。1 つのコンテナで、全てのサービスを動かす)。データは、postgres の temporal と temporal_visibility。
-# 起動の前に、initContainer で、スキーマを作る(何度流しても、変わらない)。default の namespace は、Job で作る。
+# Temporal(3 つの Pod。各 Pod が、全てのサービス(frontend、history、matching、worker)を動かし、Pod 同士が、DB の cluster_membership で見つけ合って、1 つのクラスターになる)。
+# データは、postgres の temporal と temporal_visibility。
+# 起動の前に、initContainer で、スキーマを作る(何度流しても、変わらない。3 つが同時に流しても、やり直しで揃う)。default の namespace は、Job で作る。
+# **numHistoryShards は、最初に起動するときに決まり、後から変えられない**(変えると、既存のデータが読めなくなる)。512 は、小さな本番の目安。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: temporal-config
   namespace: launchs
 data:
-  # __POSTGRES_PASSWORD__ は、initContainer が、Secret の値に置き換える。
+  # __POSTGRES_PASSWORD__ と __POD_IP__ は、initContainer が、Secret の値と、Pod の IP に置き換える。
   config.yaml.template: |
     log:
       stdout: true
       level: info
     persistence:
-      numHistoryShards: 4
+      numHistoryShards: 512
       defaultStore: default
       visibilityStore: visibility
       datastores:
@@ -41,7 +43,8 @@ data:
     global:
       membership:
         maxJoinDuration: 30s
-        broadcastAddress: 127.0.0.1
+        # 他の Pod から届くアドレス(自分の Pod の IP)。initContainer が、__POD_IP__ を置き換える。
+        broadcastAddress: __POD_IP__
       pprof:
         port: 7936
     services:
@@ -63,8 +66,8 @@ data:
           enabled: true
           initialFailoverVersion: 1
           rpcName: temporal-frontend
-          rpcAddress: 127.0.0.1:7233
-          httpAddress: 127.0.0.1:7243
+          rpcAddress: temporal:7233
+          httpAddress: temporal:7243
     dcRedirectionPolicy:
       policy: noop
     archival:
@@ -125,9 +128,12 @@ metadata:
   namespace: launchs
 spec:
   replicas: 1
-  # 単一ノードなので、新しい Pod の前に、古い Pod を止める(同じ DB に、2 つ目のクラスターを作らない)。
+  # 1 つずつ入れ替える(常に、2 つ以上が動いている)。
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: temporal
@@ -137,6 +143,14 @@ spec:
         app.kubernetes.io/name: temporal
         admission.datadoghq.com/enabled: "false"
     spec:
+      # 3 つのノードに、ばらけさせる。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: temporal
       initContainers:
         # スキーマを作る。
         - name: schema
@@ -151,8 +165,11 @@ spec:
         # 設定の雛形に、DB のパスワードを入れる。
         - name: render-config
           image: busybox:1.37
-          command: ["/bin/sh", "-c", "sed \"s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g\" /template/config.yaml.template > /config/config.yaml"]
+          command: ["/bin/sh", "-c", "sed -e \"s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g\" -e \"s/__POD_IP__/${POD_IP}/g\" /template/config.yaml.template > /config/config.yaml"]
           env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
