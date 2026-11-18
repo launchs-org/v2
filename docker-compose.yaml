@@ -207,6 +207,29 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # ingress のアクセスの集計(Traefik のプラグイン launchs-stats の出力)を、Traefik の Pod のログから読み取り、DB に保存する(docs/ingress-plugins.md)。同時に動くのは1つ。
+  accessstats:
+    build:
+      context: .
+      dockerfile: accessstats/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # Traefik の Pod がいる namespace と、Pod を選ぶラベル。
+      ACCESS_STATS_TRAEFIK_NAMESPACE: ${ACCESS_STATS_TRAEFIK_NAMESPACE:-traefik}
+      ACCESS_STATS_TRAEFIK_SELECTOR: ${ACCESS_STATS_TRAEFIK_SELECTOR:-app.kubernetes.io/name=traefik}
+      # false にすると、クライアントの IP を保存しない(パスとメソッドの集計だけ残る)。
+      ACCESS_STATS_KEEP_CLIENTS: ${ACCESS_STATS_KEEP_CLIENTS:-true}
+      # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
+      KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
   # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
   migrate-app:
     image: migrate/migrate:v4.19.1
