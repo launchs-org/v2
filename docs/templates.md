@@ -1,6 +1,6 @@
 # テンプレート(設計)
 
-**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)、B3(フォルダ形式と `from:`)は実装済み。C(テンプレートから作る)は、土台(計画の型、計画を作る処理、クォータのまとめての確認)まで。D(画面)は、これから。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
+**状態: 段階 A(deploy のファイル)、B(定義と検証)、E の一部(同梱 5 つ)、B2(ConfigMap)、B3(フォルダ形式と `from:`)は実装済み。C(テンプレートから作る。API、Workflow、起動前の準備)も実装済み(実機確認済み)。D(画面)は、これから。** 決定したことと、決めていないことを、分けて書く。実装は、下の「段階」の順に、小さな PR で進める。
 
 利用者が、「PostgreSQL」「WordPress」のような、**よく使う構成**を、入力欄を埋めるだけで作れるようにする。構成は、YAML のファイルで定義する。初期設定の**設定ファイル**も、コンテナに渡せる。
 
@@ -304,3 +304,16 @@ nginx(静的な公開)、PostgreSQL、MariaDB、Redis、WordPress(web + DB)、No
 
 - 段階 B の、YAML の読み込みに使う、Go のライブラリ(`gopkg.in/yaml.v3` か、`sigs.k8s.io/yaml`)と、展開の実装(YAML を読んだ**あとの値**に、再帰で、置き換える)。
 - 段階 C の、クォータの「まとめての確認」を、既存のクォータの仕組み(ユーザーの行をロックして、数える)に、どう、組み込むか。deploy を、1 つずつ作る既存の処理の前に、全体の数を、確認する、別のメソッドが要る。
+
+## 実機での確認(段階 C。Talos。2026-11-18)
+
+実際のスタックと Talos で、API から、同梱のテンプレートを作って確認した。確認のあと、プロジェクトを API から削除し、namespace と PV が消えたことも確認した。
+
+- **nginx**(ConfigMap 3 ファイル + ingress): 数秒で `succeeded`。設定、ページ(変数が展開されている)、バイナリの `favicon.gif`(GIF として配信される)、`gzip on`、ingress のホスト名、deploy の `configmapMounts`(版 1)が、期待どおり。
+- **PostgreSQL**(volume + ConfigMap + deploy のファイル): 約 110 秒(PVC の用意)。`max_connections` と `log_statement` が、渡した値になり、`config_file` が、マウントした ConfigMap を指す。**`init.sql` が、最初の起動で実行された**(ログに `CREATE EXTENSION` が出て、`pgcrypto` がある)。Pod の再作成は 0 回。
+- **WordPress**(2 つの deploy + 2 つの volume + ingress): 約 4 分。順序は、db → db の service → web → web の service → ingress(web を YAML の先に書いても、参照される db が先)。web の `WORDPRESS_DB_HOST` が、db の service の DNS 名に置き換わり、**WordPress が DB につながって、インストール画面が出る**。
+- **code-server**(ConfigMap の `settings.json` を、ボリュームの下に置く): `succeeded`。テーマと文字の大きさが、渡した値で設定ファイルに入り、サーバーが応答する。**制約**: `.vscode` ディレクトリは root 所有になるため、利用者は、`.vscode` の中に、新しいファイルを作れない(`settings.json` 自体は、読めて、設定は効く)。ボリュームの他の場所には、書ける。
+
+### 分かったこと
+- deploy が「完了」になるのは、Deployment が Ready になったとき。**readiness probe を持たないイメージ**(PostgreSQL など)は、データベースが、接続を受け付ける前でも「完了」になる(PostgreSQL は、ボリュームの接続が遅く、`initdb` が終わるまで、さらに約 1 分かかった)。テンプレートに、起動の確認(probe)を足す機能は、まだ無い。
+- 開発環境の `air` の監視に、`templates/` を足した(テンプレートを編集しても、backend が再ビルドされなかったため)。

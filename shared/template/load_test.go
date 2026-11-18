@@ -16,17 +16,17 @@ func TestLoadBundled(testingT *testing.T) {
 	if loadError != nil {
 		testingT.Fatalf("同梱のテンプレートが、読み込めるはず: %v", loadError)
 	}
-	// 同梱の 5 つが、id の順に並ぶ。
+	// 同梱の 6 つが、id の順に並ぶ。
 	listed := registry.List()
 	ids := make([]string, 0, len(listed))
 	for _, bundled := range listed {
 		ids = append(ids, bundled.Metadata.ID)
 	}
-	if strings.Join(ids, ",") != "code-server,mariadb,nginx,postgres,redis" {
-		testingT.Fatalf("5 つが、id の順にあるはず: %v", ids)
+	if strings.Join(ids, ",") != "code-server,mariadb,nginx,postgres,redis,wordpress" {
+		testingT.Fatalf("6 つが、id の順にあるはず: %v", ids)
 	}
 	// スペックは、データベースと Redis が medium、code-server が large、nginx が small(決めたとおり)。
-	wantSpec := map[string]string{"nginx": "small", "redis": "medium", "postgres": "medium", "mariadb": "medium", "code-server": "large"}
+	wantSpec := map[string]string{"nginx": "small", "redis": "medium", "postgres": "medium", "mariadb": "medium", "code-server": "large", "wordpress": "medium"}
 	for _, bundled := range listed {
 		for _, resource := range bundled.Resources {
 			if resource.Kind == ResourceDeploy && resource.Spec != wantSpec[bundled.Metadata.ID] {
