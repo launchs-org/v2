@@ -56,3 +56,37 @@ func TestMergeAndPercentile(testingT *testing.T) {
 		testingT.Error("度数が無ければ 0 のはず")
 	}
 }
+
+// TestBuildReport は、区間への振り分け、空の区間の穴埋め、期間の名前の検索を確認する。
+func TestBuildReport(testingT *testing.T) {
+	spec, found := FindRange("1h")
+	if !found {
+		testingT.Fatal("1h があるはず")
+	}
+	if _, other := FindRange("2h"); other {
+		testingT.Error("2h は無いはず")
+	}
+	now := time.Date(2026, 11, 18, 10, 30, 30, 0, time.UTC)
+	record, _ := ParseLine(sampleLine, true)
+	record.Start = time.Date(2026, 11, 18, 10, 10, 20, 0, time.UTC)
+	report := BuildReport(spec, now, []Record{record})
+	if report.Range != "1h" || report.BucketSeconds != 60 || report.Totals.Count != 4 || report.Totals.Status["2xx"] != 4 || report.Totals.Status["5xx"] != 0 {
+		testingT.Fatalf("合計が違う: %+v", report.Totals)
+	}
+	// 1 時間(60 区間)+ 今の区間。
+	if len(report.Series) != 61 || !report.Series[0].Start.Equal(time.Date(2026, 11, 18, 9, 30, 0, 0, time.UTC)) {
+		testingT.Fatalf("区間の数と始まりが違う: %d %v", len(report.Series), report.Series[0].Start)
+	}
+	filled := 0
+	for _, point := range report.Series {
+		if point.Count > 0 {
+			filled++
+			if !point.Start.Equal(time.Date(2026, 11, 18, 10, 10, 0, 0, time.UTC)) || point.AvgMs != 2.125 {
+				testingT.Errorf("区間が違う: %+v", point)
+			}
+		}
+	}
+	if filled != 1 || report.Paths[0].Key != "/a" || report.Clients[0].Key != "1.1.1.1" {
+		testingT.Errorf("1 区間だけが埋まり、上位が入るはず: %d %+v", filled, report)
+	}
+}
