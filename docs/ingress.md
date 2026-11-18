@@ -15,7 +15,7 @@
 
 - Traefik をクラスターに入れる(IngressRoute の CRD を含む)。`TRAEFIK_API_VERSION`(既定 `traefik.io/v1alpha1`)と `TRAEFIK_ENTRY_POINTS`(既定 `web`)は、worker の環境変数。
 - Traefik の namespace を、`INGRESS_NAMESPACE`(worker)に指定する。プロジェクトの NetworkPolicy が、その namespace からの通信を許可する([network-isolation.md](network-isolation.md))。指定しないと、Traefik から Pod へ届かない。
-- 本番の RBAC では、worker に、`traefik.io` の `ingressroutes` の get / create / update / delete を許す。
+- 本番の RBAC では、worker に、`traefik.io` の `ingressroutes` の get / create / update / delete を許す。アクセスの集計(`INGRESS_STATS_PLUGIN`)を使うときは、`middlewares` の get / create / update / delete も許す([ingress-plugins.md](ingress-plugins.md))。
 - ベースドメインのワイルドカード(`*.shconn.org`)を、Traefik へ向ける(DNS)。
 
 ## 開発用のクラスター(Talos)での確認
@@ -64,6 +64,8 @@ code-server(4.145 で確認)は、WebSocket の握手のとき、`Origin`(ブラ
 3. curl は、`--http1.1` が要る(HTTP/2 では、`Upgrade` ヘッダーが無効になる)。
 
 ### 修正の方針(別の修正として実装する)
+
+> 実際には、案 A ではなく、Traefik のプラグイン `launchs-edge` で直す方針にした(本当のクライアント IP も届く。設計と確認の結果は [ingress-plugins.md](ingress-plugins.md))。
 運用側で直す方法も、ある。プラットフォームで直す方法を、実装する予定。
 
 | 案 | 内容 | 向き不向き |
