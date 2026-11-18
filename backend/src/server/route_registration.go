@@ -65,6 +65,12 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	templateController := controller.NewTemplateController(service.NewTemplateService(templateRegistry))
 	apiGroup.GET("/templates", templateController.List)
 	apiGroup.GET("/templates/:templateId", templateController.Get)
+	// テンプレートから部品を作る(受け付けは同期。作成は、Workflow が非同期で行い、進み具合を取れる)。
+	templateApplyController := controller.NewTemplateApplyController(service.NewTemplateApplyService(
+		templateRegistry, repository.NewTemplateApplyRepository(dependencies.Database), projectRepository,
+		repository.NewQuotaRepository(dependencies.Database), dependencies.IngressHostGenerator, dependencies.TemplateApplyStarter))
+	apiGroup.POST("/projects/:projectId/templates/:templateId/apply", templateApplyController.Apply)
+	apiGroup.GET("/projects/:projectId/template-applies/:applyId", templateApplyController.Get)
 	// プロジェクトの namespace の k8s の Event の一覧(watcher が、DB に保存したものを読む)。
 	eventController := controller.NewProjectEventController(service.NewProjectEventService(repository.NewProjectEventRepository(dependencies.Database)))
 	apiGroup.GET("/projects/:projectId/events", eventController.List)
