@@ -278,27 +278,30 @@ let nextId = 1
  * @returns 一覧、または、子つきの詳細。
  */
 function mockTasks(taskId: string | undefined, query: URLSearchParams): ProjectTaskListResponse | ProjectTask {
-  // 決まったタスクを、時刻をずらして並べる(1 つは実行中、1 つは失敗)。
+  // 決まったタスクを、時刻をずらして並べる(1 つは実行中で、手順の途中。1 つは失敗。1 つは削除済みのプロジェクトの削除)。
   const now = Date.now()
-  const make = (index: number, kind: string, resourceId: string, status: ProjectTask["status"], seconds: number, error = ""): ProjectTask => ({
-    taskId: `task-mock-${index}`, kind, resourceId, status, error, startedAt: new Date(now - index * 90_000).toISOString(),
-    finishedAt: status === "running" ? null : new Date(now - index * 90_000 + seconds * 1000).toISOString(), durationMs: seconds * 1000, workflowId: `wf-mock-${index}`,
+  const steps = (states: ("done" | "running" | "failed" | "waiting")[]) => ["namespace を用意", "volume と ConfigMap を用意", "Deployment を作成", "起動を待つ", "結果を記録"].map((label, index) => ({ activity: `step-${index}`, label, state: states[index] ?? "waiting" as const, ...(states[index] === "running" ? { attempt: 2 } : {}), ...(states[index] === "failed" ? { error: "api down" } : {}) }))
+  const make = (index: number, kind: string, resourceId: string, status: ProjectTask["status"], seconds: number, extra: Partial<ProjectTask> = {}): ProjectTask => ({
+    taskId: `task-mock-${index}`, projectId: "prj-mock", projectName: "my-app", kind, resourceId, status, error: "", startedAt: new Date(now - index * 90_000).toISOString(),
+    finishedAt: status === "running" ? null : new Date(now - index * 90_000 + seconds * 1000).toISOString(), durationMs: status === "running" ? (index * 90 + 40) * 1000 : seconds * 1000, workflowId: `wf-mock-${index}`, ...extra,
   })
-  const all = [
-    make(0, "ingress_apply", "ingress-mock-1", "running", 4),
-    make(1, "template_apply", "apply-mock-1", "succeeded", 48),
-    make(2, "deploy_create", "deploy-mock-1", "failed", 300, "イメージを取得できません: ghcr.io/example/app:missing (not found)"),
-    make(3, "deploy_scale", "deploy-mock-1", "succeeded", 12),
-    make(4, "volume_resize", "volume-mock-1", "succeeded", 9),
+  const all: ProjectTask[] = [
+    make(0, "deploy_create", "deploy-mock-1", "running", 4, { progress: { done: 3, total: 5, current: "起動を待つ", steps: steps(["done", "done", "done", "running"]) } }),
+    make(1, "ingress_apply", "ingress-mock-1", "running", 4, { progress: { done: 1, total: 2, current: "結果を確定", steps: [{ activity: "a", label: "IngressRoute を更新", state: "done" }, { activity: "b", label: "結果を確定", state: "running" }] } }),
+    make(2, "project_create", "prj-mock", "succeeded", 0, { projectName: "new-app" }),
+    make(3, "deploy_create", "deploy-mock-2", "failed", 300, { error: "処理「WaitDeploymentReady」が、時間切れになりました", progress: { done: 3, total: 5, current: "", steps: steps(["done", "done", "done", "failed"]) } }),
+    make(4, "template_apply", "apply-mock-1", "succeeded", 48),
+    make(5, "project_delete", "prj-old", "succeeded", 11, { projectId: "prj-old", projectName: "old-app" }),
   ]
   if (taskId) {
     const found = all.find((task) => task.taskId === taskId) ?? all[0]
-    return found.kind === "template_apply" ? { ...found, children: [make(11, "deploy_create", "deploy-mock-2", "succeeded", 20), make(12, "service_create", "service-mock-2", "succeeded", 6)] } : { ...found, children: [] }
+    const withSteps = found.progress ? found : { ...found, progress: { done: 5, total: 5, current: "", steps: steps(["done", "done", "done", "done", "done"]) } }
+    return found.kind === "template_apply" ? { ...withSteps, children: [make(11, "deploy_create", "deploy-mock-2", "succeeded", 20), make(12, "service_create", "service-mock-2", "succeeded", 6)] } : { ...withSteps, children: [] }
   }
   const status = query.get("status")
   const kind = query.get("kind")
-  const tasks = all.filter((task) => (!status || task.status === status) && (!kind || task.kind === kind))
-  return { tasks, nextCursor: null, counts: { running: 1, failedRecent: 1 } }
+  const tasks = all.filter((task) => (!status || task.status === status) && (!kind || task.kind === kind)).map(({ progress, ...task }) => (progress && task.status === "running" ? { ...task, progress: { ...progress, steps: undefined } } : task))
+  return { tasks, nextCursor: null, counts: { running: 2, failedRecent: 1 } }
 }
 
 /**
@@ -392,6 +395,8 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
         volumeTotalMB: { used: volumeUsed, limit: 102400 },
         specs: { small: { used: 3, limit: 20 }, medium: { used: 1, limit: 10 }, large: { used: 0, limit: 4 } },
       }
+    } else if (segments[2] === "tasks" && method === "GET") {
+      result = mockTasks(undefined, url.searchParams)
     } else if (segments[2] === "templates") {
       if (segments[3]) {
         const found = mockTemplates.find((template) => template.id === segments[3])

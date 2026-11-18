@@ -7,6 +7,7 @@ import type { ProjectViewProps } from "@/lib/nav"
 import { validateProjectName } from "@/lib/project-name"
 import type { DeployListResponse, Project, VolumeListResponse } from "@/lib/types"
 import { Badge, EmptyState, Modal, ToastNotice } from "@/components/ui-kit"
+import { TasksView } from "@/components/views/tasks-view"
 
 /** 表の列幅(モックと同じ)。 */
 const COLS = { "--cols": "1.4fr 1fr 90px 100px 130px 190px" } as React.CSSProperties
@@ -126,6 +127,11 @@ export function ProjectsView({ projects, refreshInterval, onRefresh, nav, search
           {rows.length === 0 && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>一致するプロジェクトがありません。</div>}
         </div></div>
       )}
+      {/* 全てのプロジェクトのタスク(作成・削除を含む。削除したプロジェクトのものも)。 */}
+      <div style={{ marginTop: 28 }}>
+        <h2 className="h2 disp" style={{ marginBottom: 12 }}>タスク</h2>
+        <TasksView projects={projects} refreshInterval={refreshInterval} nav={nav} />
+      </div>
       {(modal === "create" || modal === "rename") && (
         <Modal title={modal === "create" ? "プロジェクトを作成" : "名前を変更"} onClose={() => setModal(null)} footer={<><button className="btn" type="button" onClick={() => setModal(null)}>やめる</button><button className="btn primary" type="submit" form="project-form" disabled={busy || problem !== null}>{modal === "create" ? "作成" : "保存"}</button></>}>
           <form id="project-form" onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>

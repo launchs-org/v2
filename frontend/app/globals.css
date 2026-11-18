@@ -304,3 +304,30 @@ button.alog-toggle { font-family: inherit; }
 .tasks-detail .meta { color: var(--faint); font-size: 12px; margin-top: 6px; }
 .tasks-detail ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tasks-detail li { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+
+/* 実行中の印(回転マークと、進行バー) */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes tslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+@keyframes tstripe { to { background-position: 28px 0; } }
+.spinner { display: inline-block; width: 11px; height: 11px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+.spinner.lg { width: 14px; height: 14px; border-width: 2.5px; }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .tprog > i { animation: none !important; } }
+.alog-status .spinner { margin-right: 6px; }
+.tprog { position: relative; width: 140px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.tprog > i { display: block; height: 100%; border-radius: 3px; background-color: #1A73E8; background-image: linear-gradient(45deg, rgba(255,255,255,.28) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.28) 50%, rgba(255,255,255,.28) 75%, transparent 75%); background-size: 28px 28px; animation: tstripe 1s linear infinite; transition: width .5s ease; }
+.tprog.ind > i { width: 30%; animation: tslide 1.3s ease-in-out infinite; background-image: none; }
+.tprog.done > i { background-color: #137333; background-image: none; animation: none; }
+.tprog.fail > i { background-color: var(--bad); background-image: none; animation: none; }
+.tprog-cell { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+.tprog-cell small { color: var(--mut); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.tsteps { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tsteps li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.tsteps .mark { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: none; border-radius: 50%; font-size: 10px; font-weight: 700; color: #fff; }
+.tsteps .mark.done { background: #137333; }
+.tsteps .mark.failed { background: var(--bad); }
+.tsteps .mark.waiting { background: transparent; border: 2px solid var(--line2); }
+.tsteps .mark.running { background: transparent; color: #1A73E8; }
+.tsteps li.waiting { color: var(--faint); }
+.tsteps li.extra { color: var(--mut); font-style: italic; }
+.tsteps .attempt { font-size: 11.5px; color: var(--warn); }
+.tsteps .why { font-size: 12px; color: var(--bad); overflow-wrap: anywhere; }

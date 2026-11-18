@@ -166,9 +166,10 @@ function TasksTabBadge({ project, refreshInterval }: { project: Project; refresh
   const running = data?.counts.running ?? 0
   const failed = data?.counts.failedRecent ?? 0
   if (running === 0 && failed === 0) return null
-  const failedFirst = failed > 0
+  const failedFirst = failed > 0 && running === 0
   const count = failedFirst ? failed : running
-  return <span className="cnt" style={{ marginLeft: 6, background: failedFirst ? "#D9480F" : "#1A73E8", color: "#fff", borderRadius: 4, font: "500 11px/1 Roboto, sans-serif", padding: "3px 6px" }} aria-label={failedFirst ? `直近 24 時間の失敗 ${failed} 件` : `実行中 ${running} 件`}>{count > 99 ? "99+" : count}</span>
+  // 実行中があれば、回転マークつきの青い数。なければ、失敗の数(橙)。
+  return <span className="cnt" style={{ marginLeft: 6, background: failedFirst ? "#D9480F" : "#1A73E8", color: "#fff", borderRadius: 4, font: "500 11px/1 Roboto, sans-serif", padding: "3px 6px", display: "inline-flex", alignItems: "center", gap: 4 }} aria-label={failedFirst ? `直近 24 時間の失敗 ${failed} 件` : `実行中 ${running} 件`}>{!failedFirst && <span className="spinner" aria-hidden style={{ width: 8, height: 8, borderWidth: 1.5 }} />}{count > 99 ? "99+" : count}</span>
 }
 
 /** 上のバーの、反映待ち(プロジェクトごとに集計する)。 */
