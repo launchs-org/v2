@@ -4,7 +4,7 @@ import { api, authenticatedFetcher } from "@/lib/api"
 import type { DeployDetail, DeployListResponse, IngressDetail, IngressListResponse, Project, Volume, VolumeListResponse } from "@/lib/types"
 
 /** 未適用の変更の種類。 */
-export type PendingKind = "起動設定" | "マウント" | "Service" | "Ingress" | "ボリューム"
+export type PendingKind = "起動設定" | "マウント" | "ConfigMap" | "Service" | "Ingress" | "ボリューム"
 
 /** 未適用の変更1件。 */
 export type PendingItem = {
@@ -63,6 +63,8 @@ export function usePending(project: Project, refreshInterval: number): PendingSu
     const config = deploy.config
     if (config.pending_env !== null || config.pending_command !== null || config.pending_args !== null) items.push({ key: `config:${deploy.deployId}`, kind: "起動設定", target: deploy.deployId, sub: "環境変数・コマンド・引数(反映すると Pod が再作成されます)", applyPath: `${path}/config/apply`, discardPath: `${path}/config/discard`, deployId: deploy.deployId })
     if (deploy.volumes.pending_mounts !== null) items.push({ key: `mounts:${deploy.deployId}`, kind: "マウント", target: deploy.deployId, sub: `${deploy.volumes.pending_mounts.length} 件のマウント(反映すると Pod が再作成されます)`, applyPath: `${path}/mounts/apply`, discardPath: `${path}/mounts/discard`, deployId: deploy.deployId })
+    const pendingConfigMapMounts = deploy.configmapMounts?.pending_mounts ?? null
+    if (pendingConfigMapMounts !== null) items.push({ key: `configmap:${deploy.deployId}`, kind: "ConfigMap", target: deploy.deployId, sub: `${pendingConfigMapMounts.length} 件のファイル(反映すると Pod が再作成されます)`, applyPath: `${path}/configmap-mounts/apply`, discardPath: `${path}/configmap-mounts/discard`, deployId: deploy.deployId })
     if (deploy.service?.pending_ports) items.push({ key: `service:${deploy.deployId}`, kind: "Service", target: deploy.service.serviceId, sub: `${deploy.service.pending_ports.length} ポート(Pod は再起動しません)`, applyPath: `${path}/service/apply`, discardPath: `${path}/service/discard`, deployId: deploy.deployId })
   }
   for (const ingress of ingressDetails ?? []) {
