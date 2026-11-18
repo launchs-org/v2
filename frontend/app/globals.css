@@ -268,6 +268,7 @@ body:has(.panel-resize.on) { cursor: col-resize; user-select: none; }
 .alog-toggle.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, #fff); background: color-mix(in srgb, var(--accent) 8%, #fff); }
 .alog-toggle.on .dot { background: var(--accent); }
 .alog-toggle input { display: none; }
+button.alog-toggle { font-family: inherit; }
 .alog-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 4px 18px 14px; }
 .alog-filters .wide { grid-column: span 2; }
 .alog-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
