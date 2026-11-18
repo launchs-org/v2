@@ -1,0 +1,33 @@
+# launchs の本番向けのマニフェスト。この場所で、`kubectl apply -k .` する(手順は README.md)。
+# namespace は、各ファイルに明記している(accessstats の Role は、Traefik の namespace に置くため、namespace の一括指定は使わない)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  # 秘密(gitignore。secret.example.yaml をコピーして作る)。
+  - secret.yaml
+  - rbac.yaml
+  - postgres.yaml
+  - temporal.yaml
+  - auth.yaml
+  - backend.yaml
+  - worker.yaml
+  - watcher.yaml
+  - logcollector.yaml
+  - accessstats.yaml
+  - frontend.yaml
+  - ingressroute.yaml
+
+# イメージのタグ。main に push されるたび、sha-<コミットの短い SHA> と latest が、GHCR に push される(.github/workflows/release.yml)。
+# 本番では、latest ではなく、sha-… を指定して、固定する(どのコミットが動いているかが、分かるように)。
+images:
+  - {name: ghcr.io/launchs-org/v2/backend, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/worker, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/watcher, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/logcollector, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/accessstats, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/auth, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/frontend, newTag: latest}
+  - {name: ghcr.io/launchs-org/v2/migrate, newTag: latest}

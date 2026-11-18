@@ -1,0 +1,35 @@
+# 秘密ではない設定。自分の環境に合わせて、変える(特に INGRESS_BASE_DOMAIN)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: launchs-config
+  namespace: launchs
+data:
+  # ingress に払い出すホスト名の、ベースドメイン(<形容詞>-<色>-<動物>.<ベースドメイン>)と、払い出さないサブドメイン。
+  INGRESS_BASE_DOMAIN: shconn.org
+  INGRESS_RESERVED_SUBDOMAINS: www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard
+  # volume 1つの大きさの上限(MB)。
+  VOLUME_MAX_SIZE_MB: "5120"
+  # プロジェクトの namespace を隔離する NetworkPolicy で、外からの通信を許す namespace(Traefik)。
+  INGRESS_NAMESPACE: traefik
+  # Traefik の IngressRoute の apiVersion と、受け付ける entryPoint。
+  TRAEFIK_API_VERSION: traefik.io/v1alpha1
+  TRAEFIK_ENTRY_POINTS: web
+  # アクセスログのプラグイン(launchs-stats)の名前。Traefik にプラグインを入れていないなら、空にする(docs/ingress-plugins.md)。
+  INGRESS_STATS_PLUGIN: launchs-stats
+  # volume の PVC の StorageClass(空ならクラスターの既定)と、アクセスモード。
+  VOLUME_STORAGE_CLASS: ""
+  VOLUME_ACCESS_MODE: ReadWriteMany
+  # クラスターのドメイン(service の DNS 名の最後の部分)。
+  CLUSTER_DOMAIN: cluster.local
+  # Traefik の Pod の場所(アクセスログを読む)。
+  ACCESS_STATS_TRAEFIK_NAMESPACE: traefik
+  ACCESS_STATS_TRAEFIK_SELECTOR: app.kubernetes.io/name=traefik
+  # サインアップの公開範囲(open か invite)。
+  AUTH_SIGNUP_MODE: invite
+  # X-Forwarded-For を信頼するプロキシ(Traefik の Pod がいる範囲)。
+  AUTH_TRUSTED_PROXY_CIDRS: 10.0.0.0/8
+  # Temporal。
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  LOG_LEVEL: info

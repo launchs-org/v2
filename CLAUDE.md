@@ -22,6 +22,7 @@ accessstats/    ingress のアクセスの集計を、Traefik のログから DB
 traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Yaegi での試験(harness)
 accessstats/    Traefik のログから、ingress のアクセスの集計を読み取って DB に保存するコンテナ(docs/ingress-plugins.md)
 traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Yaegi での試験(harness)
+deploy/         本番向けの Kubernetes のマニフェスト(kustomize。`cd deploy && kubectl apply -k .`。deploy/README.md)
 registry/       同じ形のコンテナ用フォルダ(これから作る)
 shared/         バックエンド・ワーカー・watcher で共有するコード
 migrations/     DB のマイグレーション(up のみ)
@@ -67,6 +68,8 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - **ログインとサインアップの、人間であることの確認は、Cloudflare Turnstile**(`.env` の `TURNSTILE_SITE_KEY` と `TURNSTILE_SECRET_KEY` を、両方書いたときだけ有効。既定は無効。本番の frontend には `CSP_TURNSTILE=https://challenges.cloudflare.com` も要る。[docs/auth.md](docs/auth.md) §16)。
 - **フロントエンドは、`frontend/`(Next.js + React + TypeScript。v0 で作った画面を土台にしている)**。同じホストの `/` に置き、`/api/` と `/auth/` を、backend と auth へ振り分ける(CORS は要らない)。開発は `next dev`(ポート 3000、nginx が `/` を向ける)、本番は standalone 出力を Node で動かす。`NEXT_PUBLIC_LAUNCHS_API_MODE=live` のとき本物の API、未指定だと、見せかけのデータ(`lib/mock-api.ts`)で動く(compose と dockerfile は live にしてある)。開発サーバーに別ホスト名(例: 172.30.1.1)でつなぐときは、`DEV_ALLOWED_ORIGINS`(compose が `HTTPS_BIND_ADDRESS` から作る)。型の検査は `task frontend:test`、本番イメージは `task frontend:build`。**以前の Vite 版にあった、テスト(vitest)と、厳しい CSP は、まだ無い**。
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
+
+- **本番向けのマニフェストは `deploy/`(kustomize)**。PostgreSQL、Temporal、auth、backend、worker、watcher、logcollector、accessstats、frontend、IngressRoute を、namespace `launchs` に置く。秘密は `deploy/secret.yaml`(gitignore。雛形は `secret.example.yaml`)。マイグレーションは、`migrate` イメージ(`migrations/dockerfile`)を、backend と auth の initContainer が流す。イメージは、`main` への push で、GHCR(`ghcr.io/launchs-org/v2/<名前>`。`sha-…` と `latest`)に出る(`.github/workflows/release.yml`)。通しの確認(イメージが出てから)は、まだ。
 
 ## docs/endpoints/ — エンドポイント仕様
 

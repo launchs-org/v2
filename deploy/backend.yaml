@@ -1,0 +1,71 @@
+# API サーバー。access token は、auth の JWKS の公開鍵で検証する(AUTH_REQUIRE_JWKS=true で、開発用の DEV_USER_ID を拒否する)。
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: launchs
+spec:
+  selector:
+    app.kubernetes.io/name: backend
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      initContainers:
+        # app データベースのマイグレーション(up だけ。何度流しても、変わらない)。
+        - name: migrate
+          image: ghcr.io/launchs-org/v2/migrate:latest
+          args: ["-path=/migrations/app", "-database=postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable", "up"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+      containers:
+        - name: backend
+          image: ghcr.io/launchs-org/v2/backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            - name: AUTH_JWKS_URL
+              value: http://auth:8080/auth/.well-known/jwks.json
+            - name: AUTH_REQUIRE_JWKS
+              value: "true"
+          envFrom:
+            - configMapRef:
+                name: launchs-config
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 1Gi}

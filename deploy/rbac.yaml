@@ -1,0 +1,112 @@
+# k8s を操作・観測するコンテナの権限。最小限にする(それぞれ、別の ServiceAccount)。
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: worker, namespace: launchs}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: watcher, namespace: launchs}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: logcollector, namespace: launchs}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: accessstats, namespace: launchs}
+---
+# worker: プロジェクトの namespace と、その中の deploy、service、ConfigMap、PVC、NetworkPolicy、IngressRoute、Middleware を作る・消す。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: launchs-worker
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, services, configmaps, persistentvolumeclaims]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [ingressroutes, middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: launchs-worker
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: launchs-worker}
+subjects:
+  - {kind: ServiceAccount, name: worker, namespace: launchs}
+---
+# watcher: Pod、Deployment、イベントを、読み取るだけ(DB に書くのは、watcher だけ。k8s には書かない)。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: launchs-watcher
+rules:
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: launchs-watcher
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: launchs-watcher}
+subjects:
+  - {kind: ServiceAccount, name: watcher, namespace: launchs}
+---
+# logcollector: Pod のログを読むだけ。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: launchs-logcollector
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: launchs-logcollector
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: launchs-logcollector}
+subjects:
+  - {kind: ServiceAccount, name: logcollector, namespace: launchs}
+---
+# accessstats: Traefik の namespace の Pod のログだけを読む(Role。他の namespace は読めない)。
+# Traefik の namespace を変えたときは、この namespace も変える(config.yaml の ACCESS_STATS_TRAEFIK_NAMESPACE と同じ)。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: launchs-accessstats
+  namespace: traefik
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: launchs-accessstats
+  namespace: traefik
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: launchs-accessstats}
+subjects:
+  - {kind: ServiceAccount, name: accessstats, namespace: launchs}
