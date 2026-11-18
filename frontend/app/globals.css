@@ -135,12 +135,13 @@ body { margin: 0; background: #F8F9FA; }
 
 
 /* ===== Railway 風: 色つきのリソースのアイコン、キャンバス、右のパネル、動き ===== */
-.app { --k-deploy: #6D4AFF; --k-volume: #E8920C; --k-ingress: #0E8FD6; --k-service: #12A36B; }
+.app { --k-deploy: #6D4AFF; --k-volume: #E8920C; --k-ingress: #0E8FD6; --k-service: #12A36B; --k-configmap: #5F6B7A; }
 .kind-icon { display: inline-grid; place-items: center; flex: none; border-radius: 10px; color: #fff; }
 .kind-icon.k-deploy { background: var(--k-deploy); }
 .kind-icon.k-volume { background: var(--k-volume); }
 .kind-icon.k-ingress { background: var(--k-ingress); }
 .kind-icon.k-service { background: var(--k-service); }
+.kind-icon.k-configmap { background: var(--k-configmap); }
 
 /* 画面の枠: 上のバー + 中身(キャンバスは、残りの高さ全部) */
 .shell { display: flex; flex-direction: column; height: 100vh; min-height: 640px; width: 100%; }
