@@ -1,10 +1,10 @@
-# code-server(ブラウザで動く VS Code。https://github.com/coder/code-server)。パスワードつき。作業フォルダは、ボリュームに保存する。
+# code-server(ブラウザで動く VS Code)。パスワードつき。作業フォルダはボリュームに保存し、エディタの設定(settings.json)は ConfigMap で渡す。
 apiVersion: launchs/v1
 kind: Template
 metadata:
   id: code-server
   name: code-server(VS Code)
-  description: ブラウザで使える VS Code(code-server)。パスワードで保護され、作業フォルダは、ボリュームに保存されます。
+  description: ブラウザで使える VS Code。パスワードで保護され、作業フォルダはボリュームに保存されます。
   icon: code
   category: tool
 
@@ -20,22 +20,54 @@ variables:
     default: "2048"
     min: 512
     max: 5120
+  - name: theme
+    label: テーマ
+    type: choice
+    default: Default Dark Modern
+    options:
+      - value: Default Dark Modern
+        label: ダーク
+      - value: Default Light Modern
+        label: ライト
+  - name: font_size
+    label: 文字の大きさ
+    type: integer
+    default: "14"
+    min: 8
+    max: 32
 
 resources:
   - kind: volume
     name: home
     sizeMB: ${storage}
 
+  - kind: configmap
+    name: editor
+    files:
+      - key: settings.json
+        content: |
+          {
+            "workbench.colorTheme": "${theme}",
+            "editor.fontSize": ${font_size},
+            "files.autoSave": "afterDelay"
+          }
+
   - kind: deploy
     name: ide
     image: codercom/code-server:latest
     spec: large
     replicas: 1
+    args: ["--bind-addr", "0.0.0.0:8080", "/home/coder/project"]
     env:
       PASSWORD: ${password}
     mounts:
       - volume: home
         path: /home/coder/project
+    configmaps:
+      # ワークスペースの設定。ボリュームの下に置く(マウント先の下は、置ける)
+      - configmap: editor
+        key: settings.json
+        path: /home/coder/project/.vscode/settings.json
     service:
       ports:
         - name: http

@@ -1,10 +1,10 @@
-# nginx で、簡単なページを公開する。ページの内容(HTML)は、deploy の「ファイル」として渡す。
+# nginx で静的なページを公開する。サーバーの設定(default.conf)とページ(index.html)と、バイナリの画像(favicon)を、共有の ConfigMap にして置く。
 apiVersion: launchs/v1
 kind: Template
 metadata:
   id: nginx
   name: nginx(静的なページ)
-  description: nginx で、簡単なページを公開します。ページの内容は、あとから、ファイルの設定で変えられます。
+  description: nginx で、簡単なページを公開します。設定ファイルとページは、ConfigMap で管理され、あとから編集できます。
   icon: globe
   category: web
 
@@ -14,21 +14,57 @@ variables:
     type: string
     default: Hello, Launchs!
     maxLength: 100
+  - name: gzip
+    label: 圧縮(gzip)
+    type: choice
+    default: "on"
+    options:
+      - value: "on"
+        label: 有効
+      - value: "off"
+        label: 無効
 
 resources:
+  - kind: configmap
+    name: site
+    files:
+      - key: default.conf
+        content: |
+          server {
+            listen 80;
+            server_name _;
+            root /usr/share/nginx/html;
+            index index.html;
+            gzip ${gzip};
+            add_header X-Content-Type-Options nosniff;
+            location / { try_files $uri $uri/ =404; }
+          }
+      - key: index.html
+        content: |
+          <!doctype html>
+          <html lang="ja">
+          <head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="/favicon.gif"></head>
+          <body><h1>${title}</h1><p>${project.name} で動いています。</p></body>
+          </html>
+      - key: favicon.gif            # バイナリ(1x1 の透明な GIF)。base64 で書く
+        encoding: base64
+        content: R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
+
   - kind: deploy
     name: web
     image: nginx:alpine
     spec: small
     replicas: 1
-    files:
-      - path: /usr/share/nginx/html/index.html
-        content: |
-          <!doctype html>
-          <html lang="ja">
-          <head><meta charset="utf-8"><title>${title}</title></head>
-          <body><h1>${title}</h1></body>
-          </html>
+    configmaps:
+      - configmap: site
+        key: default.conf
+        path: /etc/nginx/conf.d/default.conf
+      - configmap: site
+        key: index.html
+        path: /usr/share/nginx/html/index.html
+      - configmap: site
+        key: favicon.gif
+        path: /usr/share/nginx/html/favicon.gif
     service:
       ports:
         - name: http
