@@ -109,9 +109,9 @@ export function IngressAccessLog({ basePath }: { basePath: string }) {
   function applyText() { setApplied({ ip: clientIp.trim(), q: text.trim() }) }
 
   return (
-    <div className="card" style={{ overflow: "hidden" }}>
+    <div style={{ borderTop: "1px solid var(--line2)" }}>
       <div className="row pad" style={{ paddingBottom: 8 }}>
-        <h2 className="h2 grow">アクセスログ</h2>
+        <h3 className="h2 grow" style={{ fontSize: 13 }}>リクエスト一覧(新しい順)</h3>
         <span className="faint" style={{ fontSize: 12 }}>{isValidating ? "更新中…" : `${LIVE_INTERVAL_MS / 1000} 秒ごとに更新`}</span>
       </div>
       <div className="row" style={{ gap: 8, padding: "0 18px 10px", flexWrap: "wrap" }}>
@@ -143,7 +143,7 @@ export function IngressAccessLog({ basePath }: { basePath: string }) {
           </tbody>
         </table>
       </div>
-      {data && rows.length === 0 && <div className="mut" style={{ fontSize: 12.5, padding: "12px 18px" }}>該当するアクセスログがありません(集計を有効にしたあとのアクセスだけが記録されます)。</div>}
+      {data && rows.length === 0 && <div className="mut" style={{ fontSize: 12.5, padding: "12px 18px" }}>該当するアクセスログがありません(記録を有効にしたあとのアクセスだけが残ります)。</div>}
       {(nextCursor || moreError) && (
         <div className="row" style={{ padding: "10px 18px 14px", gap: 10 }}>
           {nextCursor && <button className="btn sm" type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "読み込み中…" : "さらに読み込む"}</button>}
