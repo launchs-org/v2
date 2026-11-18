@@ -25,6 +25,12 @@ const (
 	// ApplyIngressRulesWorkflowTimeout は、ルールの反映の Workflow 全体の期限。
 	ApplyIngressRulesWorkflowTimeout = 15 * time.Minute
 
+	// ReapplyIngressRouteWorkflowName は、現在のルールのまま、IngressRoute を作り直す Workflow(アクセスの集計の切り替え)の名前。
+	ReapplyIngressRouteWorkflowName = "ReapplyIngressRouteWorkflow"
+
+	// ReapplyIngressRouteActivityName は、現在のルールで IngressRoute を反映する Activity の名前。
+	ReapplyIngressRouteActivityName = "ReapplyIngressRoute"
+
 	// DeleteIngressWorkflowName は、ingress の削除の Workflow の名前。
 	DeleteIngressWorkflowName = "DeleteIngressWorkflow"
 
@@ -57,6 +63,12 @@ type CommitIngressRulesResultInput struct {
 
 	// Succeeded は、反映に成功したか。
 	Succeeded bool
+}
+
+// ReapplyIngressRouteInput は、IngressRoute の作り直しの Workflow と Activity の入力。
+type ReapplyIngressRouteInput struct {
+	// IngressID は、対象の ingress の ID。
+	IngressID string
 }
 
 // DeleteIngressInput は、ingress の削除の Workflow の入力。
@@ -105,4 +117,16 @@ func NewApplyIngressRulesWorkflowID(ingressID string) string {
 func NewDeleteIngressWorkflowID(ingressID string) string {
 	// ingress の ID に、実行ごとの UUID を付ける。
 	return "delete-" + ingressID + "-" + uuid.NewString()
+}
+
+// NewReapplyIngressRouteWorkflowID は、IngressRoute の作り直しの Workflow の ID を作る(実行ごとに別の ID)。
+//
+// 引数:
+//   - ingressID: 対象の ingress の ID。
+//
+// 戻り値:
+//   - Workflow の ID。
+func NewReapplyIngressRouteWorkflowID(ingressID string) string {
+	// ingress の ID に、実行ごとの UUID を付ける。
+	return "reapply-route-" + ingressID + "-" + uuid.NewString()
 }

@@ -89,6 +89,10 @@ type WorkerConfig struct {
 	// TraefikEntryPoints は、IngressRoute を受け付ける entryPoint の名前(環境変数 TRAEFIK_ENTRY_POINTS。カンマ区切り)。
 	TraefikEntryPoints []string
 
+	// IngressStatsPlugin は、アクセスの集計の Traefik プラグインの名前(環境変数 INGRESS_STATS_PLUGIN。例: launchs-stats)。
+	// 空なら、アクセスの集計は使わない(既定。Traefik にプラグインを入れてから指定する。docs/ingress-plugins.md)。
+	IngressStatsPlugin string
+
 	// VolumeStorageClass は、PVC に指定する StorageClass(環境変数 VOLUME_STORAGE_CLASS)。空なら、クラスターの既定。拡張に対応したものが前提。
 	VolumeStorageClass string
 
@@ -111,6 +115,7 @@ type WorkerConfig struct {
 //   - CLUSTER_DOMAIN: クラスターのドメイン。省略すると cluster.local(クラスターごとに違う。CoreDNS の設定で確かめる)。
 //   - EGRESS_BLOCKED_NETWORKS: プロジェクトの namespace から、出ていく通信を許可しない内部のネットワーク(CIDR のカンマ区切り。IPv4)。
 //     省略すると、既定(10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10)。何も除かない設定は、できない。
+//   - INGRESS_STATS_PLUGIN: アクセスの集計の Traefik プラグインの名前(例: launchs-stats)。省略すると、集計は使わない。
 //   - INGRESS_NAMESPACE: 外からの通信を中継する namespace(Traefik など)。省略すると、その namespace からの通信は許可しない。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
@@ -136,6 +141,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	clusterDomain := reader.OptionalString("CLUSTER_DOMAIN", defaultClusterDomain)
 	traefikAPIVersion := reader.OptionalString("TRAEFIK_API_VERSION", defaultTraefikAPIVersion)
 	traefikEntryPointsText := reader.OptionalString("TRAEFIK_ENTRY_POINTS", defaultTraefikEntryPoints)
+	ingressStatsPlugin := reader.OptionalString("INGRESS_STATS_PLUGIN", "")
 	volumeStorageClass := reader.OptionalString("VOLUME_STORAGE_CLASS", "")
 	volumeAccessMode := reader.OptionalString("VOLUME_ACCESS_MODE", defaultVolumeAccessMode)
 	kubernetesSettings := k8s.ReadSettings(reader)
@@ -203,6 +209,7 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		VolumeAccessMode:   volumeAccessMode,
 		TraefikAPIVersion:  traefikAPIVersion,
 		TraefikEntryPoints: traefikEntryPoints,
+		IngressStatsPlugin: ingressStatsPlugin,
 		Kubernetes:         kubernetesSettings,
 	}, nil
 }

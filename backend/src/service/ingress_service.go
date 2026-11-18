@@ -41,6 +41,9 @@ type IngressStore interface {
 	// BeginRulesApply は、ルールの反映を始める(状態を applying にする)。変える前の状態を返す。
 	BeginRulesApply(requestContext context.Context, userID string, projectID string, ingressID string) (string, error)
 
+	// SetAccessStats は、アクセスの集計の有効・無効を保存し、保存後の ingress を返す。
+	SetAccessStats(requestContext context.Context, userID string, projectID string, ingressID string, enabled bool) (model.Ingress, error)
+
 	// RevertApply は、反映の開始に失敗したとき、状態を元に戻す。
 	RevertApply(requestContext context.Context, ingressID string, previousStatus string) error
 }
@@ -49,6 +52,9 @@ type IngressStore interface {
 type IngressWorkflowStarter interface {
 	// StartRulesApply は、ルールの反映の Workflow を開始する。
 	StartRulesApply(requestContext context.Context, ingressID string) error
+
+	// StartRouteReapply は、現在のルールのまま、IngressRoute を作り直す Workflow を開始する。
+	StartRouteReapply(requestContext context.Context, ingressID string) error
 
 	// StartIngressDeletion は、ingress の削除の Workflow を開始する。
 	StartIngressDeletion(requestContext context.Context, ingressID string) error
@@ -181,6 +187,37 @@ func (ingressService *IngressService) UpdateRules(requestContext context.Context
 func (ingressService *IngressService) DiscardRules(requestContext context.Context, userID string, projectID string, ingressID string) error {
 	// 保存先に任せる。
 	return ingressService.ingressStore.DiscardPendingRules(requestContext, userID, projectID, ingressID)
+}
+
+// UpdateAccessStats は、アクセスの集計の有効・無効を切り替え、IngressRoute に反映する。
+//
+// 流れ: 設定を保存する → ルールがあれば、IngressRoute を作り直す Workflow を開始する(同じ値でも開始する。冪等)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - projectID: プロジェクトの ID。
+//   - ingressID: ingress の ID。
+//   - enabled: 有効にするなら true。
+//
+// 戻り値:
+//   - 保存後の ingress。無ければ not_found、反映中・削除中なら conflict、Workflow を開始できなければ internal_error。
+func (ingressService *IngressService) UpdateAccessStats(requestContext context.Context, userID string, projectID string, ingressID string, enabled bool) (model.Ingress, error) {
+	// 設定を保存する。
+	ingress, saveError := ingressService.ingressStore.SetAccessStats(requestContext, userID, projectID, ingressID, enabled)
+	if saveError != nil {
+		return model.Ingress{}, saveError
+	}
+	// 反映済みのルールが無ければ、IngressRoute が無いので、作り直すものが無い。
+	rules, parseError := model.ParseIngressRules(ingress.Rules)
+	if parseError != nil || len(rules) == 0 {
+		return ingress, nil
+	}
+	// IngressRoute を作り直す。
+	if startError := ingressService.ingressWorkflowStarter.StartRouteReapply(requestContext, ingressID); startError != nil {
+		return model.Ingress{}, apperror.Wrap(apperror.KindInternal, "IngressRoute の作り直しを開始できませんでした", startError)
+	}
+	return ingress, nil
 }
 
 // ApplyRules は、pending のルールの反映を始める。

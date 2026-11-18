@@ -68,3 +68,24 @@ func (starter *TemporalIngressWorkflowStarter) StartIngressDeletion(requestConte
 	}
 	return nil
 }
+
+// StartRouteReapply は、現在のルールのまま、IngressRoute を作り直す Workflow を開始する(開始だけを行い、完了は待たない)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - ingressID: 対象の ingress の ID。
+//
+// 戻り値:
+//   - Workflow を開始できなかったときのエラー。
+func (starter *TemporalIngressWorkflowStarter) StartRouteReapply(requestContext context.Context, ingressID string) error {
+	// 実行ごとに別の ID で、期限つきで開始する。
+	_, executeError := starter.temporalClient.ExecuteWorkflow(requestContext, client.StartWorkflowOptions{
+		ID:                       sharedworkflow.NewReapplyIngressRouteWorkflowID(ingressID),
+		TaskQueue:                sharedworkflow.TaskQueueGeneral,
+		WorkflowExecutionTimeout: sharedworkflow.ApplyIngressRulesWorkflowTimeout,
+	}, sharedworkflow.ReapplyIngressRouteWorkflowName, sharedworkflow.ReapplyIngressRouteInput{IngressID: ingressID})
+	if executeError != nil {
+		return fmt.Errorf("IngressRoute の作り直しの Workflow を開始できませんでした: %w", executeError)
+	}
+	return nil
+}
