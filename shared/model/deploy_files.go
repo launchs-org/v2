@@ -60,8 +60,7 @@ func ValidateFiles(files []FileSpec, mounts []MountSpec) error {
 	totalBytes := 0
 	for _, file := range files {
 		// path の書式を確かめる(「/」で始まる、使える文字だけ、長さ、「/」だけは不可、「..」と「//」と末尾の「/」は不可)。
-		if !filePathPattern.MatchString(file.Path) || len(file.Path) > MaxFilePathLength || file.Path == "/" ||
-			strings.Contains(file.Path, "..") || strings.Contains(file.Path, "//") || strings.HasSuffix(file.Path, "/") || path.Clean(file.Path) != file.Path {
+		if !IsValidFilePath(file.Path) {
 			return apperror.New(apperror.KindInvalidRequest, "files の path は、「/」で始まる、英数字と . _ - / だけのファイルの path にしてください(「..」、「//」、末尾の「/」は不可。200文字まで): "+file.Path)
 		}
 		// 同じ path の重複を拒否する。
@@ -90,6 +89,21 @@ func ValidateFiles(files []FileSpec, mounts []MountSpec) error {
 		return apperror.New(apperror.KindInvalidRequest, "files の内容の合計は、256KiBまでです")
 	}
 	return nil
+}
+
+// IsValidFilePath は、コンテナの中のファイルの path として使える書式かを返す(deploy のファイルと、ConfigMap のマウントで共通)。
+//
+// 「/」で始まり、英数字と . _ - / だけ、200文字まで。「/」だけ、「..」、「//」、末尾の「/」は不可。
+//
+// 引数:
+//   - filePath: 確かめる path。
+//
+// 戻り値:
+//   - 使える書式なら true。
+func IsValidFilePath(filePath string) bool {
+	// 文字の種類と長さ、「/」だけ、「..」、「//」、末尾の「/」、正規化して変わるものを、全て拒否する。
+	return filePathPattern.MatchString(filePath) && len(filePath) <= MaxFilePathLength && filePath != "/" &&
+		!strings.Contains(filePath, "..") && !strings.Contains(filePath, "//") && !strings.HasSuffix(filePath, "/") && path.Clean(filePath) == filePath
 }
 
 // itoa は、整数を、10進の文字列にする(エラーメッセージ用)。

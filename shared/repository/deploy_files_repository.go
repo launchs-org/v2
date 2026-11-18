@@ -54,6 +54,10 @@ func (deployRepository *DeployRepository) SavePendingFiles(requestContext contex
 		if validateError := model.ValidateFiles(files, mounts); validateError != nil {
 			return validateError
 		}
+		// ConfigMap のマウントの path と、まったく同じでないこと、数の合計が上限以内であることを確かめる(照らす相手は、pending があればそれ、無ければ現在のもの)。
+		if overlapError := checkConfigMapMountOverlaps(effectiveJSON(deploy.ConfigMapMounts, deploy.PendingConfigMapMounts), encoded, mountsRaw); overlapError != nil {
+			return overlapError
+		}
 		// 現在と同じ内容なら、pending は空にする(現在が NULL のときは、空の配列と同じ内容として比べる)。
 		deploy.PendingFiles = datatypes.JSON(encoded)
 		if sameFiles(deploy.Files, encoded) {
@@ -151,6 +155,10 @@ func (deployRepository *DeployRepository) BeginFilesApply(requestContext context
 		}
 		if validateError := model.ValidateFiles(pendingFiles, mounts); validateError != nil {
 			return apperror.New(apperror.KindConflict, "適用するファイルが、マウントと重なっています: "+validateError.Error())
+		}
+		// 反映されている ConfigMap のマウントとも、重ならないことを確かめる。
+		if overlapError := checkConfigMapMountOverlaps(deploy.ConfigMapMounts, deploy.PendingFiles, deploy.Mounts); overlapError != nil {
+			return apperror.New(apperror.KindConflict, "適用するファイルが、ConfigMap のマウントと重なっています: "+overlapError.Error())
 		}
 		// 変えた deploy を保存する。
 		if saveError := transaction.Save(&deploy).Error; saveError != nil {

@@ -28,6 +28,10 @@ type DeployUseCase interface {
 	UpdateFiles(requestContext context.Context, userID string, deployID string, files []model.FileSpec) error
 	DiscardFiles(requestContext context.Context, userID string, deployID string) error
 	ApplyFiles(requestContext context.Context, userID string, deployID string) error
+	UpdateConfigMapMounts(requestContext context.Context, userID string, deployID string, mounts []model.ConfigMapMountSpec) error
+	DiscardConfigMapMounts(requestContext context.Context, userID string, deployID string) error
+	ApplyConfigMapMounts(requestContext context.Context, userID string, deployID string) error
+	GetConfigMapMounts(requestContext context.Context, userID string, deployID string) (model.Deploy, map[string]model.ConfigMap, error)
 	Scale(requestContext context.Context, userID string, deployID string, replicas int) error
 	Delete(requestContext context.Context, userID string, deployID string) error
 }

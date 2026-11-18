@@ -83,6 +83,9 @@ type DeployResponse struct {
 	// Files は、deploy のファイル(設定ファイルなど)。現在のファイルと、まだ適用していないファイル。
 	Files FilesResponse `json:"files"`
 
+	// ConfigMapMounts は、deploy にマウントしている共有の ConfigMap のファイル。現在のものと、まだ適用していないもの。
+	ConfigMapMounts ConfigMapMountsResponse `json:"configmapMounts"`
+
 	// Service は、deploy に紐づく service。まだ作っていなければ null(controller が、設定する)。
 	Service any `json:"service"`
 }
@@ -131,7 +134,9 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		},
 		Volumes: DeployVolumesResponse{Mounts: mounts, PendingMounts: pendingMounts},
 		Files:   newFilesResponse(deploy),
-		Service: nil,
+		// 詳細では、ConfigMap の名前と最新の版は付けない(それは、GET .../configmap-mounts で返す)。
+		ConfigMapMounts: newConfigMapMountsResponse(deploy, nil),
+		Service:         nil,
 	}
 }
 

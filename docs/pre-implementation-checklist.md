@@ -382,7 +382,7 @@ client-go を直接使うか。ServiceAccount に与える RBAC の範囲。
 - API サーバー: k8s 権限なし(DB の読み書きと Workflow の開始だけで足りる)
 - Worker: ClusterRole(namespace は動的に作られるため、クラスタ全体に対する権限が必要)
   - namespaces: 作成・取得・一覧・削除
-  - deployments / services / persistentvolumeclaims / configmaps / jobs / resourcequotas: 作成・取得・更新・削除(configmaps は、deploy のファイル用)
+  - deployments / services / persistentvolumeclaims / configmaps / jobs / resourcequotas: 作成・取得・更新・削除(configmaps は、deploy のファイルと、共有の ConfigMap の版用。configmaps は、一覧も要る)
   - traefik の ingressroutes: 作成・取得・更新・削除
   - pods: 取得・一覧・監視、events: 取得
 - ログ収集コンテナ: pods の取得・一覧・監視、pods/log の取得(読み取りのみ)

@@ -1,5 +1,7 @@
 import type {
   BuildListItem,
+  ConfigMapFile,
+  ConfigMapMount,
   DeployDetail,
   DeployListItem,
   IngressDetail,
@@ -149,6 +151,52 @@ let buildsByProject: Record<string, BuildListItem[]> = {
   ],
 }
 
+/** モックの ConfigMap。版ごとに、ファイルを持つ(編集のたびに、版が増える)。 */
+type MockConfigMap = { configMapId: string; projectId: string; name: string; currentRevision: number; revisions: Record<number, ConfigMapFile[]>; createdAt: string; updatedAt: string }
+
+let configMapsById: Record<string, MockConfigMap> = {
+  cm_northstar_config: {
+    configMapId: "cm_northstar_config", projectId: "prj_northstar", name: "northstar-config", currentRevision: 2,
+    revisions: {
+      1: [{ key: "config.yaml", encoding: "text", content: "log_level: info\nport: 8080\n" }],
+      2: [{ key: "config.yaml", encoding: "text", content: "log_level: debug\nport: 8080\n" }, { key: "logo.bin", encoding: "base64", content: "AAECAwQFBgc=" }],
+    },
+    createdAt: "2026-11-10T09:00:00.000Z", updatedAt: "2026-11-16T09:00:00.000Z",
+  },
+}
+
+/** 保存する大きさ(key の長さ + 内容の長さ)を数える。 */
+const storedSize = (files: ConfigMapFile[]) => files.reduce((sum, file) => sum + file.key.length + new TextEncoder().encode(file.content).length, 0)
+/** 元のバイト数(base64 は、デコードした大きさ)。 */
+const decodedSize = (file: ConfigMapFile) => file.encoding === "base64" ? atob(file.content).length : new TextEncoder().encode(file.content).length
+const getConfigMapList = (projectId: string) => Object.values(configMapsById).filter((item) => item.projectId === projectId)
+/** ConfigMap を使っている deploy のマウント(現在と pending)。 */
+function configMapUsages(configMapId: string) {
+  const usages: { deployId: string; revision: number; key: string; path: string; pending: boolean }[] = []
+  for (const deploy of Object.values(deployDetails)) {
+    for (const pending of [false, true]) {
+      const mounts = pending ? deploy.configmapMounts?.pending_mounts : deploy.configmapMounts?.mounts
+      for (const mount of mounts ?? []) if (mount.configMapId === configMapId) usages.push({ deployId: deploy.deployId, revision: mount.revision, key: mount.key, path: mount.path, pending })
+    }
+  }
+  return usages
+}
+/** ConfigMap の取得のレスポンス(指定した版の中身つき)。 */
+function configMapView(item: MockConfigMap, revision = item.currentRevision) {
+  const files = item.revisions[revision]
+  if (!files) throw new Error("ConfigMap の版が見つかりません")
+  return { configMapId: item.configMapId, projectId: item.projectId, name: item.name, currentRevision: item.currentRevision, revision, files: [...files].sort((left, right) => left.key.localeCompare(right.key)).map((file) => ({ ...file, size: decodedSize(file) })), createdAt: item.createdAt, updatedAt: item.updatedAt }
+}
+/** 入力のファイルを検査して、key の昇順にする(encoding の省略は text)。 */
+function checkConfigMapFiles(input: unknown): ConfigMapFile[] {
+  const files = ((input ?? []) as Partial<ConfigMapFile>[]).map((file) => ({ key: String(file.key ?? ""), encoding: (file.encoding ?? "text") as ConfigMapFile["encoding"], content: String(file.content ?? "") }))
+  if (files.length > 50) throw new Error("files は、50個までです")
+  if (new Set(files.map((file) => file.key)).size !== files.length) throw new Error("files の key が重複しています")
+  for (const file of files) if (!/^[A-Za-z0-9._-]+$/.test(file.key) || file.key === "." || file.key === "..") throw new Error(`files の key の形が正しくありません: ${file.key}`)
+  if (storedSize(files) > 1024 * 1024) throw new Error("ファイルの大きさの合計が上限(1MiB)を超えています")
+  return files.sort((left, right) => left.key.localeCompare(right.key))
+}
+
 let nextId = 1
 const newId = (prefix: string) => `${prefix}_${nextId++}_${Math.random().toString(36).slice(2, 7)}`
 const clone = <T,>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T
@@ -269,6 +317,20 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
             result = undefined
           }
         }
+      } else if (resource === "configmaps") {
+        if (method === "GET") {
+          result = {
+            configmaps: getConfigMapList(projectId).map((item) => ({ configMapId: item.configMapId, name: item.name, currentRevision: item.currentRevision, fileCount: item.revisions[item.currentRevision].length, totalBytes: storedSize(item.revisions[item.currentRevision]), usedBy: new Set(configMapUsages(item.configMapId).map((usage) => usage.deployId)).size, updatedAt: item.updatedAt })),
+            nextCursor: null,
+          }
+        } else if (method === "POST") {
+          const name = String(payload.name ?? "")
+          if (!/^[A-Za-z0-9-]{1,64}$/.test(name)) throw new Error("name は、英数字とハイフンだけの1〜64文字でなければなりません")
+          if (getConfigMapList(projectId).some((item) => item.name === name)) throw new Error("同じ名前の ConfigMap がすでにあります")
+          const item: MockConfigMap = { configMapId: newId("cm"), projectId, name, currentRevision: 1, revisions: { 1: checkConfigMapFiles(payload.files) }, createdAt: now(), updatedAt: now() }
+          configMapsById[item.configMapId] = item
+          result = configMapView(item)
+        }
       } else if (resource === "builds" && method === "GET") result = { builds: clone(getBuildList(projectId)), nextCursor: null }
       else if (resource === "ingresses") {
         const list = getIngressList(projectId)
@@ -298,6 +360,36 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           }
         }
       }
+    } else if (segments[2] === "configmaps" && segments[3]) {
+      const item = configMapsById[segments[3]]
+      if (!item) throw new Error("ConfigMap が見つかりません")
+      if (segments.length === 4 && method === "GET") result = configMapView(item, url.searchParams.get("revision") ? Number(url.searchParams.get("revision")) : undefined)
+      else if (segments.length === 4 && method === "PUT") {
+        // 全件置き換え。中身が同じなら、版は増えない。使っている版は、残す。
+        const files = checkConfigMapFiles(payload.files)
+        if (JSON.stringify(files) !== JSON.stringify(item.revisions[item.currentRevision])) {
+          item.currentRevision += 1
+          item.revisions[item.currentRevision] = files
+          item.updatedAt = now()
+          const inUse = new Set(configMapUsages(item.configMapId).map((usage) => usage.revision))
+          for (const revision of Object.keys(item.revisions).map(Number)) if (revision <= item.currentRevision - 10 && !inUse.has(revision)) delete item.revisions[revision]
+        }
+        result = configMapView(item)
+      } else if (segments.length === 4 && method === "PATCH") {
+        const name = String(payload.name ?? "")
+        if (!/^[A-Za-z0-9-]{1,64}$/.test(name)) throw new Error("name は、英数字とハイフンだけの1〜64文字でなければなりません")
+        if (getConfigMapList(item.projectId).some((other) => other.name === name && other.configMapId !== item.configMapId)) throw new Error("同じ名前の ConfigMap がすでにあります")
+        item.name = name
+        item.updatedAt = now()
+        result = undefined
+      } else if (segments.length === 4 && method === "DELETE") {
+        const users = Array.from(new Set(configMapUsages(item.configMapId).map((usage) => usage.deployId)))
+        if (users.length > 0) throw new Error(`deploy が使っているため、ConfigMap を削除できません。使っている deploy: ${users.join(", ")}`)
+        delete configMapsById[item.configMapId]
+        result = undefined
+      } else if (segments[4] === "revisions" && method === "GET") {
+        result = { revisions: Object.keys(item.revisions).map(Number).sort((left, right) => right - left).map((revision) => ({ revision, fileCount: item.revisions[revision].length, totalBytes: storedSize(item.revisions[revision]), createdAt: item.updatedAt })) }
+      } else if (segments[4] === "usage" && method === "GET") result = { usages: configMapUsages(item.configMapId) }
     } else if (segments[2] === "deploy" && segments.length === 3 && method === "POST") {
       const projectId = String(payload.projectId ?? "")
       const deployId = newId("dep")
@@ -394,6 +486,36 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           result = undefined
         } else if (segments[5] === "discard" && method === "POST") {
           deploy.volumes.pending_mounts = null
+          result = undefined
+        }
+      } else if (action === "configmap-mounts") {
+        const state = (deploy.configmapMounts ??= { mounts: [], pending_mounts: null })
+        // 名前と、最新の版を付ける(GET だけ)。
+        const decorate = (mounts: ConfigMapMount[]) => mounts.map((mount) => ({ ...mount, configMapName: configMapsById[mount.configMapId]?.name, latestRevision: configMapsById[mount.configMapId]?.currentRevision }))
+        if (segments.length === 5 && method === "GET") result = { mounts: decorate(state.mounts), pending_mounts: state.pending_mounts === null ? null : decorate(state.pending_mounts) }
+        else if (segments.length === 5 && method === "PUT") {
+          const requested = (payload.mounts ?? []) as Partial<ConfigMapMount>[]
+          if (requested.length > 30) throw new Error("mounts は、30件までです")
+          const previous = new Map((state.pending_mounts ?? state.mounts).map((mount) => [`${mount.configMapId}\u0000${mount.key}`, mount.revision]))
+          const resolved: ConfigMapMount[] = requested.map((mount) => {
+            const item = configMapsById[String(mount.configMapId)]
+            if (!item || item.projectId !== deploy.projectId) throw new Error("このプロジェクトに、この ConfigMap がありません")
+            // 版は、指定が無ければ、すでにマウントしている版を保ち、無ければ最新。
+            const revision = mount.revision || previous.get(`${mount.configMapId}\u0000${mount.key}`) || item.currentRevision
+            if (!item.revisions[revision]?.some((file) => file.key === mount.key)) throw new Error("ConfigMap の版に、この key のファイルがありません")
+            if (!/^\/[A-Za-z0-9._\-/]*$/.test(String(mount.path)) || String(mount.path).includes("..")) throw new Error("mounts の path の形が正しくありません")
+            if (mount.mode && !/^0[0-7]{3}$/.test(mount.mode)) throw new Error("mounts の mode は、8進数の4桁の文字列にしてください")
+            return { configMapId: item.configMapId, revision, key: String(mount.key), path: String(mount.path), mode: mount.mode || "0644" }
+          })
+          if (new Set(resolved.map((mount) => mount.path)).size !== resolved.length) throw new Error("mounts の path が重複しています")
+          state.pending_mounts = JSON.stringify(resolved) === JSON.stringify(state.mounts) ? null : resolved
+          result = undefined
+        } else if (segments[5] === "apply" && method === "POST") {
+          if (state.pending_mounts !== null) state.mounts = state.pending_mounts
+          state.pending_mounts = null
+          result = undefined
+        } else if (segments[5] === "discard" && method === "POST") {
+          state.pending_mounts = null
           result = undefined
         }
       } else if (action === "logs" && method === "GET") {
