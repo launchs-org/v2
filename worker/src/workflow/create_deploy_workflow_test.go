@@ -26,6 +26,8 @@ func newCreateDeployEnvironment(testingT *testing.T) *testsuite.TestWorkflowEnvi
 	// Activity は、名前だけを登録する(中身はテストが差し替える)。
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.EnsureProjectNamespaceInput) error { return nil },
 		activity.RegisterOptions{Name: sharedworkflow.EnsureProjectNamespaceActivityName})
+	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.PrepareDeployDependenciesInput) error { return nil },
+		activity.RegisterOptions{Name: sharedworkflow.PrepareDeployDependenciesActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.ApplyDeploymentInput) (int64, error) { return 0, nil },
 		activity.RegisterOptions{Name: sharedworkflow.ApplyDeploymentActivityName})
 	testEnvironment.RegisterActivityWithOptions(func(context.Context, sharedworkflow.WaitDeploymentReadyInput) error { return nil },

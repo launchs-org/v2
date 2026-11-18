@@ -15,8 +15,8 @@ const (
 	CreateTemplateServiceActivityName   = "CreateTemplateService"
 	CreateTemplateIngressActivityName   = "CreateTemplateIngress"
 
-	// ReadTemplateServiceDNSActivityName は、作った service の DNS 名を読む Activity の名前。
-	ReadTemplateServiceDNSActivityName = "ReadTemplateServiceDNS"
+	// LoadTemplateStepsActivityName は、計画のステップの一覧(種類と name)を読む Activity の名前。
+	LoadTemplateStepsActivityName = "LoadTemplateSteps"
 
 	// UpdateTemplateStepActivityName は、ステップの進み具合を記録する Activity の名前。
 	UpdateTemplateStepActivityName = "UpdateTemplateStep"
@@ -67,13 +67,13 @@ type UpdateTemplateStepInput struct {
 	Error string
 }
 
-// ReadTemplateServiceDNSInput は、service の DNS 名を読む Activity の入力。
-type ReadTemplateServiceDNSInput struct {
-	// ApplyID は、実行の ID。
-	ApplyID string
+// TemplateStepRef は、計画のステップの、種類と name(Workflow が、順に実行するための目印。値は含まない)。
+type TemplateStepRef struct {
+	// Kind は、volume、configmap、deploy、service、ingress のどれか。
+	Kind string
 
-	// Index は、service のステップの位置。
-	Index int
+	// Name は、テンプレートの中の部品の name。
+	Name string
 }
 
 // FinishTemplateApplyInput は、実行の結果を確定する Activity の入力。
