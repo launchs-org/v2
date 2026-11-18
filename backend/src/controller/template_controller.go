@@ -5,7 +5,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 )
 
 // TemplateUseCase は、TemplateController が呼ぶ、テンプレートのビジネスルール。

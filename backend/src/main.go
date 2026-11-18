@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 	"launchs/templates"
 	"os"
 	"os/signal"

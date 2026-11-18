@@ -4,8 +4,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"launchs/backend/src/template"
 	"launchs/shared/apperror"
+	"launchs/shared/template"
 )
 
 // TestTemplateService は、一覧と取得(無い id は not_found)を確認する。

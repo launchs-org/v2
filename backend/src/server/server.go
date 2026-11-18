@@ -4,7 +4,7 @@
 package server
 
 import (
-	"launchs/backend/src/template"
+	"launchs/shared/template"
 	"log/slog"
 
 	"github.com/labstack/echo/v5"
