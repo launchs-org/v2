@@ -1,0 +1,44 @@
+# Traefik の Pod のログから、ingress のアクセスログを読み取って DB に保存する(docs/ingress-plugins.md)。同時に動くのは 1 つ(advisory lock)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accessstats
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: accessstats
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: accessstats
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      serviceAccountName: accessstats
+      containers:
+        - name: accessstats
+          image: ghcr.io/launchs-org/v2/accessstats:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            # 同じクラスターの中の k8s に、ServiceAccount でつなぐ。
+            - name: KUBERNETES_ACCESS
+              value: in-cluster
+            # false にすると、クライアントの IP を保存しない。
+            - name: ACCESS_STATS_KEEP_CLIENTS
+              value: "true"
+          envFrom:
+            - configMapRef:
+                name: launchs-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}

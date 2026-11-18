@@ -1,0 +1,228 @@
+# Temporal(単一ノード。1 つのコンテナで、全てのサービスを動かす)。データは、postgres の temporal と temporal_visibility。
+# 起動の前に、initContainer で、スキーマを作る(何度流しても、変わらない)。default の namespace は、Job で作る。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-config
+  namespace: launchs
+data:
+  # __POSTGRES_PASSWORD__ は、initContainer が、Secret の値に置き換える。
+  config.yaml.template: |
+    log:
+      stdout: true
+      level: info
+    persistence:
+      numHistoryShards: 4
+      defaultStore: default
+      visibilityStore: visibility
+      datastores:
+        default:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal
+            connectAddr: postgres:5432
+            connectProtocol: tcp
+            user: postgres
+            password: __POSTGRES_PASSWORD__
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: 1h
+        visibility:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal_visibility
+            connectAddr: postgres:5432
+            connectProtocol: tcp
+            user: postgres
+            password: __POSTGRES_PASSWORD__
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: 1h
+    global:
+      membership:
+        maxJoinDuration: 30s
+        broadcastAddress: 127.0.0.1
+      pprof:
+        port: 7936
+    services:
+      frontend:
+        rpc: {grpcPort: 7233, membershipPort: 6933, bindOnIP: 0.0.0.0, httpPort: 7243}
+      matching:
+        rpc: {grpcPort: 7235, membershipPort: 6935, bindOnIP: 0.0.0.0}
+      history:
+        rpc: {grpcPort: 7234, membershipPort: 6934, bindOnIP: 0.0.0.0}
+      worker:
+        rpc: {grpcPort: 7239, membershipPort: 6939, bindOnIP: 0.0.0.0}
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: active
+      currentClusterName: active
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: temporal-frontend
+          rpcAddress: 127.0.0.1:7233
+          httpAddress: 127.0.0.1:7243
+    dcRedirectionPolicy:
+      policy: noop
+    archival:
+      history:
+        state: disabled
+      visibility:
+        state: disabled
+    namespaceDefaults:
+      archival:
+        history:
+          state: disabled
+        visibility:
+          state: disabled
+  setup-schema.sh: |
+    #!/bin/sh
+    # temporal と temporal_visibility にスキーマを作る(何度流しても、変わらない)。
+    set -eu
+    schema_root=/etc/temporal/schema/postgresql/v12
+    setup_schema() {
+      temporal-sql-tool --plugin postgres12 --endpoint postgres --port 5432 --user postgres --password "${POSTGRES_PASSWORD}" --database "$1" \
+        setup-schema --version 0.0 || echo "(スキーマの管理テーブルは作成済み。続ける)"
+      temporal-sql-tool --plugin postgres12 --endpoint postgres --port 5432 --user postgres --password "${POSTGRES_PASSWORD}" --database "$1" \
+        update-schema --schema-dir "${schema_root}/$2/versioned"
+    }
+    # postgres が起動するまで、くり返す。
+    until setup_schema temporal temporal && setup_schema temporal_visibility visibility; do
+      echo "スキーマを作れなかった。やり直す"
+      sleep 3
+    done
+  create-namespace.sh: |
+    #!/bin/sh
+    # Temporal に default の namespace を作る(あれば、何もしない)。
+    set -eu
+    address=temporal:7233
+    until temporal operator cluster health --address "${address}" 2>/dev/null | grep -q SERVING; do echo "Temporal を待つ"; sleep 2; done
+    if temporal operator namespace describe --address "${address}" --namespace default >/dev/null 2>&1; then
+      echo "namespace は作成済み: default"
+    else
+      temporal operator namespace create --address "${address}" --namespace default
+    fi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  namespace: launchs
+spec:
+  selector:
+    app.kubernetes.io/name: temporal
+  ports:
+    - name: grpc
+      port: 7233
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+  namespace: launchs
+spec:
+  replicas: 1
+  # 単一ノードなので、新しい Pod の前に、古い Pod を止める(同じ DB に、2 つ目のクラスターを作らない)。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: temporal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: temporal
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      initContainers:
+        # スキーマを作る。
+        - name: schema
+          image: temporalio/admin-tools:1.32.2
+          command: ["/bin/sh", "/scripts/setup-schema.sh"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+        # 設定の雛形に、DB のパスワードを入れる。
+        - name: render-config
+          image: busybox:1.37
+          command: ["/bin/sh", "-c", "sed \"s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g\" /template/config.yaml.template > /config/config.yaml"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+          volumeMounts:
+            - {name: template, mountPath: /template, readOnly: true}
+            - {name: rendered, mountPath: /config}
+      containers:
+        - name: temporal
+          image: temporalio/server:1.32.2
+          env:
+            - name: TEMPORAL_SERVER_CONFIG_FILE_PATH
+              value: /config/config.yaml
+            # 認証は使わない(クラスターの中の、NetworkPolicy で守る前提。外には公開しない)。
+            - name: TEMPORAL_ALLOW_NO_AUTH
+              value: "true"
+          ports:
+            - containerPort: 7233
+          readinessProbe:
+            tcpSocket: {port: 7233}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 7233}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: rendered, mountPath: /config, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap:
+            name: temporal-config
+            items:
+              - {key: setup-schema.sh, path: setup-schema.sh}
+        - name: template
+          configMap:
+            name: temporal-config
+            items:
+              - {key: config.yaml.template, path: config.yaml.template}
+        - name: rendered
+          emptyDir: {}
+---
+# default の namespace を作る Job(完了したら、10 分後に消える。もう一度 apply すれば、また流れる。何度流しても、変わらない)。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-namespace
+  namespace: launchs
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: temporal-namespace
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-namespace
+          image: temporalio/admin-tools:1.32.2
+          command: ["/bin/sh", "/scripts/create-namespace.sh"]
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap:
+            name: temporal-config
+            items:
+              - {key: create-namespace.sh, path: create-namespace.sh}
