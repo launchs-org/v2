@@ -59,7 +59,9 @@ resources:
       - volume: home
         path: /home/coder/project
     configmaps:
-      # ワークスペースの設定。ボリュームの下に置く(マウント先の下は、置ける)
+      # ワークスペースの設定。ボリュームの下に置く(マウント先の下は、置ける)。
+      # 注意(Talos で確認): .vscode ディレクトリは root 所有になるため、利用者は、.vscode の中に、新しいファイルを作れない
+      # (settings.json 自体は読めて、設定は効く)。
       - configmap: editor
         key: settings.json
         path: /home/coder/project/.vscode/settings.json
