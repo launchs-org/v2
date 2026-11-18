@@ -66,6 +66,21 @@ func (fakeStore *fakeDeployStore) BeginConfigApply(_ context.Context, _ string, 
 	return model.DeployStatusActive, nil
 }
 
+// SavePendingFiles は、何もせず成功する。
+func (fakeStore *fakeDeployStore) SavePendingFiles(_ context.Context, _ string, _ string, _ []model.FileSpec) error {
+	return nil
+}
+
+// DiscardPendingFiles は、何もせず成功する。
+func (fakeStore *fakeDeployStore) DiscardPendingFiles(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// BeginFilesApply は、元の状態として active を返す。
+func (fakeStore *fakeDeployStore) BeginFilesApply(_ context.Context, _ string, _ string) (string, error) {
+	return model.DeployStatusActive, nil
+}
+
 // SavePendingMounts は、何もせず成功する。
 func (fakeStore *fakeDeployStore) SavePendingMounts(_ context.Context, _ string, _ string, _ []model.MountSpec) error {
 	return nil
@@ -123,6 +138,11 @@ func (fakeStore *fakePodStore) ListPodsByDeploy(_ context.Context, deployID stri
 type fakeDeployWorkflowStarter struct {
 	startedDeployIDs []string
 	startError       error
+}
+
+// StartFilesApply は、決めたエラーを返す。
+func (fakeStarter *fakeDeployWorkflowStarter) StartFilesApply(_ context.Context, _ string) error {
+	return fakeStarter.startError
 }
 
 // StartMountsApply は、何もせず成功する。
@@ -245,6 +265,35 @@ func TestDeployServiceListPods(testingT *testing.T) {
 		fakePods := &fakePodStore{err: errors.New("database down")}
 		if _, listError := NewDeployService(&fakeDeployStore{}, fakePods, &fakeDeployWorkflowStarter{}).ListPods(context.Background(), "user-a", "deploy-1"); listError == nil {
 			subTest.Errorf("エラーのはず")
+		}
+	})
+}
+
+// TestDeployServiceFiles は、ファイルの保存の前の検査(個数・path・内容)と、適用の流れ(開始に失敗したら、状態を戻す)を確認する。
+func TestDeployServiceFiles(testingT *testing.T) {
+	testingT.Run("不正な path のファイルは、保存先に渡さず、invalid_request", func(subTest *testing.T) {
+		deployService := NewDeployService(&fakeDeployStore{}, &fakePodStore{}, &fakeDeployWorkflowStarter{})
+		updateError := deployService.UpdateFiles(context.Background(), "user-a", "deploy-1", []model.FileSpec{{Path: "etc/a", Content: ""}})
+		if apperror.KindOf(updateError) != apperror.KindInvalidRequest {
+			subTest.Errorf("invalid_request のはず: %v", updateError)
+		}
+	})
+	testingT.Run("正しいファイルは、保存先に渡す", func(subTest *testing.T) {
+		deployService := NewDeployService(&fakeDeployStore{}, &fakePodStore{}, &fakeDeployWorkflowStarter{})
+		if updateError := deployService.UpdateFiles(context.Background(), "user-a", "deploy-1", []model.FileSpec{{Path: "/etc/a", Content: "x"}}); updateError != nil {
+			subTest.Errorf("保存できるはず: %v", updateError)
+		}
+	})
+	testingT.Run("適用の Workflow を開始できなかったら、internal_error", func(subTest *testing.T) {
+		deployService := NewDeployService(&fakeDeployStore{}, &fakePodStore{}, &fakeDeployWorkflowStarter{startError: errors.New("temporal down")})
+		if applyError := deployService.ApplyFiles(context.Background(), "user-a", "deploy-1"); apperror.KindOf(applyError) != apperror.KindInternal {
+			subTest.Errorf("internal_error のはず: %v", applyError)
+		}
+	})
+	testingT.Run("適用の Workflow が開始できれば、成功", func(subTest *testing.T) {
+		deployService := NewDeployService(&fakeDeployStore{}, &fakePodStore{}, &fakeDeployWorkflowStarter{})
+		if applyError := deployService.ApplyFiles(context.Background(), "user-a", "deploy-1"); applyError != nil {
+			subTest.Errorf("成功するはず: %v", applyError)
 		}
 	})
 }
