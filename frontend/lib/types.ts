@@ -99,6 +99,29 @@ export type IngressDetail = {
   /** アクセスの集計(Traefik のプラグイン launchs-stats)を有効にしているか。 */
   accessStats?: boolean
 }
+/** プロジェクトのタスク(worker が記録した Workflow の履歴)。 */
+export type TaskStatus = "running" | "succeeded" | "failed" | "canceled" | "lost"
+/** タスクの手順(Activity)1 つの進み具合。extra は、後始末など、定義に無い手順。 */
+export type TaskStep = { activity: string; label: string; state: "done" | "running" | "failed" | "waiting"; attempt?: number; error?: string; extra?: boolean }
+/** タスクの進み具合。total が 0 のときは、手順の総数が決まらない(動いた手順だけを出す)。steps は、詳細のときだけ。 */
+export type TaskProgress = { done: number; total: number; current: string; steps?: TaskStep[] }
+export type ProjectTask = {
+  taskId: string
+  projectId: string
+  projectName: string
+  progress?: TaskProgress
+  kind: string
+  resourceId: string
+  status: TaskStatus
+  error: string
+  startedAt: string
+  finishedAt: string | null
+  durationMs: number
+  workflowId: string
+  children?: ProjectTask[]
+}
+export type ProjectTaskListResponse = { tasks: ProjectTask[]; nextCursor: string | null; counts: { running: number; failedRecent: number } }
+
 /** アクセスログの 1 行(1 リクエスト)。 */
 export type AccessLogEntry = { time: string; method: string; url: string; status: number; durationMs: number; clientIp: string; bytes: number }
 export type AccessLogsResponse = { logs: AccessLogEntry[]; nextCursor: string | null }

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 
 	sdkactivity "go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	sdkworkflow "go.temporal.io/sdk/workflow"
 
@@ -21,6 +23,7 @@ import (
 	"launchs/worker/src/activity"
 	"launchs/worker/src/cluster"
 	"launchs/worker/src/config"
+	"launchs/worker/src/tracking"
 	"launchs/worker/src/workflow"
 )
 
@@ -64,7 +67,11 @@ func run() error {
 	defer temporalClient.Close()
 
 	// 一般の Task Queue を処理するワーカーを作り、Workflow と Activity を登録する。
-	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{})
+	// 全ての Workflow を、プロジェクトのタスクとして記録する(docs/tasks.md)。
+	taskRepository := repository.NewProjectTaskRepository(appDatabase)
+	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{
+		Interceptors: []interceptor.WorkerInterceptor{tracking.NewTaskInterceptor(taskRepository, appLogger)},
+	})
 	generalWorker.RegisterWorkflowWithOptions(workflow.DeleteProjectWorkflow, sdkworkflow.RegisterOptions{Name: sharedworkflow.DeleteProjectWorkflowName})
 	// k8s を操作する役を、設定に合わせて選ぶ。
 	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, cluster.OperatorSettings{
@@ -200,6 +207,10 @@ func run() error {
 	generalWorker.RegisterActivityWithOptions(configMapMountsActivities.CleanupConfigMapRevisions, sdkactivity.RegisterOptions{Name: sharedworkflow.CleanupConfigMapRevisionsActivityName})
 
 	appLogger.Info("ワーカーを起動する", "task_queue", sharedworkflow.TaskQueueGeneral, "temporal", workerConfig.TemporalAddress)
+	// 古いタスクの削除を、別の goroutine で、定期的に行う(worker が止まると、一緒に止まる)。
+	pruneContext, stopPrune := context.WithCancel(context.Background())
+	defer stopPrune()
+	go tracking.RunPruner(pruneContext, taskRepository, appLogger)
 	if runError := generalWorker.Run(worker.InterruptCh()); runError != nil {
 		return fmt.Errorf("ワーカーが異常終了しました: %w", runError)
 	}

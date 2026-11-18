@@ -41,6 +41,9 @@ type Dependencies struct {
 	// TemplateApplyStarter は、テンプレートから部品を作る Workflow を開始するもの。
 	TemplateApplyStarter service.TemplateApplyStarter
 
+	// ActivityObserver は、タスクの進み具合(動いている Activity)を、Temporal の履歴から読み取るもの。nil のときは、進み具合を出さない(テスト用)。
+	ActivityObserver service.ActivityObserver
+
 	// TemplateRegistry は、読み込み済みのテンプレート(docs/templates.md)。nil のときは、同梱のものを読み込む(テスト用)。
 	TemplateRegistry *template.Registry
 

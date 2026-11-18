@@ -8,6 +8,8 @@ import type {
   DeployDetail,
   DeployListItem,
   AccessLogsResponse,
+  ProjectTask,
+  ProjectTaskListResponse,
   IngressDetail,
   IngressListItem,
   Project,
@@ -269,6 +271,40 @@ function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
 
 let nextId = 1
 /**
+ * タスク(Workflow の履歴)の、見せかけのデータを作る。
+ *
+ * @param taskId 詳細のときの、タスクの ID(一覧なら undefined)。
+ * @param query クエリ(status、kind)。
+ * @returns 一覧、または、子つきの詳細。
+ */
+function mockTasks(taskId: string | undefined, query: URLSearchParams): ProjectTaskListResponse | ProjectTask {
+  // 決まったタスクを、時刻をずらして並べる(1 つは実行中で、手順の途中。1 つは失敗。1 つは削除済みのプロジェクトの削除)。
+  const now = Date.now()
+  const steps = (states: ("done" | "running" | "failed" | "waiting")[]) => ["namespace を用意", "volume と ConfigMap を用意", "Deployment を作成", "起動を待つ", "結果を記録"].map((label, index) => ({ activity: `step-${index}`, label, state: states[index] ?? "waiting" as const, ...(states[index] === "running" ? { attempt: 2 } : {}), ...(states[index] === "failed" ? { error: "api down" } : {}) }))
+  const make = (index: number, kind: string, resourceId: string, status: ProjectTask["status"], seconds: number, extra: Partial<ProjectTask> = {}): ProjectTask => ({
+    taskId: `task-mock-${index}`, projectId: "prj-mock", projectName: "my-app", kind, resourceId, status, error: "", startedAt: new Date(now - index * 90_000).toISOString(),
+    finishedAt: status === "running" ? null : new Date(now - index * 90_000 + seconds * 1000).toISOString(), durationMs: status === "running" ? (index * 90 + 40) * 1000 : seconds * 1000, workflowId: `wf-mock-${index}`, ...extra,
+  })
+  const all: ProjectTask[] = [
+    make(0, "deploy_create", "deploy-mock-1", "running", 4, { progress: { done: 3, total: 5, current: "起動を待つ", steps: steps(["done", "done", "done", "running"]) } }),
+    make(1, "ingress_apply", "ingress-mock-1", "running", 4, { progress: { done: 1, total: 2, current: "結果を確定", steps: [{ activity: "a", label: "IngressRoute を更新", state: "done" }, { activity: "b", label: "結果を確定", state: "running" }] } }),
+    make(2, "project_create", "prj-mock", "succeeded", 0, { projectName: "new-app" }),
+    make(3, "deploy_create", "deploy-mock-2", "failed", 300, { error: "処理「WaitDeploymentReady」が、時間切れになりました", progress: { done: 3, total: 5, current: "", steps: steps(["done", "done", "done", "failed"]) } }),
+    make(4, "template_apply", "apply-mock-1", "succeeded", 48),
+    make(5, "project_delete", "prj-old", "succeeded", 11, { projectId: "prj-old", projectName: "old-app" }),
+  ]
+  if (taskId) {
+    const found = all.find((task) => task.taskId === taskId) ?? all[0]
+    const withSteps = found.progress ? found : { ...found, progress: { done: 5, total: 5, current: "", steps: steps(["done", "done", "done", "done", "done"]) } }
+    return found.kind === "template_apply" ? { ...withSteps, children: [make(11, "deploy_create", "deploy-mock-2", "succeeded", 20), make(12, "service_create", "service-mock-2", "succeeded", 6)] } : { ...withSteps, children: [] }
+  }
+  const status = query.get("status")
+  const kind = query.get("kind")
+  const tasks = all.filter((task) => (!status || task.status === status) && (!kind || task.kind === kind)).map(({ progress, ...task }) => (progress && task.status === "running" ? { ...task, progress: { ...progress, steps: undefined } } : task))
+  return { tasks, nextCursor: null, counts: { running: 2, failedRecent: 1 } }
+}
+
+/**
  * アクセスログの、見せかけのデータを作る(新しい順。絞り込みも効く)。
  *
  * @param query クエリ(status、method、ip、q)。
@@ -359,6 +395,8 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
         volumeTotalMB: { used: volumeUsed, limit: 102400 },
         specs: { small: { used: 3, limit: 20 }, medium: { used: 1, limit: 10 }, large: { used: 0, limit: 4 } },
       }
+    } else if (segments[2] === "tasks" && method === "GET") {
+      result = mockTasks(undefined, url.searchParams)
     } else if (segments[2] === "templates") {
       if (segments[3]) {
         const found = mockTemplates.find((template) => template.id === segments[3])
@@ -452,6 +490,8 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
         const apply = mockApplies[segments[5]]
         if (!apply) throw new Error("テンプレートの実行が見つかりません")
         result = mockApplyProgress(apply)
+      } else if (resource === "tasks" && method === "GET") {
+        result = mockTasks(segments[5], url.searchParams)
       } else if (resource === "builds" && method === "GET") result = { builds: clone(getBuildList(projectId)), nextCursor: null }
       else if (resource === "ingresses") {
         const list = getIngressList(projectId)
