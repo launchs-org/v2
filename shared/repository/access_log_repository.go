@@ -52,6 +52,10 @@ type AccessLogFilter struct {
 	// ClientIP は、クライアントの IP(完全一致)。
 	ClientIP string
 
+	// From と To は、期間(From 以上、To より前)。ゼロ値なら、その側は絞り込まない。
+	From time.Time
+	To   time.Time
+
 	// Query は、URL に含まれる文字列(大文字小文字は区別しない)。
 	Query string
 }
@@ -105,6 +109,12 @@ func (accessStatsRepository *AccessStatsRepository) ListLogs(requestContext cont
 			return nil, nil, apperror.New(apperror.KindInvalidRequest, "cursor が正しくありません")
 		}
 		query = query.Where("(requested_at, id) < (?, ?)", after.CreatedAt, afterID)
+	}
+	if !filter.From.IsZero() {
+		query = query.Where("requested_at >= ?", filter.From)
+	}
+	if !filter.To.IsZero() {
+		query = query.Where("requested_at < ?", filter.To)
 	}
 	if status := strings.ToLower(strings.TrimSpace(filter.Status)); status != "" {
 		if len(status) == 3 && status[1:] == "xx" && status[0] >= '1' && status[0] <= '5' {

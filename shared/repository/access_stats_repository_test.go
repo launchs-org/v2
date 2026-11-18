@@ -108,6 +108,8 @@ func TestAccessLogRepository(testingT *testing.T) {
 		"_ はそのまま":       {AccessLogFilter{Query: "b_c"}, 1},
 		"% はそのまま":       {AccessLogFilter{Query: "%d"}, 1},
 		"_ は任意の1文字ではない": {AccessLogFilter{Query: "b_"}, 1},
+		"期間(From 以降)":   {AccessLogFilter{From: time.UnixMilli(start.UnixMilli() + 2)}, 2},
+		"期間(To より前)":    {AccessLogFilter{To: time.UnixMilli(start.UnixMilli() + 2)}, 1},
 		"組み合わせ":         {AccessLogFilter{ClientIP: "1.1.1.1", Status: "2xx"}, 1},
 	} {
 		got, _, filterError := repo.ListLogs(ctx, "ingress-a", testCase.filter, 10, nil)

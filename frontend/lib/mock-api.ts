@@ -8,7 +8,6 @@ import type {
   DeployDetail,
   DeployListItem,
   AccessLogsResponse,
-  AccessStatsResponse,
   IngressDetail,
   IngressListItem,
   Project,
@@ -270,38 +269,6 @@ function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
 
 let nextId = 1
 /**
- * アクセスの集計の、見せかけのデータを作る(range ごとに、区間の数と長さを変える)。
- *
- * @param enabled 集計が有効か。
- * @param range 期間(1h、24h、7d、30d)。
- * @returns API と同じ形のレスポンス。
- */
-function mockAccessStats(enabled: boolean, range: string): AccessStatsResponse {
-  // 期間ごとの、区間の数と長さ(秒)。
-  const spec = { "1h": [60, 60], "24h": [96, 900], "7d": [168, 3600], "30d": [30, 86400] }[range] ?? [60, 60]
-  const [points, bucketSeconds] = spec
-  const now = Date.now()
-  const series = Array.from({ length: points }, (_, index) => {
-    // 波のある件数を作る(同じ入力なら、同じ形になる)。
-    const count = Math.round((40 + 30 * Math.sin(index / 5)) * (bucketSeconds / 60) * (enabled ? 1 : 0))
-    const failed = Math.round(count * 0.02)
-    return {
-      start: new Date(now - (points - index) * bucketSeconds * 1000).toISOString(), count,
-      status: { "1xx": 0, "2xx": count - failed - Math.round(count * 0.05), "3xx": Math.round(count * 0.05), "4xx": 0, "5xx": failed },
-      methods: { GET: count }, bytes: count * 2048, avgMs: 30 + (index % 7), p50Ms: 25, p95Ms: 100, p99Ms: 250,
-    }
-  })
-  const total = series.reduce((sum, point) => sum + point.count, 0)
-  const failedTotal = series.reduce((sum, point) => sum + point.status["5xx"], 0)
-  return {
-    enabled, range: range as AccessStatsResponse["range"], from: series[0].start, to: new Date(now).toISOString(), bucketSeconds,
-    totals: { count: total, status: { "1xx": 0, "2xx": total - failedTotal - Math.round(total * 0.05), "3xx": Math.round(total * 0.05), "4xx": 0, "5xx": failedTotal }, methods: { GET: Math.round(total * 0.8), POST: Math.round(total * 0.2) }, bytes: total * 2048, avgMs: 33, p50Ms: 25, p95Ms: 100, p99Ms: 250 },
-    series, paths: [{ key: "/", count: Math.round(total * 0.5) }, { key: "/api/items/:id", count: Math.round(total * 0.3) }, { key: "/static/app.js", count: Math.round(total * 0.2) }],
-    clients: enabled ? [{ key: "203.0.113.9", count: Math.round(total * 0.6) }, { key: "198.51.100.7", count: Math.round(total * 0.4) }] : [], uniqueClients: enabled ? 2 : 0,
-  }
-}
-
-/**
  * アクセスログの、見せかけのデータを作る(新しい順。絞り込みも効く)。
  *
  * @param query クエリ(status、method、ip、q)。
@@ -320,6 +287,8 @@ function mockAccessLogs(query: URLSearchParams): AccessLogsResponse {
     return { time: new Date(now - index * 4000).toISOString(), method, url, status: code, durationMs: 3 + (index % 9) * 1.7, clientIp, bytes: 512 + index * 37 }
   }).filter((entry) => (!status || (status.endsWith("xx") ? String(entry.status).startsWith(status[0]) : String(entry.status) === status))
     && (!query.get("method") || entry.method === query.get("method")?.toUpperCase())
+    && (!query.get("from") || entry.time >= (query.get("from") ?? ""))
+    && (!query.get("to") || entry.time < (query.get("to") ?? ""))
     && (!query.get("ip") || entry.clientIp === query.get("ip"))
     && (!query.get("q") || entry.url.toLowerCase().includes((query.get("q") ?? "").toLowerCase())))
   return { logs, nextCursor: null }
@@ -503,8 +472,6 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
             result = clone(ingress)
           } else if (segments[6] === "access-logs" && method === "GET") {
             result = mockAccessLogs(url.searchParams)
-          } else if (segments[6] === "access-stats" && method === "GET") {
-            result = mockAccessStats(ingress.accessStats !== false, String(url.searchParams.get("range") ?? "1h"))
           } else if (segments[6] === "apply" && method === "POST") {
             if (ingress.pending_rules !== null) ingress.rules = ingress.pending_rules
             ingress.pending_rules = null

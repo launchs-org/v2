@@ -3,10 +3,12 @@ package controller
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"launchs/backend/src/middlewares"
+	"launchs/shared/apperror"
 	"launchs/shared/pagination"
 	"launchs/shared/repository"
 )
@@ -69,7 +71,15 @@ func (accessLogController *AccessLogController) List(echoContext *echo.Context) 
 		after = &position
 	}
 	// 絞り込みを読んで、取得する。
-	filter := repository.AccessLogFilter{Status: echoContext.QueryParam("status"), Method: echoContext.QueryParam("method"), ClientIP: echoContext.QueryParam("ip"), Query: echoContext.QueryParam("q")}
+	from, fromError := parseOptionalTime(echoContext.QueryParam("from"), "from")
+	if fromError != nil {
+		return fromError
+	}
+	to, toError := parseOptionalTime(echoContext.QueryParam("to"), "to")
+	if toError != nil {
+		return toError
+	}
+	filter := repository.AccessLogFilter{From: from, To: to, Status: echoContext.QueryParam("status"), Method: echoContext.QueryParam("method"), ClientIP: echoContext.QueryParam("ip"), Query: echoContext.QueryParam("q")}
 	logs, nextPosition, listError := accessLogController.accessLogUseCase.List(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"), filter, limit, after)
 	if listError != nil {
 		return listError
@@ -84,4 +94,25 @@ func (accessLogController *AccessLogController) List(echoContext *echo.Context) 
 		response.NextCursor = &nextCursor
 	}
 	return echoContext.JSON(http.StatusOK, response)
+}
+
+// parseOptionalTime は、クエリの時刻(RFC 3339)を読む。空なら、ゼロ値。
+//
+// 引数:
+//   - text: クエリの値。
+//   - name: クエリの名前(エラーの文に使う)。
+//
+// 戻り値:
+//   - 時刻(空ならゼロ値)。読めなければ invalid_request。
+func parseOptionalTime(text string, name string) (time.Time, error) {
+	// 空は、指定なし。
+	if text == "" {
+		return time.Time{}, nil
+	}
+	// RFC 3339 として読む。
+	parsed, parseError := time.Parse(time.RFC3339, text)
+	if parseError != nil {
+		return time.Time{}, apperror.New(apperror.KindInvalidRequest, name+" は RFC 3339 の日時(例: 2026-11-18T10:00:00Z)にしてください")
+	}
+	return parsed, nil
 }
