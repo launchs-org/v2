@@ -31,7 +31,7 @@ func applyTestTemplateFiles() fstest.MapFS {
     min: 256
     max: 1024
 `)},
-		"sample/1.0.0/volumes.yaml": {Data: []byte("volumes:\n  - name: data\n    sizeMB: ${storage}\n")},
+		"sample/1.0.0/volumes.yaml":    {Data: []byte("volumes:\n  - name: data\n    sizeMB: ${storage}\n")},
 		"sample/1.0.0/configmaps.yaml": {Data: []byte("configmaps:\n  - name: conf\n    files:\n      - key: a.conf\n        content: \"pw=${password}\\n\"\n")},
 		"sample/1.0.0/deploy.yaml": {Data: []byte(`deploys:
   - name: web

@@ -261,10 +261,10 @@ func TestLoadFrom(testingT *testing.T) {
 	// 与えたファイルと、files / deploy の files の書き方で、新しい構成のフォルダを作って読み込む。
 	load := func(files string, deployFiles string, extra map[string][]byte) (*Registry, error) {
 		folder := fstest.MapFS{
-			"t/manifest.yaml":           {Data: []byte("id: t\nname: t\n")},
-			"t/1.0.0/config.yaml":       {Data: []byte("variables:\n  - name: title\n    label: 題\n    type: string\n    default: hi\n")},
-			"t/1.0.0/configmaps.yaml":   {Data: []byte("configmaps:\n  - name: conf\n    files:\n" + files + "\n")},
-			"t/1.0.0/deploy.yaml":       {Data: []byte("deploys:\n  - name: web\n    image: nginx\n    spec: small\n" + deployFiles + "\n")},
+			"t/manifest.yaml":         {Data: []byte("id: t\nname: t\n")},
+			"t/1.0.0/config.yaml":     {Data: []byte("variables:\n  - name: title\n    label: 題\n    type: string\n    default: hi\n")},
+			"t/1.0.0/configmaps.yaml": {Data: []byte("configmaps:\n  - name: conf\n    files:\n" + files + "\n")},
+			"t/1.0.0/deploy.yaml":     {Data: []byte("deploys:\n  - name: web\n    image: nginx\n    spec: small\n" + deployFiles + "\n")},
 		}
 		for name, data := range extra {
 			folder["t/1.0.0/"+name] = &fstest.MapFile{Data: data}
