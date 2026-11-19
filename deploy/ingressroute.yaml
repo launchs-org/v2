@@ -11,17 +11,17 @@ spec:
     - web
   routes:
     - kind: Rule
-      match: Host(`launchs.example.com`) && (PathPrefix(`/api/`) || Path(`/healthz`))
+      match: Host(`www.shconn.org`) && (PathPrefix(`/api/`) || Path(`/healthz`))
       services:
         - name: backend
           port: 8080
     - kind: Rule
-      match: Host(`launchs.example.com`) && PathPrefix(`/auth/`)
+      match: Host(`www.shconn.org`) && PathPrefix(`/auth/`)
       services:
         - name: auth
           port: 8080
     - kind: Rule
-      match: Host(`launchs.example.com`)
+      match: Host(`www.shconn.org`)
       services:
         - name: frontend
           port: 3000
