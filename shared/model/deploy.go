@@ -64,6 +64,9 @@ type Deploy struct {
 	// Command は、現在の起動コマンド。nil ならイメージのデフォルト。
 	Command *string `gorm:"column:command"`
 
+	// FSGroup は、Pod のボリュームの所有グループ(fsGroup)。非 root のイメージが、ボリュームに書けるようにする。nil なら指定しない。テンプレートが作るときだけ決める(API からは変えられない)。
+	FSGroup *int `gorm:"column:fs_group"`
+
 	// Args は、現在の起動引数(JSON の配列)。nil ならイメージのデフォルト。
 	Args datatypes.JSON `gorm:"column:args"`
 

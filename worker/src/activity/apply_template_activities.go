@@ -356,6 +356,10 @@ func (applyTemplateActivities *ApplyTemplateActivities) CreateTemplateDeploy(req
 	if command != "" {
 		deploy.Command = &command
 	}
+	if deployPlan.FSGroup > 0 {
+		fsGroup := deployPlan.FSGroup
+		deploy.FSGroup = &fsGroup
+	}
 	if len(args) > 0 {
 		deploy.Args = mustJSON(args)
 	}

@@ -105,6 +105,7 @@ type DeployPlan struct {
 	Spec       string               `json:"spec"`
 	Replicas   int                  `json:"replicas"`
 	Env        map[string]string    `json:"env"`
+	FSGroup    int                  `json:"fsGroup,omitempty"`
 	Command    string               `json:"command"`
 	Args       []string             `json:"args"`
 	Mounts     []MountPlan          `json:"mounts"`

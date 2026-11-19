@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"launchs/shared/model"
 )
@@ -31,11 +32,14 @@ var (
 var (
 	validSpecs     = map[string]bool{"small": true, "medium": true, "large": true}
 	validProtocols = map[string]bool{"tcp": true, "udp": true}
-	validCategory  = map[string]bool{"database": true, "web": true, "cache": true, "tool": true}
+	validCategory  = map[string]bool{"database": true, "web": true, "cache": true, "tool": true, "monitoring": true, "dev": true}
 )
 
 // maxPasswordLength は、自動で作る password の長さの上限。
 const maxPasswordLength = 128
+
+// maxNotesRunes は、metadata.notes(作成後の案内)の、最大の文字数。
+const maxNotesRunes = 2000
 
 // Validate は、テンプレート1つの形と参照を確かめる。エラーは、日本語で、どの部分かが分かるように書く。
 //
@@ -64,7 +68,10 @@ func Validate(template Template) error {
 		return fmt.Errorf("metadata.name が空です")
 	}
 	if template.Metadata.Category != "" && !validCategory[template.Metadata.Category] {
-		return fmt.Errorf("metadata.category は、database、web、cache、tool のどれかです(%q)", template.Metadata.Category)
+		return fmt.Errorf("metadata.category は、database、web、cache、tool、monitoring、dev のどれかです(%q)", template.Metadata.Category)
+	}
+	if utf8.RuneCountInString(template.Metadata.Notes) > maxNotesRunes {
+		return fmt.Errorf("metadata.notes は、%d 文字までです", maxNotesRunes)
 	}
 	if len(template.Resources) == 0 {
 		return fmt.Errorf("resources が空です(作る部品が、1つもありません)")
@@ -76,7 +83,14 @@ func Validate(template Template) error {
 		return variableError
 	}
 
-	// ===== 3. 部品 =====
+	// ===== 3. 作成後の案内(notes)の参照: 変数だけ(画面が、入力した値を差し込むため) =====
+	for _, reference := range referencesIn(template.Metadata.Notes) {
+		if _, exists := variables[reference]; !exists {
+			return fmt.Errorf("metadata.notes: ${%s} は、知らない参照です(notes で使えるのは、variables の名前だけです)", reference)
+		}
+	}
+
+	// ===== 4. 部品 =====
 	return validateResources(template.Resources, variables)
 }
 
@@ -260,8 +274,8 @@ func checkUnusedFields(where string, resource Resource) error {
 	if resource.Kind != ResourceVolume && resource.SizeMB != "" {
 		return fmt.Errorf("%s: sizeMB は、volume だけに使えます", where)
 	}
-	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.ConfigMaps) > 0 || resource.Service != nil) {
-		return fmt.Errorf("%s: image、spec、replicas、env、command、args、mounts、configmaps、service は、deploy だけに使えます", where)
+	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || resource.FSGroup != 0 || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.ConfigMaps) > 0 || resource.Service != nil) {
+		return fmt.Errorf("%s: image、spec、replicas、fsGroup、env、command、args、mounts、configmaps、service は、deploy だけに使えます", where)
 	}
 	if !isDeploy && resource.Kind != ResourceConfigMap && len(resource.Files) > 0 {
 		return fmt.Errorf("%s: files は、deploy と configmap だけに使えます", where)
@@ -393,6 +407,9 @@ func validateDeploy(where string, resource Resource, volumes map[string]bool, co
 	}
 	if strings.TrimSpace(resource.Image) == "" || strings.ContainsAny(resource.Image, " \t\n") {
 		return fmt.Errorf("%s: image は、空白を含まない、空でない文字列です", where)
+	}
+	if resource.FSGroup < 0 || resource.FSGroup > 65535 {
+		return fmt.Errorf("%s.fsGroup は、0(指定なし)から 65535 です(%d)", where, resource.FSGroup)
 	}
 	if !validSpecs[resource.Spec] {
 		return fmt.Errorf("%s: spec は、small、medium、large のどれかです(%q)", where, resource.Spec)

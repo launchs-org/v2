@@ -63,6 +63,9 @@ type Metadata struct {
 
 	// Category は、絞り込みの分類。
 	Category string `yaml:"category"`
+
+	// Notes は、作成が終わったあとに、画面に出す案内(最初にすること、初期のログインなど)。${変数名} で、入力した値(自動で作ったパスワードを含む)を差し込める。
+	Notes string `yaml:"notes"`
 }
 
 // Variable は、利用者が入力する値1つの定義。値は、全て、文字列として受け取り、型に合うかを検査する。
@@ -135,6 +138,9 @@ type Resource struct {
 
 	// Env は、環境変数。
 	Env map[string]string `yaml:"env"`
+
+	// FSGroup は、Pod のボリュームの所有グループ(fsGroup)。イメージが非 root(例: Grafana は 472、n8n は 1000)で、ボリュームに書くとき、そのグループの ID を指定する。0 は指定なし。
+	FSGroup int `yaml:"fsGroup"`
 
 	// Command と Args は、起動コマンドと引数。
 	Command string   `yaml:"command"`

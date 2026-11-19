@@ -1,0 +1,47 @@
+# Memos(手軽なメモ)。データは、ボリュームに保存する。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: memos
+  name: Memos(メモ)
+  description: 思いついたことを、すぐ書き留められる、シンプルなメモです。タグや検索もあります。
+  icon: note
+  category: tool
+  notes: |
+    1. 公開 URL を開いて、最初のユーザーを作ります。最初のユーザーが、管理者になります。作成が終わったら、すぐ開いて、作ってください。
+    2. 管理者でログインしたら、「設定」で、ほかの人の登録を許すかどうかを、決められます。
+
+variables:
+  - name: storage
+    label: データの大きさ(MB)
+    type: integer
+    default: "512"
+    min: 128
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: memos
+    image: neosmemo/memos:stable
+    spec: small
+    replicas: 1
+    env:
+      MEMOS_MODE: prod
+    mounts:
+      - volume: data
+        path: /var/opt/memos
+    service:
+      ports:
+        - name: http
+          port: 5230
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: memos
+        port: 5230

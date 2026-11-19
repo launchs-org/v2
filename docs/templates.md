@@ -41,7 +41,9 @@ metadata:
   name: PostgreSQL
   description: データベース(PostgreSQL 16)。データは、ボリュームに保存されます。
   icon: database            # 画面の絵(決まった名前から選ぶ)
-  category: database        # 絞り込み(database / web / cache / tool)
+  category: database        # 絞り込み(database / web / cache / tool / monitoring / dev)
+  notes: |                  # 作成後に画面に出す案内(任意。2000 文字まで。${変数名} は入力した値に置き換わる。password は、案内の中には出さない)
+    最初にすること …
 
 # 利用者が、入力する値。${名前} で、下の resources の中から使う。
 variables:
@@ -276,6 +278,36 @@ deploy の起動の前に、**現在のマウント・ファイルに必要な�
 ## 同梱のテンプレート(段階 E、最初の案)
 
 nginx(静的な公開)、PostgreSQL、MariaDB、Redis、WordPress(web + DB)、Node.js / Python の最小のアプリ(イメージを入れるだけ)。**各テンプレートは、実機(Talos)で、作成と起動を、確認してから、入れる。**
+
+### 同梱のテンプレート(2026-11-19 に、9 つを追加)
+| id | カテゴリ | 内容 | 備考 |
+|---|---|---|---|
+| `uptime-kuma` | monitoring | 死活監視 | 最初に開いた人が管理者になる(notes に書いた) |
+| `grafana` | monitoring | グラフの画面 | `fsGroup: 472`。管理者のパスワードは自動生成 |
+| `excalidraw` | tool | ホワイトボード | データなし(volume なし) |
+| `vaultwarden` | tool | パスワード管理 | 新規登録の許可を選べる。登録後に止める手順を notes に書いた |
+| `memos` | tool | メモ | 最初のユーザーが管理者 |
+| `n8n` | tool | 自動化 | `fsGroup: 1000`。暗号化キーは自動生成。初回の起動に数分かかる |
+| `gitea` | dev | Git ホスティング | SQLite。SSH は無効(公開は HTTP だけ)。初回は、画面で設定する |
+| `adminer` | dev | データベースの管理画面 | PostgreSQL と MariaDB の両方に使える |
+| `mailpit` | dev | 開発用のメール受信箱 | 画面は、パスワードで保護。SMTP(1025)は、同じプロジェクトの中だけ |
+
+- **MinIO は見送り**: 公式の無料版イメージの提供が変わって(配布元とタグが不安定)、確実に動くイメージを、決められなかったため。
+- **公開は HTTP だけ**: 非 HTTP のポート(Gitea の SSH、Mailpit の SMTP)は、公開せず、無効にするか、クラスターの中だけで使う。
+- **非 root のイメージ**: launchs のボリュームは root 所有で、非 root で動くイメージ(Grafana は 472、n8n は 1000)は、書き込めない。deploy の `fsGroup`(Pod の fsGroup)で、ボリュームの所有グループを指定する(下の「fsGroup」)。
+
+### `fsGroup`(deploy の項目)
+- テンプレートの deploy に `fsGroup: <グループの ID>`(1〜65535)を書くと、Pod に `securityContext.fsGroup` が付き、ボリュームが、そのグループで書ける。0 または省略は、指定なし。
+- `deploys.fs_group`(マイグレーション 23)に、作るときだけ保存する。**利用者が、API で変えることはできない**(起動設定の API は、触らない)。deploy 以外の部品には、使えない(検証でエラー)。
+- 確認: Grafana と n8n で、実機(Talos、Longhorn の RWX)で、ボリュームに書けることを確認した。
+
+### 作成後の案内(`metadata.notes`)
+- 作成が終わったあとの画面に、「最初にすること」として出る。`${変数名}` は、入力した値に置き換わる(**password の変数は、案内には出さず**「作成した値で確認できます」になる)。参照できるのは、variables の名前だけ(検証でエラー)。
+- 「最初に開いた人が管理者になる」ものや、作成後に、環境変数を変えて止めたい設定(Vaultwarden の新規登録)を、利用者に伝えるために使う。
+
+### 実機で分かったこと(2026-11-19)
+- **ボリュームの準備が遅い**: Longhorn の RWX(NFS の共有)は、ボリュームごとに、共有の Pod を立てるため、準備に 1〜2 分かかる。ボリュームのあるテンプレートを、**7 つ同時に作ると、300 秒の期限に間に合わず、failed になる**ものが出た(Pod は、あとから起動する)。1 つずつなら、通る。
+- n8n は、初回の起動に、データの準備(マイグレーション)で、数分かかる(notes に書いた)。
 
 ## セキュリティ
 

@@ -12,10 +12,10 @@ func TestTemplateAPI(testingT *testing.T) {
 	// 同梱のテンプレートで動くクライアント(データベースは使わないが、他の API と同じ作りのサーバーを使う)。
 	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{})
 
-	testingT.Run("一覧は、同梱の 6 つを、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
+	testingT.Run("一覧は、同梱の 15 個を、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
 		statusCode, responseBody := apiClient.call(http.MethodGet, "/templates", "")
 		templates, _ := responseBody["templates"].([]any)
-		if statusCode != http.StatusOK || len(templates) != 6 {
+		if statusCode != http.StatusOK || len(templates) != 15 {
 			subTest.Fatalf("200 で、6 つのはず: %d %v", statusCode, responseBody)
 		}
 		// id で引けるようにし、並びは、id の順(code-server、mariadb、nginx、postgres、redis、wordpress)になっていることを確かめる。
@@ -30,7 +30,7 @@ func TestTemplateAPI(testingT *testing.T) {
 				subTest.Errorf("%s: resources は返さないはず", item["id"])
 			}
 		}
-		if strings.Join(ids, ",") != "code-server,mariadb,nginx,postgres,redis,wordpress" {
+		if strings.Join(ids, ",") != "adminer,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redis,uptime-kuma,vaultwarden,wordpress" {
 			subTest.Errorf("id の順のはず: %v", ids)
 		}
 		// 要約: postgres は deploy 1・volume 1・ingress なし・ファイル 1、nginx は ingress あり、code-server は volume と ingress あり。

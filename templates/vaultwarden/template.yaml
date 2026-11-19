@@ -1,0 +1,58 @@
+# Vaultwarden(パスワード管理。Bitwarden 互換)。データは、ボリュームに保存する。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: vaultwarden
+  name: Vaultwarden(パスワード管理)
+  description: 自分専用のパスワード管理です。Bitwarden のアプリや拡張機能を、そのまま使えます。
+  icon: shield
+  category: tool
+  notes: |
+    1. 公開 URL を開いて、「アカウントを作成」で、自分のアカウントを作ります。マスターパスワードは、忘れると、中身を取り出せません。必ず、控えてください。
+    2. 自分(と、使う人)のアカウントを作り終えたら、新しい登録を止めるために、デプロイの「起動設定」で、環境変数 SIGNUPS_ALLOWED を false にして、反映します。
+    3. Bitwarden のアプリや拡張機能で、サーバーの URL に、この公開 URL を入れて、ログインします。
+    データは、ボリュームに入っています。ボリュームを消すと、パスワードも消えます。
+
+variables:
+  - name: signups_allowed
+    label: 新しい登録を許す
+    type: choice
+    default: "true"
+    options:
+      - value: "true"
+        label: 許す(最初は、これ)
+      - value: "false"
+        label: 許さない
+  - name: storage
+    label: データの大きさ(MB)
+    type: integer
+    default: "512"
+    min: 128
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: vault
+    image: vaultwarden/server:latest
+    spec: small
+    replicas: 1
+    env:
+      SIGNUPS_ALLOWED: ${signups_allowed}
+    mounts:
+      - volume: data
+        path: /data
+    service:
+      ports:
+        - name: http
+          port: 80
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: vault
+        port: 80
