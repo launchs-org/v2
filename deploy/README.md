@@ -19,7 +19,7 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。この場�
    ```
    `secret.yaml` に、`POSTGRES_PASSWORD`、最初の管理者の名前とパスワード、署名鍵(必要なら Turnstile のキー)を書く。`secret.yaml` は gitignore 済み(リポジトリには置かない)。
 2. **設定を直す**: `config.yaml`(ingress に払い出すホスト名のベースドメイン `INGRESS_BASE_DOMAIN` など)と、`ingressroute.yaml`(`launchs.example.com` を、自分のホスト名に。3 か所)。
-3. **(任意)イメージのタグを固定する**: `kustomization.yaml` の `images` の `newTag` を、`latest` から `sha-xxxxxxx` に変える。
+3. **(任意)イメージのタグを固定する**: `kustomization.yaml` の `images` の `newTag` を、`latest` から `sha-xxxxxxx` に変える。`main` に入れたあとは、CI が、`newTag` を、自動で、最新の `sha-…` に書き換える([OPERATIONS.md](OPERATIONS.md) の「タグの自動更新」)。
 4. **適用する**:
    ```sh
    kubectl apply -k .

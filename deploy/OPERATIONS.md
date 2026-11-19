@@ -6,7 +6,8 @@ namespace `launchs` で動かしている launchs を、更新したり、戻し
 ## 1. 全体の流れ
 ```
 main に入れる → GitHub Actions が、テストを通して、イメージを GHCR に出す(sha-… と latest)
-   → kustomization.yaml の newTag を、新しい sha-… にする → kubectl apply -k .
+   → CI が、deploy/kustomization.yaml の newTag を、新しい sha-… に書き換えて、main にコミットする(自動)
+   → 運用者が、main を取り込んで、kubectl apply -k .(手動。ここで、人が確認する)
    → backend と auth の Pod が起動するとき、initContainer が、マイグレーションを流す
    → 新しい Pod が、Ready になってから、古い Pod が止まる(ローリングアップデート)
 ```
@@ -42,7 +43,7 @@ main に入れる → GitHub Actions が、テストを通して、イメージ�
 1. **更新する内容を確認する**: マージされた PR に、**マイグレーションの追加**(`migrations/…`)や、**環境変数・RBAC の変更**(`deploy/` の差分)が、あるかを見ます。ある場合は、§3.2 も読みます。
 2. **イメージが出ていることを確認する**: GitHub Actions の `release` が、成功していて、`ghcr.io/launchs-org/v2/<名前>:sha-<短い SHA>` が、8 つ(backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate)ともあること。
 3. **バックアップを取る**(§5)。**マイグレーションがある更新は、必ず**取ります。
-4. **タグを決めて、書き換える**: `kustomization.yaml` の `images` の、**8 つ全部**の `newTag` を、新しい `sha-…` にします(1 つでも古いと、アプリとマイグレーションの版が、食い違います)。
+4. **タグを取り込む**: `release` が成功すると、CI が、`deploy/kustomization.yaml` の `images` の、**8 つ全部**の `newTag` を、今回の `sha-…` に書き換えて、`main` に、`deploy: イメージのタグを sha-… に更新する` というコミットを、自動で入れます(§3.3)。**`git pull` で、このコミットを取り込みます**。手元のコピーで運用しているときは、`kustomization.yaml` の `newTag` を、同じ `sha-…` に、8 つ全部書き換えます(1 つでも古いと、アプリとマイグレーションの版が、食い違います)。
 5. **差分を見る**:
    ```sh
    kubectl diff -k .
@@ -64,6 +65,14 @@ main に入れる → GitHub Actions が、テストを通して、イメージ�
    - §2 の、マイグレーションの版が、最新。
    - 異常な Pod がない: `kubectl -n launchs get pods | grep -v Running`
 9. **記録する**: どの `sha-…` を、いつ、適用したかを、控えます(戻すときに、使います)。
+
+### 3.3 タグの自動更新(CI)
+- **しくみ**: `.github/workflows/release.yml` の `update-tags` ジョブが、8 つのイメージが、全部出たあとで、`.github/scripts/update-image-tags.sh` を使って、`newTag` を書き換え、`main` にコミットします(`github-actions[bot]`)。**クラスターには、適用しません**(オンプレで、GitHub のランナーから届かないため)。
+- **無限ループにならない**: `GITHUB_TOKEN` での push は、新しいワークフローを起こさないので、このコミットで、`release` は、もう一度動きません。
+- **`main` への直接 push**: ブランチ保護で、直接 push が禁止されていると、このジョブは、失敗します(その場合は、ブランチ保護の例外に、`github-actions[bot]` を足すか、PR を作る方式に、替えます)。
+- **失敗したとき**: ジョブが失敗しても、イメージは、すでに出ています。`gh workflow run release.yml` で、やり直すか、手で、`newTag` を書き換えます。
+- **手元で試す**: `bash .github/scripts/update-image-tags.sh sha-abc1234 deploy/kustomization.yaml`(`sha-<16進の7〜40文字>` 以外は、拒否します。行が 8 つでないときも、止まります)。
+- **`develop` とのずれ**: このコミットは、`main` だけに入ります。`develop` には入らないので、次に `develop` → `main` の PR を作る前に、`main` を `develop` に取り込んでおくと、`kustomization.yaml` で、競合しません。
 
 ### 3.1 `latest` タグで運用しているとき
 `newTag: latest` のままだと、マニフェストが変わらないので、`kubectl apply -k .` では、Pod が、入れ替わりません。新しいイメージを使うには、次のようにします。

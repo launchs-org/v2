@@ -1,6 +1,6 @@
 # main に push(= develop → main の PR をマージ)されたら、8 つのイメージを、ビルドして、GHCR に push する。
 # イメージ: backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate(ghcr.io/<リポジトリ>/<名前>)。
-# タグ: sha-<コミットの短い SHA> と latest。
+# タグ: sha-<コミットの短い SHA> と latest。そのあと、deploy/kustomization.yaml の newTag を、今回の sha-… に書き換えて、main にコミットする(update-tags)。
 name: release
 
 on:
@@ -92,3 +92,40 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           # ビルドの証明(provenance)は、付ける(どのコミットから作ったか、確かめられる)。
           provenance: true
+
+  # 8 つのイメージが、全部出たあとで、deploy/kustomization.yaml の newTag を、今回の sha-… に書き換えて、main にコミットする。
+  # (GITHUB_TOKEN での push は、新しいワークフローを起こさないので、この push で、release が、もう一度動くことはない。)
+  # クラスターへの適用は、しない(オンプレで、GitHub のランナーから届かない)。コミットされたタグで、運用者が `kubectl apply -k .` する(deploy/OPERATIONS.md)。
+  update-tags:
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # 最新の main を取る(ビルドの間に、別のコミットが入っていても、その上に、積む)。
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: newTag を書き換える
+        run: bash .github/scripts/update-image-tags.sh "sha-${GITHUB_SHA::7}" deploy/kustomization.yaml
+
+      - name: コミットして、main に push する
+        run: |
+          if git diff --quiet; then
+            echo "タグは、すでに最新です。コミットしません。"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy: イメージのタグを sha-${GITHUB_SHA::7} に更新する"
+          # 同時に、別の push があっても、取り込んで、やり直す(3 回まで)。
+          for _ in 1 2 3; do
+            git pull --rebase origin main && git push origin main && exit 0
+            sleep 5
+          done
+          echo "push に失敗しました(ブランチ保護で、拒否された可能性があります)" >&2
+          exit 1
+
