@@ -11,3 +11,5 @@ launchs-ui-mock
 docs
 **/*.md
 **/*_test.go
+# テンプレートの README は、API が返すので、イメージに埋め込む(上の **/*.md の例外)。
+!templates/templates/*/README.md
