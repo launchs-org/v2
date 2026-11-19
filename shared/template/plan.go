@@ -69,7 +69,7 @@ func BuildPlan(template Template, values map[string]string, options PlanOptions)
 	}
 	for _, name := range deployOrder(template.Resources, deployResources) {
 		deploy := expandedByName[name]
-		deployPlan := &templateplan.DeployPlan{Image: deploy.Image, Spec: deploy.Spec, Replicas: deploy.Replicas, Env: deploy.Env, Command: deploy.Command, Args: deploy.Args}
+		deployPlan := &templateplan.DeployPlan{Image: deploy.Image, Spec: deploy.Spec, Replicas: deploy.Replicas, Env: deploy.Env, FSGroup: deploy.FSGroup, Command: deploy.Command, Args: deploy.Args}
 		volumeMounts := make([]model.MountSpec, 0, len(deploy.Mounts))
 		for _, mount := range deploy.Mounts {
 			deployPlan.Mounts = append(deployPlan.Mounts, templateplan.MountPlan{Volume: mount.Volume, Path: mount.Path})

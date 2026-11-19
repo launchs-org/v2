@@ -274,8 +274,8 @@ func checkUnusedFields(where string, resource Resource) error {
 	if resource.Kind != ResourceVolume && resource.SizeMB != "" {
 		return fmt.Errorf("%s: sizeMB は、volume だけに使えます", where)
 	}
-	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.ConfigMaps) > 0 || resource.Service != nil) {
-		return fmt.Errorf("%s: image、spec、replicas、env、command、args、mounts、configmaps、service は、deploy だけに使えます", where)
+	if !isDeploy && (resource.Image != "" || resource.Spec != "" || resource.Replicas != nil || resource.FSGroup != 0 || len(resource.Env) > 0 || resource.Command != "" || len(resource.Args) > 0 || len(resource.Mounts) > 0 || len(resource.ConfigMaps) > 0 || resource.Service != nil) {
+		return fmt.Errorf("%s: image、spec、replicas、fsGroup、env、command、args、mounts、configmaps、service は、deploy だけに使えます", where)
 	}
 	if !isDeploy && resource.Kind != ResourceConfigMap && len(resource.Files) > 0 {
 		return fmt.Errorf("%s: files は、deploy と configmap だけに使えます", where)
@@ -407,6 +407,9 @@ func validateDeploy(where string, resource Resource, volumes map[string]bool, co
 	}
 	if strings.TrimSpace(resource.Image) == "" || strings.ContainsAny(resource.Image, " \t\n") {
 		return fmt.Errorf("%s: image は、空白を含まない、空でない文字列です", where)
+	}
+	if resource.FSGroup < 0 || resource.FSGroup > 65535 {
+		return fmt.Errorf("%s.fsGroup は、0(指定なし)から 65535 です(%d)", where, resource.FSGroup)
 	}
 	if !validSpecs[resource.Spec] {
 		return fmt.Errorf("%s: spec は、small、medium、large のどれかです(%q)", where, resource.Spec)

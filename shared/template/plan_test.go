@@ -143,3 +143,23 @@ func TestBuildPlanErrors(testingT *testing.T) {
 		}
 	})
 }
+
+// TestBuildPlanFSGroup は、deploy の fsGroup が、計画に引き継がれることを確認する。
+func TestBuildPlanFSGroup(testingT *testing.T) {
+	parsed := mustParse(testingT, multiDeployYAML)
+	for index := range parsed.Resources {
+		if parsed.Resources[index].Kind == ResourceDeploy && parsed.Resources[index].Name == "db" {
+			parsed.Resources[index].FSGroup = 999
+		}
+	}
+	plan, planError := BuildPlan(parsed, map[string]string{"password": "secret"}, planOptions())
+	if planError != nil {
+		testingT.Fatal(planError)
+	}
+	if got := plan.Steps[plan.StepIndex(templateplan.StepDeploy, "db")].Deploy.FSGroup; got != 999 {
+		testingT.Errorf("db は 999 のはず: %d", got)
+	}
+	if got := plan.Steps[plan.StepIndex(templateplan.StepDeploy, "web")].Deploy.FSGroup; got != 0 {
+		testingT.Errorf("web は指定なし(0)のはず: %d", got)
+	}
+}

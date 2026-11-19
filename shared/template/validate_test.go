@@ -271,3 +271,30 @@ func TestValidateNotes(testingT *testing.T) {
 		testingT.Error("知らないカテゴリは、拒否するはず")
 	}
 }
+
+// TestValidateFSGroup は、deploy の fsGroup(ボリュームの所有グループ)の範囲と、deploy 以外での使用の拒否を確認する。
+func TestValidateFSGroup(testingT *testing.T) {
+	template := mustParse(testingT, validTemplateYAML)
+	deployIndex, volumeIndex := -1, -1
+	for index, resource := range template.Resources {
+		if resource.Kind == ResourceDeploy {
+			deployIndex = index
+		}
+		if resource.Kind == ResourceVolume {
+			volumeIndex = index
+		}
+	}
+	template.Resources[deployIndex].FSGroup = 472
+	if validateError := Validate(template); validateError != nil {
+		testingT.Errorf("472 は、使えるはず: %v", validateError)
+	}
+	template.Resources[deployIndex].FSGroup = 70000
+	if validateError := Validate(template); validateError == nil {
+		testingT.Error("65535 を超える値は、拒否するはず")
+	}
+	template.Resources[deployIndex].FSGroup = 472
+	template.Resources[volumeIndex].FSGroup = 472
+	if validateError := Validate(template); validateError == nil {
+		testingT.Error("volume には、fsGroup は使えないはず")
+	}
+}

@@ -139,6 +139,9 @@ type Resource struct {
 	// Env は、環境変数。
 	Env map[string]string `yaml:"env"`
 
+	// FSGroup は、Pod のボリュームの所有グループ(fsGroup)。イメージが非 root(例: Grafana は 472、n8n は 1000)で、ボリュームに書くとき、そのグループの ID を指定する。0 は指定なし。
+	FSGroup int `yaml:"fsGroup"`
+
 	// Command と Args は、起動コマンドと引数。
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args"`

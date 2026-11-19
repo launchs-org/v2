@@ -70,6 +70,9 @@ type DeploymentDefinition struct {
 	// Command は、起動コマンド。nil ならイメージの既定。
 	Command *string
 
+	// FSGroup は、Pod のボリュームの所有グループ(fsGroup)。nil なら指定しない。
+	FSGroup *int64
+
 	// Mounts は、Pod にマウントするボリューム(PVC)。無ければ空。
 	Mounts []MountDefinition
 
@@ -151,8 +154,15 @@ func newDeploymentDefinition(deploy model.Deploy, spec model.DeploySpec) (Deploy
 			ConfigMapName: model.ConfigMapRevisionResourceName(mount.ConfigMapID, mount.Revision), Key: mount.Key, Path: mount.Path, Mode: mount.ModeBits(),
 		})
 	}
+	// ボリュームの所有グループ(テンプレートが指定したときだけ)。
+	var fsGroup *int64
+	if deploy.FSGroup != nil {
+		group := int64(*deploy.FSGroup)
+		fsGroup = &group
+	}
 	// 組み立てて返す。
 	return DeploymentDefinition{
+		FSGroup:         fsGroup,
 		ConfigMapMounts: configMapMounts,
 		Files:           newFileDefinitions(parsedFiles),
 		Namespace:       deploy.ProjectID,
