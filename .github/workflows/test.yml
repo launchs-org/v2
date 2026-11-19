@@ -42,6 +42,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # templates/ は、別のリポジトリ(submodule)。--recursive にしない(その中の launchs/ が、この本体を指すため、終わらなくなる)。
+          submodules: true
+          # 別の非公開リポジトリ(templates)を取るため、読み取りの権限のある token を、secret TEMPLATES_TOKEN に入れる(無ければ、既定の token)。
+          token: ${{ secrets.TEMPLATES_TOKEN || github.token }}
 
       # Go のバージョンは go.mod に合わせる。モジュールのキャッシュも自動で効く。
       - uses: actions/setup-go@v5

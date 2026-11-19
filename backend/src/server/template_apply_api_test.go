@@ -15,14 +15,11 @@ import (
 	"launchs/shared/template"
 )
 
-// applyTestTemplate は、テンプレートの実行のテストに使う、volume、configmap、deploy(+service)、ingress を持つテンプレート。
-const applyTestTemplate = `
-apiVersion: launchs/v1
-kind: Template
-metadata:
-  id: sample
-  name: サンプル
-variables:
+// applyTestTemplateFiles は、テンプレートの実行のテストに使う、volume、configmap、deploy(+service)、ingress を持つテンプレート(新しい構成: manifest.yaml と、1.0.0/ の種類ごとのファイル)。
+func applyTestTemplateFiles() fstest.MapFS {
+	return fstest.MapFS{
+		"sample/manifest.yaml": {Data: []byte("id: sample\nname: サンプル\n")},
+		"sample/1.0.0/config.yaml": {Data: []byte(`variables:
   - name: password
     label: パスワード
     type: password
@@ -33,28 +30,22 @@ variables:
     default: "512"
     min: 256
     max: 1024
-resources:
-  - kind: volume
-    name: data
-    sizeMB: ${storage}
-  - kind: configmap
-    name: conf
-    files:
-      - key: a.conf
-        content: "pw=${password}\n"
-  - kind: deploy
-    name: web
+`)},
+		"sample/1.0.0/volumes.yaml": {Data: []byte("volumes:\n  - name: data\n    sizeMB: ${storage}\n")},
+		"sample/1.0.0/configmaps.yaml": {Data: []byte("configmaps:\n  - name: conf\n    files:\n      - key: a.conf\n        content: \"pw=${password}\\n\"\n")},
+		"sample/1.0.0/deploy.yaml": {Data: []byte(`deploys:
+  - name: web
     image: nginx:alpine
     spec: small
     env:
       PASSWORD: ${password}
     mounts: [{ volume: data, path: /data }]
     configmaps: [{ configmap: conf, key: a.conf, path: /etc/a.conf }]
-    service:
-      ports: [{ name: http, port: 80, protocol: tcp }]
-  - kind: ingress
-    rules: [{ path: /, deploy: web, port: 80 }]
-`
+`)},
+		"sample/1.0.0/service.yaml": {Data: []byte("services:\n  - deploy: web\n    ports: [{ name: http, port: 80, protocol: tcp }]\n")},
+		"sample/1.0.0/ingress.yaml": {Data: []byte("rules: [{ path: /, deploy: web, port: 80 }]\n")},
+	}
+}
 
 // fakeTemplateApplyStarter は、テスト用の TemplateApplyStarter。開始を頼まれた ID を覚え、決めたエラーを返す。
 type fakeTemplateApplyStarter struct {
@@ -87,7 +78,7 @@ type templateApplyEnvironment struct {
 //   - 用意した環境。
 func newTemplateApplyEnvironment(testingT *testing.T) *templateApplyEnvironment {
 	// テスト用のテンプレートを、1 つだけ持つ一覧を作る。
-	registry, loadError := template.Load(fstest.MapFS{"sample/template.yaml": {Data: []byte(applyTestTemplate)}})
+	registry, loadError := template.Load(applyTestTemplateFiles())
 	if loadError != nil {
 		testingT.Fatal(loadError)
 	}
@@ -145,6 +136,26 @@ func TestTemplateApplyAPI(testingT *testing.T) {
 			if !strings.Contains(plan, want) {
 				subTest.Errorf("計画に %q が入るはず: %s", want, plan)
 			}
+		}
+	})
+	testingT.Run("版を省略すると、既定の版で作り、使った版が、応答と、進み具合と、記録に入る", func(subTest *testing.T) {
+		environment := newTemplateApplyEnvironment(subTest)
+		_, body := environment.ownerClient.call(http.MethodPost, environment.applyPath, `{}`)
+		_, progress := environment.ownerClient.call(http.MethodGet, "/projects/"+environment.projectID+"/template-applies/"+body["applyId"].(string), "")
+		var recorded string
+		environment.database.Raw("SELECT template_version FROM template_applies WHERE id = ?", body["applyId"]).Scan(&recorded)
+		if body["version"] != "1.0.0" || progress["templateVersion"] != "1.0.0" || recorded != "1.0.0" {
+			subTest.Errorf("1.0.0 が入るはず: %v %v %q", body["version"], progress["templateVersion"], recorded)
+		}
+	})
+	testingT.Run("版を指定できる。無い版は 404 で、何も保存しない", func(subTest *testing.T) {
+		environment := newTemplateApplyEnvironment(subTest)
+		okStatus, okBody := environment.ownerClient.call(http.MethodPost, environment.applyPath, `{"version":"1.0.0"}`)
+		missingStatus, _ := environment.ownerClient.call(http.MethodPost, environment.applyPath, `{"version":"9.9.9"}`)
+		var count int64
+		environment.database.Raw("SELECT count(*) FROM template_applies").Scan(&count)
+		if okStatus != 200 || okBody["version"] != "1.0.0" || missingStatus != 404 || count != 1 {
+			subTest.Errorf("1.0.0 は成功、9.9.9 は 404、保存は 1 件のはず: %d %v %d %d", okStatus, okBody["version"], missingStatus, count)
 		}
 	})
 	testingT.Run("本文が無くても、全て既定で受け付ける", func(subTest *testing.T) {

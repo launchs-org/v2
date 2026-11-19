@@ -16,24 +16,14 @@ func TestLoadBundled(testingT *testing.T) {
 	if loadError != nil {
 		testingT.Fatalf("同梱のテンプレートが、読み込めるはず: %v", loadError)
 	}
-	// 同梱の 15 個が、id の順に並ぶ。
+	// 同梱の 16 個が、id の順に並ぶ。
 	listed := registry.List()
 	ids := make([]string, 0, len(listed))
 	for _, bundled := range listed {
 		ids = append(ids, bundled.Metadata.ID)
 	}
-	if strings.Join(ids, ",") != "adminer,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redis,uptime-kuma,vaultwarden,wordpress" {
-		testingT.Fatalf("15 個が、id の順にあるはず: %v", ids)
-	}
-	// スペックは、データベースと Redis が medium、code-server が large、nginx が small(決めたとおり)。
-	wantSpec := map[string]string{"nginx": "small", "redis": "medium", "postgres": "medium", "mariadb": "medium", "code-server": "large", "wordpress": "medium",
-		"uptime-kuma": "medium", "grafana": "medium", "excalidraw": "small", "vaultwarden": "small", "memos": "small", "n8n": "medium", "gitea": "medium", "adminer": "small", "mailpit": "small"}
-	for _, bundled := range listed {
-		for _, resource := range bundled.Resources {
-			if resource.Kind == ResourceDeploy && resource.Spec != wantSpec[bundled.Metadata.ID] {
-				testingT.Errorf("%s のスペックは %s のはず: %s", bundled.Metadata.ID, wantSpec[bundled.Metadata.ID], resource.Spec)
-			}
-		}
+	if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
+		testingT.Fatalf("16 個が、id の順にあるはず: %v", ids)
 	}
 	// 同梱のテンプレートごとに、既定の入力で、値が決まり、展開できる(service の DNS 名は、仮の値)。
 	for _, bundled := range listed {
@@ -94,39 +84,86 @@ func TestLoadBundled(testingT *testing.T) {
 	})
 }
 
-// minimalYAML は、Load のテスト用の、最小のテンプレート(id を差し込む)。
-const minimalYAML = `
-apiVersion: launchs/v1
-kind: Template
-metadata:
-  id: %ID%
-  name: n
-resources:
-  - kind: deploy
-    name: a
-    image: x
-    spec: small
-`
+// versionedFolder は、Load のテスト用の、最小のテンプレート(<id>/manifest.yaml と、<id>/<版>/ の config.yaml、deploy.yaml)を作る。
+//
+// 引数:
+//   - id: テンプレートの id(フォルダ名と、manifest の id)。
+//   - versions: 作る版の名前(複数なら、全て同じ中身)。
+//
+// 戻り値:
+//   - メモリ上のファイルシステム。
+func versionedFolder(id string, versions ...string) fstest.MapFS {
+	// manifest と、README を作る。
+	folder := fstest.MapFS{
+		id + "/manifest.yaml": {Data: []byte("id: " + id + "\nname: n\n")},
+		id + "/README.md":     {Data: []byte("# " + id + "\n")},
+	}
+	// 版ごとに、config.yaml と deploy.yaml を作る。
+	for _, version := range versions {
+		folder[id+"/"+version+"/config.yaml"] = &fstest.MapFile{Data: []byte("notes: hi\n")}
+		folder[id+"/"+version+"/deploy.yaml"] = &fstest.MapFile{Data: []byte("deploys:\n  - name: a\n    image: x\n    spec: small\n")}
+	}
+	return folder
+}
 
-// TestLoad は、読み込みの、フォルダ名との不一致(これが id の重複も防ぐ)、不正な YAML、検証エラー、template.yaml が無いフォルダ、空のフォルダを確認する。
-func TestLoad(testingT *testing.T) {
-	// id のテンプレートのフォルダ(<id>/template.yaml)を作る。
-	folder := func(id string) fstest.MapFS {
-		return fstest.MapFS{id + "/" + TemplateFileName: {Data: []byte(strings.Replace(minimalYAML, "%ID%", id, 1))}}
-	}
-	merge := func(maps ...fstest.MapFS) fstest.MapFS {
-		merged := fstest.MapFS{}
-		for _, one := range maps {
-			for name, file := range one {
-				merged[name] = file
-			}
+// mergeFolders は、複数のメモリ上のファイルシステムを、1 つにまとめる。
+//
+// 引数:
+//   - maps: まとめるもの。
+//
+// 戻り値:
+//   - まとめたもの。
+func mergeFolders(maps ...fstest.MapFS) fstest.MapFS {
+	// 全てのファイルを写す。
+	merged := fstest.MapFS{}
+	for _, one := range maps {
+		for name, file := range one {
+			merged[name] = file
 		}
-		return merged
 	}
+	return merged
+}
+
+// TestLoad は、読み込みの、版、既定の版、manifest との不一致、不正な YAML、検証エラー、ファイルの分け方の規則を確認する。
+func TestLoad(testingT *testing.T) {
 	testingT.Run("正しい 2 つは、id の順に読み込める", func(subTest *testing.T) {
-		registry, loadError := Load(merge(folder("b"), folder("a")))
+		registry, loadError := Load(mergeFolders(versionedFolder("b", "1.0.0"), versionedFolder("a", "1.0.0")))
 		if loadError != nil || len(registry.List()) != 2 || registry.List()[0].Metadata.ID != "a" {
 			subTest.Errorf("a、b の順のはず: %v", loadError)
+		}
+	})
+	testingT.Run("manifest の情報と、config.yaml の notes と、README と、版が、テンプレートに入る", func(subTest *testing.T) {
+		registry, loadError := Load(versionedFolder("a", "1.0.0"))
+		if loadError != nil {
+			subTest.Fatal(loadError)
+		}
+		found, _ := registry.Get("a")
+		if found.Metadata.Name != "n" || found.Metadata.Notes != "hi" || found.Metadata.Readme != "# a\n" || found.Metadata.Version != "1.0.0" || len(found.Metadata.Versions) != 1 {
+			subTest.Errorf("入っているはず: %+v", found.Metadata)
+		}
+	})
+	testingT.Run("版は、新しい順に並び(数として比べる)、既定は、いちばん新しい版", func(subTest *testing.T) {
+		registry, loadError := Load(versionedFolder("a", "1.0.0", "1.10.0", "1.2.0", "0.9.9"))
+		if loadError != nil {
+			subTest.Fatal(loadError)
+		}
+		found, _ := registry.Get("a")
+		if strings.Join(found.Metadata.Versions, ",") != "1.10.0,1.2.0,1.0.0,0.9.9" || found.Metadata.Version != "1.10.0" {
+			subTest.Errorf("1.10.0 が最新のはず: %v %s", found.Metadata.Versions, found.Metadata.Version)
+		}
+	})
+	testingT.Run("manifest の latest で、既定の版を選べる。GetVersion で、版を指定できる", func(subTest *testing.T) {
+		folder := versionedFolder("a", "1.0.0", "2.0.0")
+		folder["a/manifest.yaml"] = &fstest.MapFile{Data: []byte("id: a\nname: n\nlatest: 1.0.0\n")}
+		registry, loadError := Load(folder)
+		if loadError != nil {
+			subTest.Fatal(loadError)
+		}
+		found, _ := registry.Get("a")
+		old, oldFound := registry.GetVersion("a", "2.0.0")
+		_, missing := registry.GetVersion("a", "3.0.0")
+		if found.Metadata.Version != "1.0.0" || !oldFound || old.Metadata.Version != "2.0.0" || missing {
+			subTest.Errorf("既定は 1.0.0、2.0.0 も引け、3.0.0 は無いはず: %s", found.Metadata.Version)
 		}
 	})
 	testingT.Run("空のフォルダは、空の一覧", func(subTest *testing.T) {
@@ -136,27 +173,51 @@ func TestLoad(testingT *testing.T) {
 		}
 	})
 	testingT.Run("直下の、フォルダでないもの(README、embed.go)は、無視する", func(subTest *testing.T) {
-		registry, loadError := Load(merge(folder("a"), fstest.MapFS{"README.md": {Data: []byte("# memo")}, "embed.go": {Data: []byte("package x")}}))
+		registry, loadError := Load(mergeFolders(versionedFolder("a", "1.0.0"), fstest.MapFS{"README.md": {Data: []byte("# memo")}, "embed.go": {Data: []byte("package x")}}))
 		if loadError != nil || len(registry.List()) != 1 {
 			subTest.Errorf("1 つのはず: %v", loadError)
 		}
 	})
+	testingT.Run("service.yaml の service は、deploy に付く。ingress.yaml は、公開になる", func(subTest *testing.T) {
+		folder := versionedFolder("a", "1.0.0")
+		folder["a/1.0.0/service.yaml"] = &fstest.MapFile{Data: []byte("services:\n  - deploy: a\n    ports:\n      - name: http\n        port: 80\n        protocol: tcp\n")}
+		folder["a/1.0.0/ingress.yaml"] = &fstest.MapFile{Data: []byte("rules:\n  - path: /\n    deploy: a\n    port: 80\n")}
+		registry, loadError := Load(folder)
+		if loadError != nil {
+			subTest.Fatal(loadError)
+		}
+		found, _ := registry.Get("a")
+		if found.Resources[0].Service == nil || found.Resources[0].Service.Ports[0].Port != 80 || !found.Summarize().Ingress {
+			subTest.Errorf("service と ingress があるはず: %+v", found.Resources)
+		}
+	})
+	withFile := func(id string, name string, content string) fstest.MapFS {
+		folder := versionedFolder(id, "1.0.0")
+		folder[id+"/"+name] = &fstest.MapFile{Data: []byte(content)}
+		return folder
+	}
 	testCases := []struct {
 		name        string
 		files       fstest.MapFS
 		wantMessage string
 	}{
-		{"フォルダ名と id が違う", fstest.MapFS{"a/template.yaml": {Data: []byte(strings.Replace(minimalYAML, "%ID%", "b", 1))}}, "フォルダ名"},
-		{"壊れた YAML", fstest.MapFS{"a/template.yaml": {Data: []byte("a: [")}}, "テンプレート a"},
-		{"検証に通らない(id が不正)", fstest.MapFS{"A/template.yaml": {Data: []byte(strings.Replace(minimalYAML, "%ID%", "A", 1))}}, "metadata.id"},
-		{"template.yaml が無いフォルダ", fstest.MapFS{"a/readme.md": {Data: []byte("x")}}, "template.yaml"},
-		{"1 つが不正なら、全体がエラー(エラーに、テンプレート名が入る)", merge(folder("a"), fstest.MapFS{"bad/template.yaml": {Data: []byte("kind: x")}}), "テンプレート bad"},
-		{"旧形式(直下の *.yaml)は、読まない(フォルダでないので、無視され、template.yaml が無いフォルダも無い)", fstest.MapFS{}, ""},
+		{"フォルダ名と manifest の id が違う", withFile("a", "manifest.yaml", "id: b\nname: n\n"), "フォルダ名"},
+		{"壊れた manifest", withFile("a", "manifest.yaml", "a: ["), "テンプレート a"},
+		{"manifest に、知らない項目", withFile("a", "manifest.yaml", "id: a\nname: n\nfoo: 1\n"), "foo"},
+		{"検証に通らない(id が不正)", versionedFolder("A", "1.0.0"), "metadata.id"},
+		{"manifest.yaml が無い", fstest.MapFS{"a/1.0.0/config.yaml": {Data: []byte("")}}, "manifest.yaml"},
+		{"版のフォルダが無い", fstest.MapFS{"a/manifest.yaml": {Data: []byte("id: a\nname: n\n")}}, "版のフォルダ"},
+		{"版の名前が、x.y.z でない", mergeFolders(versionedFolder("a", "1.0.0"), fstest.MapFS{"a/v2/config.yaml": {Data: []byte("")}}), "x.y.z"},
+		{"版の名前に、先頭の 0 がある", versionedFolder("a", "01.0.0"), "x.y.z"},
+		{"latest の版が無い", withFile("a", "manifest.yaml", "id: a\nname: n\nlatest: 9.9.9\n"), "latest"},
+		{"config.yaml が無い版", fstest.MapFS{"a/manifest.yaml": {Data: []byte("id: a\nname: n\n")}, "a/1.0.0/deploy.yaml": {Data: []byte("")}}, "config.yaml"},
+		{"deploy.yaml に kind を書いた", withFile("a", "1.0.0/deploy.yaml", "deploys:\n  - kind: deploy\n    name: a\n    image: x\n    spec: small\n"), "kind"},
+		{"deploy の中に service を書いた", withFile("a", "1.0.0/deploy.yaml", "deploys:\n  - name: a\n    image: x\n    spec: small\n    service:\n      ports: []\n"), "service.yaml"},
+		{"service.yaml が、無い deploy を指す", withFile("a", "1.0.0/service.yaml", "services:\n  - deploy: zz\n    ports: []\n"), "zz"},
+		{"service.yaml で、同じ deploy が重複", withFile("a", "1.0.0/service.yaml", "services:\n  - deploy: a\n    ports: []\n  - deploy: a\n    ports: []\n"), "重複"},
+		{"1 つが不正なら、全体がエラー(エラーに、テンプレート名が入る)", mergeFolders(versionedFolder("a", "1.0.0"), fstest.MapFS{"bad/manifest.yaml": {Data: []byte("a: [")}}), "テンプレート bad"},
 	}
 	for _, testCase := range testCases {
-		if testCase.wantMessage == "" {
-			continue
-		}
 		testingT.Run(testCase.name+" は、エラー", func(subTest *testing.T) {
 			if _, loadError := Load(testCase.files); loadError == nil || !strings.Contains(loadError.Error(), testCase.wantMessage) {
 				subTest.Errorf("%q を含むエラーになるはず: %v", testCase.wantMessage, loadError)
@@ -164,7 +225,7 @@ func TestLoad(testingT *testing.T) {
 		})
 	}
 	testingT.Run("旧形式の、直下の a.yaml は、読み込まれない", func(subTest *testing.T) {
-		registry, loadError := Load(fstest.MapFS{"a.yaml": {Data: []byte(strings.Replace(minimalYAML, "%ID%", "a", 1))}})
+		registry, loadError := Load(fstest.MapFS{"a.yaml": {Data: []byte("kind: x")}})
 		if loadError != nil || len(registry.List()) != 0 {
 			subTest.Errorf("空のはず: %v", loadError)
 		}
@@ -197,12 +258,16 @@ resources:
 
 // TestLoadFrom は、from: が、フォルダのファイルに置き換わること(text、バイナリの自動判定、強制)と、規則に反するときのエラーを確認する。
 func TestLoadFrom(testingT *testing.T) {
-	// 与えたファイルと、files / deploy の files の書き方で、フォルダを作って読み込む。
+	// 与えたファイルと、files / deploy の files の書き方で、新しい構成のフォルダを作って読み込む。
 	load := func(files string, deployFiles string, extra map[string][]byte) (*Registry, error) {
-		text := strings.Replace(strings.Replace(fromYAML, "%FILES%", files, 1), "%DEPLOYFILES%", deployFiles, 1)
-		folder := fstest.MapFS{"t/" + TemplateFileName: {Data: []byte(text)}}
+		folder := fstest.MapFS{
+			"t/manifest.yaml":           {Data: []byte("id: t\nname: t\n")},
+			"t/1.0.0/config.yaml":       {Data: []byte("variables:\n  - name: title\n    label: 題\n    type: string\n    default: hi\n")},
+			"t/1.0.0/configmaps.yaml":   {Data: []byte("configmaps:\n  - name: conf\n    files:\n" + files + "\n")},
+			"t/1.0.0/deploy.yaml":       {Data: []byte("deploys:\n  - name: web\n    image: nginx\n    spec: small\n" + deployFiles + "\n")},
+		}
 		for name, data := range extra {
-			folder["t/"+name] = &fstest.MapFile{Data: data}
+			folder["t/1.0.0/"+name] = &fstest.MapFile{Data: data}
 		}
 		return Load(folder)
 	}

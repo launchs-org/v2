@@ -66,6 +66,15 @@ type Metadata struct {
 
 	// Notes は、作成が終わったあとに、画面に出す案内(最初にすること、初期のログインなど)。${変数名} で、入力した値(自動で作ったパスワードを含む)を差し込める。
 	Notes string `yaml:"notes"`
+
+	// Version は、この版の名前(x.y.z。版のフォルダの名前)。読み込むときに、決まる。
+	Version string `yaml:"-"`
+
+	// Versions は、このテンプレートの、全ての版(新しい順)。読み込むときに、決まる。
+	Versions []string `yaml:"-"`
+
+	// Readme は、テンプレートの README.md の内容(無ければ空)。読み込むときに、決まる。
+	Readme string `yaml:"-"`
 }
 
 // Variable は、利用者が入力する値1つの定義。値は、全て、文字列として受け取り、型に合うかを検査する。

@@ -208,7 +208,7 @@ type MockTemplate = Template & { steps: { kind: TemplateApplyStep["kind"]; name:
 const passwordVariable = { name: "password", label: "パスワード", type: "password" as const, default: null, required: false, generate: true, options: [], min: null, max: null, minLength: null, maxLength: null, pattern: null }
 const mockTemplates: MockTemplate[] = [
   {
-    id: "postgres", name: "PostgreSQL", description: "データベース(PostgreSQL 16)。データはボリュームに保存され、設定ファイルは ConfigMap で編集できます。", icon: "database", category: "database", notes: "",
+    id: "postgres", name: "PostgreSQL", description: "データベース(PostgreSQL 16)。データはボリュームに保存され、設定ファイルは ConfigMap で編集できます。", icon: "database", version: "1.0.0", versions: ["1.0.0"], category: "database", notes: "",
     summary: { deploys: 1, volumes: 1, ingress: false, files: 1, configmaps: 1 },
     variables: [
       { name: "database", label: "データベース名", type: "string", default: "app", required: false, generate: false, options: [], min: null, max: null, minLength: null, maxLength: null, pattern: "^[a-z][a-z0-9_]{0,30}$" },
@@ -219,7 +219,7 @@ const mockTemplates: MockTemplate[] = [
     steps: [{ kind: "volume", name: "data", sizeMB: 1024 }, { kind: "configmap", name: "pgconf" }, { kind: "deploy", name: "db", image: "postgres:16", spec: "medium" }, { kind: "service", name: "db" }],
   },
   {
-    id: "nginx", name: "nginx(静的なページ)", description: "nginx で、簡単なページを公開します。設定ファイルとページは、ConfigMap で管理され、あとから編集できます。", icon: "globe", category: "web", notes: "公開 URL を開くと、「${title}」のページが出ます。ページの中身は、ConfigMap で、あとから編集できます。",
+    id: "nginx", name: "nginx(静的なページ)", description: "nginx で、簡単なページを公開します。設定ファイルとページは、ConfigMap で管理され、あとから編集できます。", icon: "globe", version: "1.0.0", versions: ["1.0.0"], category: "web", notes: "公開 URL を開くと、「${title}」のページが出ます。ページの中身は、ConfigMap で、あとから編集できます。",
     summary: { deploys: 1, volumes: 0, ingress: true, files: 0, configmaps: 1 },
     variables: [
       { name: "title", label: "ページの題", type: "string", default: "Hello, Launchs!", required: false, generate: false, options: [], min: null, max: null, minLength: null, maxLength: 100, pattern: null },
@@ -228,7 +228,7 @@ const mockTemplates: MockTemplate[] = [
     steps: [{ kind: "configmap", name: "site" }, { kind: "deploy", name: "web", image: "nginx:alpine", spec: "small" }, { kind: "service", name: "web" }, { kind: "ingress", name: "ingress" }],
   },
   {
-    id: "wordpress", name: "WordPress", description: "ブログ・サイトを作れる WordPress。データベース(MariaDB)と、アップロードしたファイルは、ボリュームに保存されます。", icon: "globe", category: "web", notes: "",
+    id: "wordpress", name: "WordPress", description: "ブログ・サイトを作れる WordPress。データベース(MariaDB)と、アップロードしたファイルは、ボリュームに保存されます。", icon: "globe", version: "1.0.0", versions: ["1.0.0"], category: "web", notes: "",
     summary: { deploys: 2, volumes: 2, ingress: true, files: 0, configmaps: 0 },
     variables: [
       { ...passwordVariable, name: "db_password", label: "データベースのパスワード" },
@@ -266,7 +266,7 @@ function mockApplyProgress(apply: MockApply): TemplateApplyProgress {
       }
     }
   }
-  return { applyId: apply.applyId, templateId: apply.template.id, status: finished ? "succeeded" : "running", values: apply.values, steps, error: null, createdAt: new Date(apply.startedAt).toISOString(), updatedAt: now() }
+  return { applyId: apply.applyId, templateId: apply.template.id, templateVersion: apply.template.version, status: finished ? "succeeded" : "running", values: apply.values, steps, error: null, createdAt: new Date(apply.startedAt).toISOString(), updatedAt: now() }
 }
 
 let nextId = 1

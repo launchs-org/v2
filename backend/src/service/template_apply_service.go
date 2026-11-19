@@ -91,25 +91,26 @@ func NewTemplateApplyService(registry *template.Registry, applyStore TemplateApp
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: 作る先のプロジェクトの ID。
 //   - templateID: テンプレートの id。
+//   - version: 使う版(x.y.z)。空なら、既定の版。
 //   - input: 利用者が入力した変数の値。
 //
 // 戻り値:
-//   - 実行の ID と、全ての変数の値(自動生成を含む)。
+//   - 実行の ID と、使った版と、全ての変数の値(自動生成を含む)。
 //   - 上記のエラー。
-func (templateApplyService *TemplateApplyService) Apply(requestContext context.Context, userID string, projectID string, templateID string, input map[string]string) (string, map[string]string, error) {
+func (templateApplyService *TemplateApplyService) Apply(requestContext context.Context, userID string, projectID string, templateID string, version string, input map[string]string) (string, string, map[string]string, error) {
 	// 1. テンプレートとプロジェクトを確かめる。
-	found, exists := templateApplyService.registry.Get(templateID)
+	found, exists := templateApplyService.registry.GetVersion(templateID, version)
 	if !exists {
-		return "", nil, apperror.New(apperror.KindNotFound, "テンプレートが見つかりません")
+		return "", "", nil, apperror.New(apperror.KindNotFound, "テンプレートが見つかりません")
 	}
 	project, projectError := templateApplyService.projectReader.FindByID(requestContext, userID, projectID)
 	if projectError != nil {
-		return "", nil, projectError
+		return "", "", nil, projectError
 	}
 	// 2. 変数の値を、検査して、補う。
 	values, valuesError := template.ResolveValues(found, input)
 	if valuesError != nil {
-		return "", nil, apperror.New(apperror.KindInvalidRequest, valuesError.Error())
+		return "", "", nil, apperror.New(apperror.KindInvalidRequest, valuesError.Error())
 	}
 	// 3. 計画を作る。ingress があるときだけ、ホスト名の候補を用意する。
 	summary := found.Summarize()
@@ -118,50 +119,50 @@ func (templateApplyService *TemplateApplyService) Apply(requestContext context.C
 		for len(hosts) < maxTemplateHosts {
 			host, hostError := templateApplyService.hostGenerator.Generate()
 			if hostError != nil {
-				return "", nil, apperror.Wrap(apperror.KindInternal, "ホスト名を払い出せませんでした", hostError)
+				return "", "", nil, apperror.Wrap(apperror.KindInternal, "ホスト名を払い出せませんでした", hostError)
 			}
 			hosts = append(hosts, host)
 		}
 	}
 	tokenBytes := make([]byte, 8)
 	if _, randomError := rand.Read(tokenBytes); randomError != nil {
-		return "", nil, apperror.Wrap(apperror.KindInternal, "乱数を得られませんでした", randomError)
+		return "", "", nil, apperror.Wrap(apperror.KindInternal, "乱数を得られませんでした", randomError)
 	}
 	plan, planError := template.BuildPlan(found, values, template.PlanOptions{
 		ProjectName: project.Name, DNSToken: hex.EncodeToString(tokenBytes), Hosts: hosts,
 		NewID: func(prefix string) string { return prefix + uuid.NewString() },
 	})
 	if planError != nil {
-		return "", nil, apperror.New(apperror.KindInvalidRequest, "テンプレートを展開できませんでした: "+planError.Error())
+		return "", "", nil, apperror.New(apperror.KindInvalidRequest, "テンプレートを展開できませんでした: "+planError.Error())
 	}
 	// 4. クォータを、全体で確かめる。
 	limits, usage, quotaError := templateApplyService.quotaReader.Get(requestContext, userID)
 	if quotaError != nil {
-		return "", nil, quotaError
+		return "", "", nil, quotaError
 	}
 	if batchError := limits.CheckBatch(usage, template.Needs(plan)); batchError != nil {
-		return "", nil, batchError
+		return "", "", nil, batchError
 	}
 	// 5. 保存する。
 	valuesJSON, valuesMarshalError := json.Marshal(values)
 	planJSON, planMarshalError := json.Marshal(plan)
 	stepsJSON, stepsMarshalError := json.Marshal(plan.InitialStates())
 	if valuesMarshalError != nil || planMarshalError != nil || stepsMarshalError != nil {
-		return "", nil, apperror.New(apperror.KindInternal, "計画を保存する形にできませんでした")
+		return "", "", nil, apperror.New(apperror.KindInternal, "計画を保存する形にできませんでした")
 	}
 	apply := model.TemplateApply{
-		ID: model.TemplateApplyIDPrefix + uuid.NewString(), ProjectID: projectID, UserID: userID, TemplateID: templateID,
+		ID: model.TemplateApplyIDPrefix + uuid.NewString(), ProjectID: projectID, UserID: userID, TemplateID: templateID, TemplateVersion: found.Metadata.Version,
 		Values: datatypes.JSON(valuesJSON), Plan: datatypes.JSON(planJSON), Steps: datatypes.JSON(stepsJSON),
 	}
 	if createError := templateApplyService.applyStore.Create(requestContext, &apply, summary.ConfigMaps); createError != nil {
-		return "", nil, createError
+		return "", "", nil, createError
 	}
 	// Workflow を開始する。開始できなければ、実行を失敗にして(止まったままにしない)、エラーを返す。
 	if startError := templateApplyService.workflowStarter.StartTemplateApply(requestContext, apply.ID); startError != nil {
 		_, _ = templateApplyService.applyStore.Finish(context.WithoutCancel(requestContext), apply.ID, false, "作成の処理を開始できませんでした")
-		return "", nil, apperror.Wrap(apperror.KindInternal, "テンプレートの実行を開始できませんでした", startError)
+		return "", "", nil, apperror.Wrap(apperror.KindInternal, "テンプレートの実行を開始できませんでした", startError)
 	}
-	return apply.ID, values, nil
+	return apply.ID, found.Metadata.Version, values, nil
 }
 
 // Get は、テンプレートの実行の、進み具合を返す。

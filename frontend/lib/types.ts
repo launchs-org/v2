@@ -223,6 +223,12 @@ export type Template = {
   category: string
   /** 作成が終わったあとに出す案内(${変数名} を含みうる)。無ければ空。 */
   notes: string
+  /** この応答の版(x.y.z)。一覧では、既定の版。 */
+  version: string
+  /** 選べる全ての版(新しい順)。 */
+  versions: string[]
+  /** テンプレートの README(詳細だけ)。 */
+  readme?: string
   variables: TemplateVariable[]
   summary: TemplateSummary
 }
@@ -239,6 +245,8 @@ export type TemplateApplyStep = {
 export type TemplateApplyProgress = {
   applyId: string
   templateId: string
+  /** 使ったテンプレートの版(古い記録は空)。 */
+  templateVersion: string
   status: "running" | "succeeded" | "failed"
   values: Record<string, string>
   steps: TemplateApplyStep[]
