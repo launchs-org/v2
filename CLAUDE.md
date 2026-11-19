@@ -71,7 +71,7 @@ Taskfile.yml    開発のコマンド(go-task。全てコンテナの中で実�
 - 責務分担: controller が pending の保存や即時反映系の書き込みを行い、非同期の apply は Temporal の Workflow/Activity が実行して結果確定後に正式値と status を更新する。
 
 - **プロジェクトのタスク(Workflow の履歴)**: worker の interceptor(`worker/src/tracking`)が、全ての Workflow の開始と終了を `project_tasks` に記録する(失敗の理由は、秘密を伏せて保存)。`GET /projects/:projectId/tasks`、画面の「タスク」タブ。保存は 30 日と、プロジェクトごとに 1000 件。設計は [docs/tasks.md](docs/tasks.md)、仕様は [docs/endpoints/tasks.md](docs/endpoints/tasks.md)。
-- **本番向けのマニフェストは `deploy/`(kustomize)**。PostgreSQL、Temporal、auth、backend、worker、watcher、logcollector、accessstats、frontend、IngressRoute を、namespace `launchs` に置く。秘密は `deploy/secret.yaml`(gitignore。雛形は `secret.example.yaml`)。マイグレーションは、`migrate` イメージ(`migrations/dockerfile`)を、backend と auth の initContainer が流す。イメージは、`main` への push で、GHCR(`ghcr.io/launchs-org/v2/<名前>`。`sha-…` と `latest`)に出る(`.github/workflows/release.yml`)。通しの確認(イメージが出てから)は、まだ。
+- **本番向けのマニフェストは `deploy/`(kustomize)**。PostgreSQL、Temporal、auth、backend、worker、watcher、logcollector、accessstats、frontend、IngressRoute を、namespace `launchs` に置く。秘密は `deploy/secret.yaml`(gitignore。雛形は `secret.example.yaml`)。マイグレーションは、`migrate` イメージ(`migrations/dockerfile`)を、backend と auth の initContainer が流す。イメージは、`main` への push で、GHCR(`ghcr.io/launchs-org/v2/<名前>`。`sha-…` と `latest`)に出る(`.github/workflows/release.yml`)。そのあと、CI が、`deploy/kustomization.yaml` の `newTag` を、今回の `sha-…` に、`main` へ自動でコミットする(クラスターへの適用は、しない。手動の `kubectl apply -k .`)。通しの確認(イメージが出てから)は、まだ。更新・マイグレーション・バックアップの運用手順は `deploy/OPERATIONS.md`。
 
 ## docs/endpoints/ — エンドポイント仕様
 
