@@ -1,0 +1,59 @@
+# n8n(自動化。ワークフローを作る)。データ(ワークフローと認証情報)は、ボリュームに保存する。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: n8n
+  name: n8n(自動化)
+  description: 「メールが来たら、スプレッドシートに書く」のような、作業の自動化を、画面でつないで作れます。
+  icon: workflow
+  category: tool
+  notes: |
+    1. 公開 URL を開いて、オーナーのアカウントを作ります。最初に開いた人がオーナーになるので、作成が終わったら、すぐ開いて、作ってください。
+    2. 「暗号化キー」は、保存した認証情報(外部サービスのパスワードなど)を守る鍵です。控えておいてください。失うと、保存した認証情報が読めなくなります。
+    3. 外部のサービスから、n8n を呼び出す(Webhook)ときは、デプロイの「起動設定」で、環境変数 WEBHOOK_URL に、公開 URL(https://…/)を入れて、反映します。
+
+variables:
+  - name: encryption_key
+    label: 暗号化キー
+    type: password
+    generate: true
+    length: 32
+  - name: storage
+    label: データの大きさ(MB)
+    type: integer
+    default: "1024"
+    min: 256
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: n8n
+    image: n8nio/n8n:latest
+    spec: medium
+    replicas: 1
+    # イメージは、ユーザー 1000(node)で動く。ボリュームに書けるよう、所有グループを 1000 にする。
+    fsGroup: 1000
+    env:
+      N8N_ENCRYPTION_KEY: ${encryption_key}
+      N8N_PROXY_HOPS: "1"
+      N8N_RUNNERS_ENABLED: "true"
+      GENERIC_TIMEZONE: Asia/Tokyo
+      TZ: Asia/Tokyo
+    mounts:
+      - volume: data
+        path: /home/node/.n8n
+    service:
+      ports:
+        - name: http
+          port: 5678
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: n8n
+        port: 5678

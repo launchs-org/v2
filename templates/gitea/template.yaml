@@ -1,0 +1,52 @@
+# Gitea(自前の Git ホスティング)。データベースは SQLite(1 つのファイル)。リポジトリと設定は、ボリュームに保存する。
+# SSH は、インターネットに公開できない(公開は HTTP だけ)ので、無効にする。Git の操作は、HTTPS で行う。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: gitea
+  name: Gitea(Git ホスティング)
+  description: 自分たちのソースコードを置いて、管理できます。GitHub のような画面で、課題管理やレビューもできます。
+  icon: git
+  category: dev
+  notes: |
+    1. 公開 URL を開くと、最初の設定画面が出ます。「サーバーのドメイン」と「Gitea のベース URL」に、この公開 URL(https://…/)を入れます。ほかの項目は、そのままで構いません。
+    2. 同じ画面の下の「管理者アカウントの設定」で、管理者を作ります。この設定画面は、最初に開いた人が、操作できてしまうので、作成が終わったら、すぐ、済ませてください。
+    3. Git の操作(clone、push)は、HTTPS で行います。SSH は、使えません(インターネットに公開できないため)。
+
+variables:
+  - name: storage
+    label: データの大きさ(MB)
+    type: integer
+    default: "2048"
+    min: 512
+    max: 5120
+
+resources:
+  - kind: volume
+    name: data
+    sizeMB: ${storage}
+
+  - kind: deploy
+    name: gitea
+    image: gitea/gitea:latest
+    spec: medium
+    replicas: 1
+    env:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__START_SSH_SERVER: "false"
+      GITEA__service__DISABLE_REGISTRATION: "false"
+    mounts:
+      - volume: data
+        path: /data
+    service:
+      ports:
+        - name: http
+          port: 3000
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: gitea
+        port: 3000
