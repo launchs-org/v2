@@ -52,6 +52,7 @@
 <div class="note info"><b>上限に注意</b><p>テンプレートは、デプロイやボリュームを、いくつか、いっぺんに作ります。<a href="account.html">アカウントの上限</a>に足りないときは、作成の前に、止められます。</p></div>
 
 <h2 class="sec">用意されているテンプレート</h2>
+<h3>基本のもの</h3>
 <div class="table-wrap"><table>
 <tr><th>テンプレート</th><th>何ができる?</th><th>入れる項目</th></tr>
 <tr><td><b>nginx</b></td><td>簡単なホームページを出す、Web サーバー。まず試すのに、ぴったり。</td><td>ページの題、圧縮(gzip)の有効・無効</td></tr>
@@ -61,6 +62,32 @@
 <tr><td><b>Redis</b></td><td>高速な、一時的なデータの置き場(キャッシュなど)。</td><td>パスワード、ボリュームの大きさ(MB)</td></tr>
 <tr><td><b>code-server</b></td><td>ブラウザで使える、プログラムを書く画面(VS Code)。</td><td>ログインのパスワード、作業フォルダの大きさ(MB)、テーマ(ダーク / ライト)、文字の大きさ</td></tr>
 </table></div>
+
+<h3>監視・画面</h3>
+<div class="table-wrap"><table>
+<tr><th>テンプレート</th><th>何ができる?</th><th>入れる項目</th></tr>
+<tr><td><b>Uptime Kuma</b></td><td>サイトが動いているかを、定期的に確かめて、止まったら知らせてくれる(死活監視)。状態ページも作れます。</td><td>データの大きさ(MB)</td></tr>
+<tr><td><b>Grafana</b></td><td>データベースや監視のデータを、グラフにして見られる画面。</td><td>管理者(admin)のパスワード(自動で作られます)、データの大きさ(MB)</td></tr>
+<tr><td><b>Excalidraw</b></td><td>手書き風の図やメモを描けるホワイトボード。サーバーには、何も保存しません。</td><td>なし(すぐ使えます)</td></tr>
+</table></div>
+
+<h3>個人ツール</h3>
+<div class="table-wrap"><table>
+<tr><th>テンプレート</th><th>何ができる?</th><th>入れる項目</th></tr>
+<tr><td><b>Vaultwarden</b></td><td>自分専用のパスワード管理(Bitwarden のアプリや拡張機能を、そのまま使えます)。</td><td>新しい登録を許すか、データの大きさ(MB)</td></tr>
+<tr><td><b>Memos</b></td><td>思いついたことを書き留める、シンプルなメモ。</td><td>データの大きさ(MB)</td></tr>
+<tr><td><b>n8n</b></td><td>作業の自動化(「メールが来たら、スプレッドシートに書く」など)を、画面でつないで作れます。</td><td>暗号化キー(自動で作られます)、データの大きさ(MB)</td></tr>
+</table></div>
+
+<h3>開発</h3>
+<div class="table-wrap"><table>
+<tr><th>テンプレート</th><th>何ができる?</th><th>入れる項目</th></tr>
+<tr><td><b>Gitea</b></td><td>自分たちのソースコードを置く、Git の置き場(GitHub のような画面)。</td><td>データの大きさ(MB)</td></tr>
+<tr><td><b>Adminer</b></td><td>PostgreSQL や MariaDB の中身を、ブラウザで見たり、直したりできます。</td><td>なし</td></tr>
+<tr><td><b>Mailpit</b></td><td>開発中のアプリが送るメールを、本物の宛先に送らずに、受け取って、画面で確認できます。</td><td>画面のパスワード(自動で作られます)、データの大きさ(MB)</td></tr>
+</table></div>
+<div class="note info"><b>作ったあとの「最初にすること」</b><p>テンプレートごとに、作成が終わった画面に、<b>最初にすること</b>(管理者アカウントの作り方など)が、出ます。<b>最初に開いた人が管理者になる</b>アプリ(Uptime Kuma、Memos、n8n、Gitea など)は、作成後、すぐに開いて、自分のアカウントを作ってください。</p></div>
+<div class="note warn"><b>ボリュームのあるテンプレートは、作成に 1〜2 分かかります</b><p>データの置き場所の準備に、時間がかかります。いくつも続けて作るときは、<b>1 つ作り終わってから</b>、次を作ってください(同時に作ると、期限(5 分)に間に合わず、失敗になることがあります)。</p></div>
 <div class="note tip"><b>データベースにつなぐときは</b><p>同じプロジェクトの中のアプリからは、データベースの <b>Service の名前</b>で、つなげます。データベースは、<b>インターネットには公開されません</b>(安全のため)。</p></div>
 
 <div class="pager"><a href="storage.html"><small>← 前へ</small>データと設定ファイル</a><a class="next" href="monitoring.html"><small>次へ →</small>様子を見る(ログ・イベント・タスク)</a></div>

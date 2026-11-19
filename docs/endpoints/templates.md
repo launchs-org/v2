@@ -39,7 +39,7 @@
 - Note: **`generate` が `true` の `password` は、`default` を、返さない(常に `null`)**。入力が無ければ、作るときに、サーバーが自動で作る(英数字。既定 24 文字)
 - Note: `options` は、`choice` の選択肢(`{"value", "label"}` の配列)。他の型では、空の配列。`min` / `max` は `integer`、`minLength` / `maxLength` は `string` と `password`、`pattern` は `string`(値の全体に一致する正規表現)の制約。無ければ `null`
 - Note: `summary` は、何が作られるかの要約(deploy、volume、ConfigMap の数、ingress を作るか、deploy に置くファイルの合計の数)。**作る部品の中身(`resources`)は、返さない**
-- Note: `icon` は、画面の絵の名前。`category` は `"database"` | `"web"` | `"cache"` | `"tool"`、または空文字
+- Note: `icon` は、画面の絵の名前。`category` は `"database"` | `"web"` | `"cache"` | `"tool"` | `"monitoring"` | `"dev"`、または空文字。`notes` は、作成後に出す案内(`${変数名}` を含みうる。無ければ空文字)
 
 ### テンプレート取得
 - Get: /templates/:templateId
