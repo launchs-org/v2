@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>しくみと言葉 | launchs 利用ガイド</title>
+<meta name="description" content="画面に出てくる言葉を、たとえ話つきで説明します。この 1 ページで、全体像がつかめます。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<aside class="side">
+<a class="brand" href="index.html"><span class="logo">L</span>launchs</a>
+<p class="tag">利用ガイド<br>はじめての人にも、やさしく。</p>
+<div class="group">
+<a class="nav" href="index.html">ホーム</a>
+</div>
+<h2>はじめに</h2>
+<div class="group">
+<a class="nav" href="start.html">はじめてのガイド</a>
+<a class="nav" href="concepts.html" aria-current="page">しくみと言葉</a>
+</div>
+<h2>機能ごとの使い方</h2>
+<div class="group">
+<a class="nav" href="deploy.html">アプリを動かす(デプロイ)</a>
+<a class="nav" href="publish.html">インターネットに公開する</a>
+<a class="nav" href="storage.html">データと設定ファイル</a>
+<a class="nav" href="templates.html">テンプレートで一括作成</a>
+<a class="nav" href="monitoring.html">様子を見る(ログ・イベント・タスク)</a>
+<a class="nav" href="account.html">アカウントと上限</a>
+</div>
+<h2>困ったとき</h2>
+<div class="group">
+<a class="nav" href="faq.html">困ったとき(FAQ)</a>
+</div>
+</aside>
+<main>
+<div class="crumb"><a href="index.html">ホーム</a> ／ はじめに</div>
+<h1>しくみと言葉</h1><p class="lead">画面に出てくる言葉を、たとえ話つきで説明します。この 1 ページで、全体像がつかめます。</p>
+
+<h2 class="sec">全体の絵</h2>
+<figure>
+<svg viewBox="0 0 880 250" role="img" aria-label="インターネットから、公開の入口、アプリ、データの置き場所へのつながり">
+<defs><marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8a86a6"/></marker></defs>
+<rect class="svg-box" x="10" y="85" width="150" height="80" rx="14"/><text class="svg-text" x="85" y="122" text-anchor="middle">🌐 インターネット</text><text class="svg-sub" x="85" y="145" text-anchor="middle">あなたのお客さん</text>
+<rect class="svg-box" x="215" y="85" width="170" height="80" rx="14"/><text class="svg-text" x="300" y="122" text-anchor="middle">🚪 Ingress</text><text class="svg-sub" x="300" y="145" text-anchor="middle">公開の入口(URL)</text>
+<rect class="svg-main" x="440" y="70" width="190" height="110" rx="14"/><text class="svg-text" x="535" y="112" text-anchor="middle">📦 デプロイ</text><text class="svg-sub" x="535" y="136" text-anchor="middle">アプリ本体</text><text class="svg-sub" x="535" y="156" text-anchor="middle">(Service で受付)</text>
+<rect class="svg-box" x="700" y="15" width="170" height="80" rx="14"/><text class="svg-text" x="785" y="52" text-anchor="middle">💾 ボリューム</text><text class="svg-sub" x="785" y="75" text-anchor="middle">消えないデータ</text>
+<rect class="svg-box" x="700" y="150" width="170" height="80" rx="14"/><text class="svg-text" x="785" y="187" text-anchor="middle">📄 ConfigMap</text><text class="svg-sub" x="785" y="210" text-anchor="middle">設定ファイル</text>
+<path class="svg-line" d="M160,125 L212,125"/><path class="svg-line" d="M385,125 L437,125"/><path class="svg-line" d="M630,100 L697,60"/><path class="svg-line" d="M630,150 L697,190"/>
+</svg>
+<figcaption>お客さんが URL を開くと、入口(Ingress)を通って、アプリ(デプロイ)に届きます。アプリは、データと設定ファイルを、必要なら使います。</figcaption>
+</figure>
+
+<h2 class="sec">言葉の説明</h2>
+<dl class="words">
+<dt>🗂 プロジェクト</dt><dd>アプリ一式を入れる<b>箱</b>。1 つのサービスや、1 つのお店を、1 つのプロジェクトにする、というイメージです。プロジェクトごとに、ほかのプロジェクトから隔てられて(のぞけない・つながらない)います。</dd>
+<dt>📦 デプロイ</dt><dd>アプリを<b>実際に動かすこと</b>、または、動いているアプリ 1 つ。「コンテナイメージ」(アプリの入った、箱詰めのファイル)を選ぶと、launchs が動かします。</dd>
+<dt>🔌 Service(サービス)</dt><dd>アプリが<b>受け付ける、ポート(窓口の番号)</b>を決めるもの。「このアプリは、80 番で、お客さんを待っています」という宣言です。</dd>
+<dt>🚪 Ingress(イングレス)</dt><dd>インターネットに公開する<b>入口</b>。URL(例: <code>https://brave-blue-fox.example.org</code>)が自動で付き、「どのパスに来たお客さんを、どのアプリに届けるか」の<b>ルール</b>を決めます。</dd>
+<dt>💾 ボリューム</dt><dd>アプリを作り直しても<b>消えない、データの置き場所</b>。データベースのデータや、アップロードされた画像など、残したいものを置きます。</dd>
+<dt>📄 ConfigMap(コンフィグマップ)</dt><dd>アプリに渡す<b>設定ファイル</b>のセット。画面から、書いたり、ファイルをアップロードしたりできます。</dd>
+<dt>🧰 テンプレート</dt><dd><b>よく使う構成のひな形</b>。「WordPress を動かしたい」のように、必要な部品(アプリ、データ、公開の入口)を、まとめて作ります。</dd>
+<dt>🔢 レプリカ(台数)</dt><dd>同じアプリを<b>何台</b>動かすか。台数を増やすと、たくさんのお客さんを、さばけます(0〜5 台)。</dd>
+<dt>🧱 Pod(ポッド)</dt><dd>動いているアプリ 1 台の、実体。「台数 3」なら、Pod が 3 つ動きます。</dd>
+</dl>
+
+<h2 class="sec">変更の「下書き → 反映」のしくみ</h2>
+<p>launchs では、動いているアプリに、<b>いきなり変更が入ることはありません</b>。変更は、いったん「<b>未反映(下書き)</b>」として保存されて、<span class="ui">反映</span>を押したときに、はじめて動き出します。</p>
+<ol class="steps">
+<li><b>保存する</b><p>画面で値を変えて、<span class="ui">保存</span>を押します。この時点では、<b>動いているアプリは、何も変わりません</b>。</p></li>
+<li><b>確認する</b><p>「未反映の変更があります」という、帯が出ます。何が変わるのか、内容を確認できます。</p></li>
+<li><b>反映する、または、破棄する</b><p><span class="ui">反映</span>を押すと、実際に変更が入ります。やめたいときは、<span class="ui">破棄</span>を押すと、下書きが消えます。</p></li>
+</ol>
+<div class="note tip"><b>安心ポイント</b><p>反映に失敗しても、<b>元の動いていた状態に戻す</b>ようになっています。まず保存して、よく見てから、反映しましょう。</p></div>
+<div class="note warn"><b>反映すると、アプリが再起動することがあります</b><p>環境変数などを変えて反映すると、アプリが作り直されます。そのあいだ、短く、つながらなくなることがあります。</p></div>
+
+<h2 class="sec">状態の見方</h2>
+<p>カードや一覧に出る、状態の表示です。</p>
+<div class="table-wrap"><table>
+<tr><th>表示</th><th>意味</th></tr>
+<tr><td><span class="badge b-ok">active</span></td><td>動いています(問題なし)。</td></tr>
+<tr><td><span class="badge b-run">pending / applying</span></td><td>作っている途中、または、反映している途中です。<b>終わるまで、ほかの操作はできません</b>。</td></tr>
+<tr><td><span class="badge b-bad">failed</span></td><td>失敗しました。理由は、「タスク」「イベント」「ログ」で、探せます(<a href="faq.html">困ったとき</a>)。</td></tr>
+<tr><td><span class="badge b-warn">deleting</span></td><td>削除している途中です。</td></tr>
+</table></div>
+
+<div class="pager"><a href="start.html"><small>← 前へ</small>はじめてのガイド</a><a class="next" href="deploy.html"><small>次へ →</small>アプリを動かす(デプロイ)</a></div>
+<footer>このガイドは、launchs の画面の言葉に合わせて書いています。画面が変わったときは、このガイドも更新します。</footer>
+</main>
+</div>
+</body>
+</html>

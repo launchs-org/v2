@@ -303,6 +303,10 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		AutomountServiceAccountToken: boolPointer(false),
 		EnableServiceLinks:           boolPointer(false),
 	}
+	// ボリュームの所有グループが指定されていれば、Pod に fsGroup を付ける(非 root のイメージが、ボリュームに書けるようにする)。
+	if definition.FSGroup != nil {
+		podSpec.SecurityContext = &corev1.PodSecurityContext{FSGroup: definition.FSGroup}
+	}
 	// マウントするボリュームがあれば、Pod のボリュームと、コンテナのマウントを足す(PVC の名前は、volume の ID)。
 	for _, mount := range definition.Mounts {
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{

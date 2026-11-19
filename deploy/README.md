@@ -19,7 +19,7 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。この場�
    ```
    `secret.yaml` に、`POSTGRES_PASSWORD`、最初の管理者の名前とパスワード、署名鍵(必要なら Turnstile のキー)を書く。`secret.yaml` は gitignore 済み(リポジトリには置かない)。
 2. **設定を直す**: `config.yaml`(ingress に払い出すホスト名のベースドメイン `INGRESS_BASE_DOMAIN` など)と、`ingressroute.yaml`(`launchs.example.com` を、自分のホスト名に。3 か所)。
-3. **(任意)イメージのタグを固定する**: `kustomization.yaml` の `images` の `newTag` を、`latest` から `sha-xxxxxxx` に変える。
+3. **(任意)イメージのタグを固定する**: `kustomization.yaml` の `images` の `newTag` を、`latest` から `sha-xxxxxxx` に変える。`main` に入れたあとは、CI が、`newTag` を、自動で、最新の `sha-…` に書き換える([OPERATIONS.md](OPERATIONS.md) の「タグの自動更新」)。
 4. **適用する**:
    ```sh
    kubectl apply -k .
@@ -27,6 +27,9 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。この場�
    ```
    backend と auth の initContainer が、マイグレーション(up のみ)を流す。Temporal は、起動前にスキーマを作り、`temporal-namespace` の Job が、`default` の namespace を作る(Job は、完了の 10 分後に消える)。PostgreSQL と Temporal が立ち上がるまで、backend、worker、watcher は、再起動をくり返すことがある(待てば落ち着く)。
 5. **確認する**: `curl https://<ホスト名>/healthz`(backend)と、`https://<ホスト名>/` の画面。最初の管理者は、`secret.yaml` の名前とパスワードでログインできる(auth が、起動時に、管理者が 1 人もいなければ作る)。作ったあと、`AUTH_BOOTSTRAP_ADMIN_PASSWORD` は、Secret から消してよい。
+
+## 運用(更新、マイグレーション、バックアップ)
+更新の手順、マイグレーションのしくみと決まり、バックアップと復元、ロールバック、よくある問題は、[OPERATIONS.md](OPERATIONS.md) にまとめています。更新の前に、読んでください。
 
 ## 更新と戻し
 - 更新: `kustomization.yaml` の `newTag` を、新しい `sha-…` に変えて、`kubectl apply -k .`(マイグレーションは、新しい backend と auth の Pod が起動するときに流れる)。

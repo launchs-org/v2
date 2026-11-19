@@ -2,15 +2,18 @@
 
 import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
-import { Box, Code2, Database, Globe, type LucideIcon } from "lucide-react"
+import { Activity, BarChart3, Box, Code2, Database, GitBranch, Globe, HardDrive, Mail, PenTool, Server, ShieldCheck, StickyNote, Workflow, type LucideIcon } from "lucide-react"
 import { ApiError, api, authenticatedFetcher } from "@/lib/api"
 import { revalidateProject } from "@/lib/revalidate"
-import { CATEGORY_LABELS, buildValues, initialFields, stepLabel, summaryText, validateFields, type FieldState } from "@/lib/template-form"
+import { CATEGORY_LABELS, buildValues, initialFields, renderNotes, stepLabel, summaryText, validateFields, type FieldState } from "@/lib/template-form"
 import type { Nav } from "@/lib/nav"
 import type { IngressDetail, Project, QuotaResponse, Template, TemplateApplyProgress, TemplateListResponse, TemplateVariable } from "@/lib/types"
 
 /** テンプレートの icon(API の値)から、絵を決める。知らない名前は、箱の絵。 */
-const ICONS: Record<string, LucideIcon> = { database: Database, globe: Globe, code: Code2 }
+const ICONS: Record<string, LucideIcon> = {
+  database: Database, globe: Globe, code: Code2, activity: Activity, shield: ShieldCheck, note: StickyNote, workflow: Workflow,
+  git: GitBranch, storage: HardDrive, mail: Mail, draw: PenTool, chart: BarChart3, server: Server,
+}
 
 /** ウィザードの段階。 */
 type Phase = "pick" | "form" | "confirm" | "running" | "done" | "failed"
@@ -319,6 +322,12 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
                 {!progress && <li className="tr mut" style={{ ["--cols" as string]: "1fr" }}>受け付けました。準備しています…</li>}
               </ul>
               {phase === "done" && host && <div className="card pad row"><span className="mut">公開 URL</span><a className="lnk mono" href={`https://${host}`} target="_blank" rel="noreferrer">https://{host}</a><span className="faint" style={{ fontSize: 12.5 }}>反映と DNS が行き渡るまで、数分かかることがあります。</span></div>}
+              {phase === "done" && selected && selected.notes && (
+                <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <h2 className="h2">最初にすること</h2>
+                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, fontSize: 14 }}>{renderNotes(selected.notes, selected, values)}</div>
+                </div>
+              )}
               {phase === "done" && selected && <ResultValues template={selected} values={values} revealed={revealed} copied={copied} onToggleReveal={(name) => setRevealed((current) => ({ ...current, [name]: !current[name] }))} onCopy={(name, value) => void copy(name, value)} />}
             </>
           )}

@@ -337,3 +337,31 @@ func TestKubernetesDeploymentOperatorApplyDeploymentGeneration(testingT *testing
 		}
 	})
 }
+
+// TestKubernetesDeploymentOperatorFSGroup は、fsGroup が指定されたときだけ、Pod に付くことを確認する(非 root のイメージが、ボリュームに書けるようにする)。
+func TestKubernetesDeploymentOperatorFSGroup(testingT *testing.T) {
+	for name, testCase := range map[string]struct {
+		fsGroup *int64
+		want    *int64
+	}{"指定あり": {fsGroup: int64Pointer(472), want: int64Pointer(472)}, "指定なし": {fsGroup: nil, want: nil}} {
+		testingT.Run(name, func(subTest *testing.T) {
+			fakeClientset := fake.NewSimpleClientset()
+			definition := newTestDefinition()
+			definition.FSGroup = testCase.fsGroup
+			if _, applyError := NewKubernetesDeploymentOperator(fakeClientset, OperatorSettings{}).ApplyDeployment(context.Background(), definition); applyError != nil {
+				subTest.Fatal(applyError)
+			}
+			deployment, _ := fakeClientset.AppsV1().Deployments(validNamespaceName).Get(context.Background(), testDeploymentName, metav1.GetOptions{})
+			securityContext := deployment.Spec.Template.Spec.SecurityContext
+			if testCase.want == nil && securityContext != nil && securityContext.FSGroup != nil {
+				subTest.Errorf("指定なしのときは、fsGroup が付かないはず: %+v", securityContext)
+			}
+			if testCase.want != nil && (securityContext == nil || securityContext.FSGroup == nil || *securityContext.FSGroup != *testCase.want) {
+				subTest.Errorf("fsGroup が付くはず: %+v", securityContext)
+			}
+		})
+	}
+}
+
+// int64Pointer は、値のポインターを返す(試験用)。
+func int64Pointer(value int64) *int64 { return &value }

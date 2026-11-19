@@ -1,0 +1,32 @@
+# Adminer(データベースの管理画面)。PostgreSQL、MariaDB(MySQL)を、ブラウザで操作できる。データは持たない(ボリュームは要らない)。
+apiVersion: launchs/v1
+kind: Template
+metadata:
+  id: adminer
+  name: Adminer(データベースの管理画面)
+  description: PostgreSQL や MariaDB の中身を、ブラウザで見たり、直したりできます。
+  icon: database
+  category: dev
+  notes: |
+    1. 公開 URL を開いて、「システム」で、PostgreSQL か MySQL を選びます。
+    2. 「サーバー」には、データベースの Service の DNS 名を入れます(データベースのデプロイの「Service」タブで、確認できます)。同じプロジェクトのデータベースにだけ、つなげます。
+    3. ユーザー名、パスワード、データベース名は、データベースを作ったときの値を入れます。
+    この画面は、パスワードがなくても、開けます(データベースのパスワードで、守られます)。使い終わったら、デプロイを消すか、台数を 0 にしてください。
+
+resources:
+  - kind: deploy
+    name: adminer
+    image: adminer:latest
+    spec: small
+    replicas: 1
+    service:
+      ports:
+        - name: http
+          port: 8080
+          protocol: tcp
+
+  - kind: ingress
+    rules:
+      - path: /
+        deploy: adminer
+        port: 8080

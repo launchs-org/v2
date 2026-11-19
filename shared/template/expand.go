@@ -29,6 +29,9 @@ type ExpandedDeploy struct {
 	Spec     string
 	Replicas int
 
+	// FSGroup は、Pod のボリュームの所有グループ(0 なら、指定なし)。
+	FSGroup int
+
 	// Env、Command、Args は、起動の設定。Command は、空なら、イメージの既定。
 	Env     map[string]string
 	Command string
@@ -188,6 +191,7 @@ func expandDeploy(resource Resource, replace func(string) (string, error)) (Expa
 	if deploy.Image, replaceError = replace(resource.Image); replaceError != nil {
 		return ExpandedDeploy{}, replaceError
 	}
+	deploy.FSGroup = resource.FSGroup
 	if deploy.Command, replaceError = replace(resource.Command); replaceError != nil {
 		return ExpandedDeploy{}, replaceError
 	}

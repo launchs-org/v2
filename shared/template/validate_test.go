@@ -241,3 +241,60 @@ func TestValidateCycle(testingT *testing.T) {
 		})
 	}
 }
+
+// TestValidateNotes は、作成後の案内(notes)の検査(長さ、参照できるのは変数だけ)を確認する。
+func TestValidateNotes(testingT *testing.T) {
+	build := func(notes string, category string) Template {
+		template := mustParse(testingT, validTemplateYAML)
+		template.Metadata.Notes = notes
+		template.Metadata.Category = category
+		return template
+	}
+	if validateError := Validate(build("タイトルは ${title} です。", "web")); validateError != nil {
+		testingT.Errorf("変数の参照は、許されるはず: %v", validateError)
+	}
+	if validateError := Validate(build("${unknown}", "web")); validateError == nil || !strings.Contains(validateError.Error(), "metadata.notes") {
+		testingT.Errorf("知らない参照は、notes のエラーになるはず: %v", validateError)
+	}
+	if validateError := Validate(build("${service.web.dns}", "web")); validateError == nil {
+		testingT.Error("notes では、service の参照は、使えないはず")
+	}
+	if validateError := Validate(build(strings.Repeat("あ", maxNotesRunes+1), "web")); validateError == nil {
+		testingT.Error("長すぎる notes は、拒否するはず")
+	}
+	for _, category := range []string{"monitoring", "dev"} {
+		if validateError := Validate(build("", category)); validateError != nil {
+			testingT.Errorf("%s は、使えるカテゴリのはず: %v", category, validateError)
+		}
+	}
+	if validateError := Validate(build("", "unknown")); validateError == nil {
+		testingT.Error("知らないカテゴリは、拒否するはず")
+	}
+}
+
+// TestValidateFSGroup は、deploy の fsGroup(ボリュームの所有グループ)の範囲と、deploy 以外での使用の拒否を確認する。
+func TestValidateFSGroup(testingT *testing.T) {
+	template := mustParse(testingT, validTemplateYAML)
+	deployIndex, volumeIndex := -1, -1
+	for index, resource := range template.Resources {
+		if resource.Kind == ResourceDeploy {
+			deployIndex = index
+		}
+		if resource.Kind == ResourceVolume {
+			volumeIndex = index
+		}
+	}
+	template.Resources[deployIndex].FSGroup = 472
+	if validateError := Validate(template); validateError != nil {
+		testingT.Errorf("472 は、使えるはず: %v", validateError)
+	}
+	template.Resources[deployIndex].FSGroup = 70000
+	if validateError := Validate(template); validateError == nil {
+		testingT.Error("65535 を超える値は、拒否するはず")
+	}
+	template.Resources[deployIndex].FSGroup = 472
+	template.Resources[volumeIndex].FSGroup = 472
+	if validateError := Validate(template); validateError == nil {
+		testingT.Error("volume には、fsGroup は使えないはず")
+	}
+}
