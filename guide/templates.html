@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テンプレートで一括作成 | launchs 利用ガイド</title>
+<meta name="description" content="よく使う構成を、必要な項目を入れるだけで、まとめて作れます。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<aside class="side">
+<a class="brand" href="index.html"><span class="logo">L</span>launchs</a>
+<p class="tag">利用ガイド<br>はじめての人にも、やさしく。</p>
+<div class="group">
+<a class="nav" href="index.html">ホーム</a>
+</div>
+<h2>はじめに</h2>
+<div class="group">
+<a class="nav" href="start.html">はじめてのガイド</a>
+<a class="nav" href="concepts.html">しくみと言葉</a>
+</div>
+<h2>機能ごとの使い方</h2>
+<div class="group">
+<a class="nav" href="deploy.html">アプリを動かす(デプロイ)</a>
+<a class="nav" href="publish.html">インターネットに公開する</a>
+<a class="nav" href="storage.html">データと設定ファイル</a>
+<a class="nav" href="templates.html" aria-current="page">テンプレートで一括作成</a>
+<a class="nav" href="monitoring.html">様子を見る(ログ・イベント・タスク)</a>
+<a class="nav" href="account.html">アカウントと上限</a>
+</div>
+<h2>困ったとき</h2>
+<div class="group">
+<a class="nav" href="faq.html">困ったとき(FAQ)</a>
+</div>
+</aside>
+<main>
+<div class="crumb"><a href="index.html">ホーム</a> ／ 機能ごとの使い方</div>
+<h1>テンプレートで一括作成</h1><p class="lead">よく使う構成を、必要な項目を入れるだけで、まとめて作れます。</p>
+
+<h2 class="sec">テンプレートとは</h2>
+<p>「WordPress を動かしたい」ときに、アプリ、データの置き場所、公開の入口を、1 つずつ作るのは大変です。<b>テンプレート</b>は、それらを、<b>1 回の操作で、まとめて作ってくれる、ひな形</b>です。</p>
+
+<h2 class="sec">使い方</h2>
+<ol class="steps">
+<li><b>テンプレートを選ぶ</b><p>構成図の右上 <span class="ui">+ 追加</span> → <span class="ui">デプロイ</span> で、<b>テンプレート</b>を選びます。</p></li>
+<li><b>項目を入れる</b><p>パスワードや、データの大きさなどを、入れます。<b>パスワードは、自分で決めて、控えて</b>ください(入れた値が、そのまま使われます)。</p></li>
+<li><b>作成する</b><p>確認して、<span class="ui">作成</span>。必要な部品が、順番に作られます。進み具合は、<span class="ui">タスク</span>タブで、見られます。</p></li>
+<li><b>公開 URL を開く</b><p>公開の入口が付くテンプレートは、構成図の Ingress から、URL を開けます。</p></li>
+</ol>
+<div class="note warn"><b>途中で失敗したとき</b><p>失敗したところで<b>止まり</b>、<b>それまでに作れたものは、残ります</b>。理由は、<span class="ui">タスク</span>タブで、確認できます。残ったものは、手で消すか、直して、作り直してください。</p></div>
+<div class="note info"><b>上限に注意</b><p>テンプレートは、デプロイやボリュームを、いくつか、いっぺんに作ります。<a href="account.html">アカウントの上限</a>に足りないときは、作成の前に、止められます。</p></div>
+
+<h2 class="sec">用意されているテンプレート</h2>
+<div class="table-wrap"><table>
+<tr><th>テンプレート</th><th>何ができる?</th><th>入れる項目</th></tr>
+<tr><td><b>nginx</b></td><td>簡単なホームページを出す、Web サーバー。まず試すのに、ぴったり。</td><td>ページの題、圧縮(gzip)の有効・無効</td></tr>
+<tr><td><b>WordPress</b></td><td>ブログやお知らせのサイト。データベースも、いっしょに作られます。</td><td>データベースのパスワード、データベースの大きさ(MB)、アップロードの置き場の大きさ(MB)</td></tr>
+<tr><td><b>PostgreSQL</b></td><td>データベース。ほかのアプリから、つないで使います。</td><td>データベース名、ユーザー名、パスワード、ボリュームの大きさ(MB)、最大の接続数</td></tr>
+<tr><td><b>MariaDB</b></td><td>データベース(MySQL 互換)。</td><td>データベース名、ユーザー名、パスワード、ボリュームの大きさ(MB)</td></tr>
+<tr><td><b>Redis</b></td><td>高速な、一時的なデータの置き場(キャッシュなど)。</td><td>パスワード、ボリュームの大きさ(MB)</td></tr>
+<tr><td><b>code-server</b></td><td>ブラウザで使える、プログラムを書く画面(VS Code)。</td><td>ログインのパスワード、作業フォルダの大きさ(MB)、テーマ(ダーク / ライト)、文字の大きさ</td></tr>
+</table></div>
+<div class="note tip"><b>データベースにつなぐときは</b><p>同じプロジェクトの中のアプリからは、データベースの <b>Service の名前</b>で、つなげます。データベースは、<b>インターネットには公開されません</b>(安全のため)。</p></div>
+
+<div class="pager"><a href="storage.html"><small>← 前へ</small>データと設定ファイル</a><a class="next" href="monitoring.html"><small>次へ →</small>様子を見る(ログ・イベント・タスク)</a></div>
+<footer>このガイドは、launchs の画面の言葉に合わせて書いています。画面が変わったときは、このガイドも更新します。</footer>
+</main>
+</div>
+</body>
+</html>

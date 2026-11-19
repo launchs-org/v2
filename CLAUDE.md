@@ -22,6 +22,7 @@ accessstats/    ingress のアクセスの集計を、Traefik のログから DB
 traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Yaegi での試験(harness)
 accessstats/    Traefik のログから、ingress のアクセスの集計を読み取って DB に保存するコンテナ(docs/ingress-plugins.md)
 traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Yaegi での試験(harness)
+guide/          利用者向けの使い方ガイド(HTML + CSS の静的なサイト。画面の言葉に合わせて書く。画面や仕様を変えたら、ここも直す)
 deploy/         本番向けの Kubernetes のマニフェスト(kustomize。`cd deploy && kubectl apply -k .`。deploy/README.md)
 registry/       同じ形のコンテナ用フォルダ(これから作る)
 shared/         バックエンド・ワーカー・watcher で共有するコード
