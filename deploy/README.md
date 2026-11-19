@@ -28,6 +28,9 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。この場�
    backend と auth の initContainer が、マイグレーション(up のみ)を流す。Temporal は、起動前にスキーマを作り、`temporal-namespace` の Job が、`default` の namespace を作る(Job は、完了の 10 分後に消える)。PostgreSQL と Temporal が立ち上がるまで、backend、worker、watcher は、再起動をくり返すことがある(待てば落ち着く)。
 5. **確認する**: `curl https://<ホスト名>/healthz`(backend)と、`https://<ホスト名>/` の画面。最初の管理者は、`secret.yaml` の名前とパスワードでログインできる(auth が、起動時に、管理者が 1 人もいなければ作る)。作ったあと、`AUTH_BOOTSTRAP_ADMIN_PASSWORD` は、Secret から消してよい。
 
+## 運用(更新、マイグレーション、バックアップ)
+更新の手順、マイグレーションのしくみと決まり、バックアップと復元、ロールバック、よくある問題は、[OPERATIONS.md](OPERATIONS.md) にまとめています。更新の前に、読んでください。
+
 ## 更新と戻し
 - 更新: `kustomization.yaml` の `newTag` を、新しい `sha-…` に変えて、`kubectl apply -k .`(マイグレーションは、新しい backend と auth の Pod が起動するときに流れる)。
 - 戻し: `newTag` を、前の `sha-…` に戻して、`kubectl apply -k .`。**マイグレーションは up だけ**なので、DB は戻らない(戻すときは、DB のスキーマが、古いイメージと合うかを、確かめる)。
