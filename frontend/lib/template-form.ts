@@ -3,7 +3,7 @@
 import type { Template, TemplateApplyStep, TemplateVariable } from "@/lib/types"
 
 /** カテゴリの、画面に出す名前(API の category の値から)。 */
-export const CATEGORY_LABELS: Record<string, string> = { database: "データベース", web: "Web", cache: "キャッシュ", tool: "ツール" }
+export const CATEGORY_LABELS: Record<string, string> = { database: "データベース", web: "Web", cache: "キャッシュ", tool: "ツール", monitoring: "監視", dev: "開発" }
 
 /** ステップの種類の、画面に出す名前。 */
 export const STEP_KIND_LABELS: Record<TemplateApplyStep["kind"], string> = {
@@ -137,4 +137,23 @@ export function summaryText(template: Template): string {
 export function stepLabel(step: Pick<TemplateApplyStep, "kind" | "name">): string {
   // service は、deploy の name なので、「(deploy の name)の公開ポート」の形にする。
   return step.kind === "ingress" ? STEP_KIND_LABELS.ingress : `${STEP_KIND_LABELS[step.kind]} ${step.name}`
+}
+
+/**
+ * テンプレートの案内(notes)の ${変数名} を、入力した値に置き換える。パスワードは、案内の中には出さず(画面に残らないよう)、「作成した値」で見るよう促す。
+ *
+ * @param notes 案内(${変数名} を含みうる)。
+ * @param template テンプレート(変数の型を引くため)。
+ * @param values 全ての変数の値(自動で作ったものを含む)。
+ * @returns 置き換えたあとの文字列。知らない名前は、そのまま残す。
+ */
+export function renderNotes(notes: string, template: Template, values: Record<string, string>): string {
+  // 変数ごとに、値(またはパスワードの代わりの文)を引いて、置き換える。
+  return notes.replace(/\$\{([A-Za-z][A-Za-z0-9_]*)\}/g, (whole, name: string) => {
+    const variable = template.variables.find((item) => item.name === name)
+    if (!variable) return whole
+    if (variable.type === "password") return "(「作成した値」で確認できます)"
+    const value = values[name] ?? ""
+    return variable.type === "choice" ? (variable.options.find((option) => option.value === value)?.label ?? value) : value
+  })
 }

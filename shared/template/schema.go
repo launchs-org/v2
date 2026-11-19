@@ -63,6 +63,9 @@ type Metadata struct {
 
 	// Category は、絞り込みの分類。
 	Category string `yaml:"category"`
+
+	// Notes は、作成が終わったあとに、画面に出す案内(最初にすること、初期のログインなど)。${変数名} で、入力した値(自動で作ったパスワードを含む)を差し込める。
+	Notes string `yaml:"notes"`
 }
 
 // Variable は、利用者が入力する値1つの定義。値は、全て、文字列として受け取り、型に合うかを検査する。

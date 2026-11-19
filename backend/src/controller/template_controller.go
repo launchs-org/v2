@@ -77,8 +77,11 @@ type TemplateResponse struct {
 	// Icon は、画面の絵の名前。
 	Icon string `json:"icon"`
 
-	// Category は、分類(database、web、cache、tool)。無ければ空。
+	// Category は、分類(database、web、cache、tool、monitoring、dev)。無ければ空。
 	Category string `json:"category"`
+
+	// Notes は、作成が終わったあとに出す案内(${変数名} は、画面が、入力した値に置き換える)。無ければ空。
+	Notes string `json:"notes"`
 
 	// Variables は、入力欄の定義。
 	Variables []TemplateVariableResponse `json:"variables"`
@@ -172,5 +175,5 @@ func newTemplateResponse(found template.Template) TemplateResponse {
 		}
 		variables = append(variables, response)
 	}
-	return TemplateResponse{ID: found.Metadata.ID, Name: found.Metadata.Name, Description: found.Metadata.Description, Icon: found.Metadata.Icon, Category: found.Metadata.Category, Variables: variables, Summary: found.Summarize()}
+	return TemplateResponse{ID: found.Metadata.ID, Name: found.Metadata.Name, Description: found.Metadata.Description, Icon: found.Metadata.Icon, Category: found.Metadata.Category, Notes: found.Metadata.Notes, Variables: variables, Summary: found.Summarize()}
 }

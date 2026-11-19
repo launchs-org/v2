@@ -221,6 +221,8 @@ export type Template = {
   description: string
   icon: string
   category: string
+  /** 作成が終わったあとに出す案内(${変数名} を含みうる)。無ければ空。 */
+  notes: string
   variables: TemplateVariable[]
   summary: TemplateSummary
 }
