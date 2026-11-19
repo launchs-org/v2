@@ -9,7 +9,7 @@
 | 項目 | 決定 | 理由 |
 |---|---|---|
 | 設定ファイルの渡し方 | **deploy に「ファイル」を持たせる**(新しい機能)。k8s の ConfigMap として、コンテナにマウントする | 初期設定だけでなく、あとから編集(pending → 適用)もできる。テンプレートは、この機能の上に乗る |
-| テンプレートの定義の置き場 | **リポジトリの `templates/<id>/`**(フォルダ形式。B3)。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
+| テンプレートの定義の置き場 | **別リポジトリ [launchs-v2-template](https://github.com/launchs-org/launchs-v2-template)**(本体には、git submodule として、`templates/` に取り込む。フォルダ形式。B3)。このシステム(backend)に同梱する | 内容を PR でレビューできる。DB も、管理画面も、要らない |
 | 作れる人 | 管理者が、リポジトリに追加する。利用者は、選んで使うだけ | 安全(利用者が、任意の構成を、流し込まない) |
 | 範囲 | **複数の部品**(deploy、volume、service、ingress、ファイル)を、1 つのテンプレートで | WordPress = web + DB(ボリューム付き)+ ingress、が書ける |
 | 変数 | **ある**。YAML の中に `${名前}` と書き、画面に入力欄を出す。パスワードは、**自動生成**の型を用意する | 初心者が、弱いパスワードを使わない |
@@ -128,42 +128,51 @@ resources:
         port: 80
 ```
 
-## フォルダ形式(段階 B3)
+## フォルダ形式(段階 B3)と、版
 
-テンプレートは、**1 つにつき 1 つのフォルダ**。git で管理でき、エディタ、CI、他のツールが、そのまま扱える。
+テンプレートは、**1 つにつき 1 つのフォルダ**で、別リポジトリ(launchs-v2-template)で管理する。本体は、これを `templates/`(git submodule)に取り込み、同梱する。**開発の手順(雛形、検証用の環境)は、そのリポジトリの README と docs**。
 
 ```
-templates/
-  nginx/
-    template.yaml        # 本体(必須)。フォルダ名は、metadata.id と同じ
-    files/               # from: で読み込むファイル(任意。置き場所は自由)
-      default.conf
-      index.html
-      favicon.gif        # バイナリも、そのまま置ける
+templates/<id>/
+  manifest.yaml        # 名前、説明、アイコン、分類、既定の版(latest)。版によらない
+  README.md            # 説明の文書(任意。詳細の API が返す)
+  <x.y.z>/             # 版のフォルダ(1.0.0 のような名前。複数持てる)
+    config.yaml        # 変数(variables)と、作成後の案内(notes)
+    volumes.yaml       # volumes:
+    configmaps.yaml    # configmaps:
+    deploy.yaml        # deploys:
+    service.yaml       # services:(deploy: <name> と ports)
+    ingress.yaml       # rules:
+    files/             # from: で読み込むファイル(バイナリも、そのまま置ける)
 ```
 
-- 読み込み(`template.Load`)は、`templates/` の直下のフォルダを、名前の順に、全て読む。フォルダでないもの(README など)は、無視する。`template.yaml` の無いフォルダは、エラー。**直下の `*.yaml`(単一ファイル形式)は、読まない。**
+- 読み込み(`template.Load`)は、`templates/` の直下のフォルダを、名前の順に、全て読む。フォルダでないもの(README など)は、無視する。`manifest.yaml` の無いフォルダ、版のフォルダの無いテンプレートは、エラー。manifest の `id` は、フォルダ名と同じ。
+- 版のフォルダの名前は `x.y.z`(数字 3 つ。`v1`、`01.0.0` は不可)。**既定の版**は、manifest の `latest`(省略は、いちばん新しい版)。**利用者は、作るときに、版を選べる**(`GET /templates/:id?version=`、apply の `version`)。作った版は、実行の記録(`template_applies.template_version`)に残る。
+- 種類ごとのファイルは、どれも最上位のキーが 1 つ(`volumes:`、`configmaps:`、`deploys:`、`services:`、`rules:`)で、**知らない項目はエラー**。部品の `kind` は、ファイルで決まるので、書かない。**service は、`service.yaml` に書く**(deploy の中には書けない。`deploy:` で deploy の name を指す)。`config.yaml` だけが必須で、他は、無ければ、その種類は作らない。
+- 版ごとに、変数も案内も違ってよい(互換性のない変更は、版を上げる)。
 - ファイルの内容は、`content:` に直接書くか、`from:` で、フォルダのファイルを指す(同時には書けない)。
 
 ```yaml
-- kind: configmap
-  name: site
-  files:
-    - key: default.conf
-      from: files/default.conf    # テキスト: ${変数} を展開する
-    - key: favicon.gif
-      from: files/favicon.gif     # バイナリ: 自動で判定して、base64 にする
-    - key: note.txt
-      encoding: base64            # テキストでも、バイナリとして扱いたいとき(変数は展開しない)
-      from: files/note.txt
-- kind: deploy
-  name: db
-  files:
-    - path: /docker-entrypoint-initdb.d/init.sql
-      from: files/init.sql        # deploy の files は、テキストだけ
+# configmaps.yaml
+configmaps:
+  - name: site
+    files:
+      - key: default.conf
+        from: files/default.conf    # テキスト: ${変数} を展開する
+      - key: favicon.gif
+        from: files/favicon.gif     # バイナリ: 自動で判定して、base64 にする
+      - key: note.txt
+        encoding: base64            # テキストでも、バイナリとして扱いたいとき(変数は展開しない)
+        from: files/note.txt
+# deploy.yaml
+deploys:
+  - name: db
+    files:
+      - path: /docker-entrypoint-initdb.d/init.sql
+        from: files/init.sql        # deploy の files は、テキストだけ
 ```
 
-- `from` は、そのテンプレートのフォルダの中の、**相対パス**だけ(`/` で始まる、`..` を含むものは、エラー。フォルダの外は、読めない)。
+- `from` は、その**版のフォルダ**の中の、**相対パス**だけ(`/` で始まる、`..` を含むものは、エラー。フォルダの外は、読めない)。
 - 自動判定: UTF-8 で、NUL 文字を含まなければ、**テキスト**。それ以外は、**バイナリ**(base64)。`encoding: text` を指定したのに、バイナリなら、エラー。
 - 1 ファイルは、1 MiB まで(ConfigMap の上限)。
 - 読み込んだあと、`from` は、内容(`content` と `encoding`)に置き換わる。検証と展開は、`content` だけを見るので、**今までの規則(変数、参照、大きさ)が、そのまま、同じように働く**。
@@ -289,7 +298,8 @@ nginx(静的な公開)、PostgreSQL、MariaDB、Redis、WordPress(web + DB)、No
 | `memos` | tool | メモ | 最初のユーザーが管理者 |
 | `n8n` | tool | 自動化 | `fsGroup: 1000`。暗号化キーは自動生成。初回の起動に数分かかる |
 | `gitea` | dev | Git ホスティング | SQLite。SSH は無効(公開は HTTP だけ)。初回は、画面で設定する |
-| `adminer` | dev | データベースの管理画面 | PostgreSQL と MariaDB の両方に使える |
+| `cloudbeaver` | dev | データベースの管理画面(ブラウザの DBeaver) | 最初に開いた人が管理者になる(notes に書いた)。起動に 1〜2 分 |
+| `redash` | monitoring | SQL でデータを調べて、グラフにする | 5 つの deploy(web、scheduler、worker、PostgreSQL、Redis)。最初に開いた人が管理者になる |
 | `mailpit` | dev | 開発用のメール受信箱 | 画面は、パスワードで保護。SMTP(1025)は、同じプロジェクトの中だけ |
 
 - **MinIO は見送り**: 公式の無料版イメージの提供が変わって(配布元とタグが不安定)、確実に動くイメージを、決められなかったため。

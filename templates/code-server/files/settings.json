@@ -1,5 +1,0 @@
-{
-  "workbench.colorTheme": "${theme}",
-  "editor.fontSize": ${font_size},
-  "files.autoSave": "afterDelay"
-}

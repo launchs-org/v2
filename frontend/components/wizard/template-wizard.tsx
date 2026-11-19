@@ -59,6 +59,8 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
   const [phase, setPhase] = useState<Phase>("pick")
   const [category, setCategory] = useState("all")
   const [selected, setSelected] = useState<Template | null>(null)
+  // 選んでいる版(x.y.z)。版を変えると、その版の入力欄と案内を読み込み直す。
+  const [loadingVersion, setLoadingVersion] = useState(false)
   const [fields, setFields] = useState<Record<string, FieldState>>({})
   const [problems, setProblems] = useState<Record<string, string>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
@@ -112,6 +114,28 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
   }
 
   /**
+   * 版を切り替える。その版の入力欄と案内を、サーバーから読み込み直して、入力を初期化する。
+   *
+   * @param version 切り替える版(x.y.z)。
+   */
+  async function changeVersion(version: string) {
+    if (!selected || loadingVersion || version === selected.version) return
+    setLoadingVersion(true)
+    setError("")
+    try {
+      const detail = await api.get<Template>(`/api/v1/templates/${encodeURIComponent(selected.id)}?version=${encodeURIComponent(version)}`)
+      setSelected(detail)
+      setFields(initialFields(detail))
+      setProblems({})
+      setRevealed({})
+    } catch (caught) {
+      setError(caught instanceof ApiError || caught instanceof Error ? caught.message : "版を読み込めませんでした。")
+    } finally {
+      setLoadingVersion(false)
+    }
+  }
+
+  /**
    * 入力欄 1 つを書き換える。
    *
    * @param name 変数名。
@@ -157,7 +181,7 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
     setError("")
     let applyId = ""
     try {
-      const accepted = await api.post<{ applyId: string; values: Record<string, string> }>(`${projectPath}/templates/${encodeURIComponent(selected.id)}/apply`, { values: buildValues(selected, fields) })
+      const accepted = await api.post<{ applyId: string; values: Record<string, string> }>(`${projectPath}/templates/${encodeURIComponent(selected.id)}/apply`, { version: selected.version, values: buildValues(selected, fields) })
       applyId = accepted.applyId
       setValues(accepted.values)
       setPhase("running")
@@ -283,6 +307,14 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
           {phase === "form" && selected && (
             <>
               <div className="mut">{selected.description}</div>
+              {selected.versions.length > 1 && (
+                <div className="field">
+                  <label className="lbl" htmlFor="template-version">版</label>
+                  <select id="template-version" className="inp" value={selected.version} disabled={loadingVersion} onChange={(event) => void changeVersion(event.target.value)}>
+                    {selected.versions.map((version, index) => <option key={version} value={version}>{version}{index === 0 ? "(最新)" : ""}</option>)}
+                  </select>
+                </div>
+              )}
               {selected.variables.length === 0 && <div className="mut">入力する項目はありません。</div>}
               {selected.variables.map((variable) => (
                 <FieldInput key={variable.name} variable={variable} field={fields[variable.name]} problem={problems[variable.name]} revealed={revealed[variable.name] === true}

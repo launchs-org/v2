@@ -15,12 +15,15 @@ import (
 
 // TemplateApplyUseCase は、TemplateApplyController が使う、テンプレートの実行のユースケース。
 type TemplateApplyUseCase interface {
-	Apply(requestContext context.Context, userID string, projectID string, templateID string, input map[string]string) (string, map[string]string, error)
+	Apply(requestContext context.Context, userID string, projectID string, templateID string, version string, input map[string]string) (string, string, map[string]string, error)
 	Get(requestContext context.Context, userID string, projectID string, applyID string) (model.TemplateApply, []templateplan.StepState, error)
 }
 
 // ApplyTemplateRequest は、テンプレートから作るリクエスト。
 type ApplyTemplateRequest struct {
+	// Version は、使う版(x.y.z)。省略すると、既定の版。
+	Version string `json:"version" validate:"max=20"`
+
 	// Values は、変数の値(変数名 → 文字列)。省略した変数は、既定値か、自動生成になる。
 	Values map[string]string `json:"values" validate:"max=50"`
 }
@@ -29,6 +32,9 @@ type ApplyTemplateRequest struct {
 type ApplyTemplateResponse struct {
 	// ApplyID は、実行の ID。進み具合を取るときに使う。
 	ApplyID string `json:"applyId"`
+
+	// Version は、使った版(x.y.z)。
+	Version string `json:"version"`
 
 	// Values は、全ての変数の値(自動生成を含む。画面が、パスワードを見せるため)。
 	Values map[string]string `json:"values"`
@@ -59,6 +65,9 @@ type TemplateApplyResponse struct {
 
 	// TemplateID は、使ったテンプレートの id。
 	TemplateID string `json:"templateId"`
+
+	// TemplateVersion は、使ったテンプレートの版(x.y.z。古い記録は空)。
+	TemplateVersion string `json:"templateVersion"`
 
 	// Status は、running、succeeded、failed のどれか。
 	Status string `json:"status"`
@@ -114,11 +123,11 @@ func (templateApplyController *TemplateApplyController) Apply(echoContext *echo.
 		return bindError
 	}
 	// 受け付ける。
-	applyID, values, applyError := templateApplyController.templateApplyUseCase.Apply(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("templateId"), request.Values)
+	applyID, usedVersion, values, applyError := templateApplyController.templateApplyUseCase.Apply(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("templateId"), request.Version, request.Values)
 	if applyError != nil {
 		return applyError
 	}
-	return echoContext.JSON(http.StatusOK, ApplyTemplateResponse{ApplyID: applyID, Values: values})
+	return echoContext.JSON(http.StatusOK, ApplyTemplateResponse{ApplyID: applyID, Version: usedVersion, Values: values})
 }
 
 // Get は、GET /projects/:projectId/template-applies/:applyId のハンドラー。進み具合を返す。
@@ -150,7 +159,7 @@ func (templateApplyController *TemplateApplyController) Get(echoContext *echo.Co
 		steps = append(steps, step)
 	}
 	return echoContext.JSON(http.StatusOK, TemplateApplyResponse{
-		ApplyID: apply.ID, TemplateID: apply.TemplateID, Status: apply.Status, Values: valuesFromJSON(apply.Values), Steps: steps, Error: apply.Error,
+		ApplyID: apply.ID, TemplateID: apply.TemplateID, TemplateVersion: apply.TemplateVersion, Status: apply.Status, Values: valuesFromJSON(apply.Values), Steps: steps, Error: apply.Error,
 		CreatedAt: jst.Format(apply.CreatedAt), UpdatedAt: jst.Format(apply.UpdatedAt),
 	})
 }

@@ -54,6 +54,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # templates/ は、別のリポジトリ(submodule)。--recursive にしない(その中の launchs/ が、この本体を指すため、終わらなくなる)。
+          submodules: true
+          # 別の非公開リポジトリ(templates)を取るため、読み取りの権限のある token を、secret TEMPLATES_TOKEN に入れる(無ければ、既定の token)。
+          token: ${{ secrets.TEMPLATES_TOKEN || github.token }}
 
       # GHCR のイメージ名は、小文字でなければならない(リポジトリの所有者に、大文字があっても大丈夫なようにする)。
       - name: イメージ名を決める

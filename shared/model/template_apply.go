@@ -34,6 +34,9 @@ type TemplateApply struct {
 	// TemplateID は、使ったテンプレートの id。
 	TemplateID string `gorm:"column:template_id"`
 
+	// TemplateVersion は、使ったテンプレートの版(x.y.z。版を扱う前の記録は空)。
+	TemplateVersion string `gorm:"column:template_version"`
+
 	// Status は、TemplateApplyStatus... のどれか。
 	Status string `gorm:"column:status"`
 

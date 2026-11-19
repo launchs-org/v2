@@ -12,11 +12,11 @@ func TestTemplateAPI(testingT *testing.T) {
 	// 同梱のテンプレートで動くクライアント(データベースは使わないが、他の API と同じ作りのサーバーを使う)。
 	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{})
 
-	testingT.Run("一覧は、同梱の 15 個を、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
+	testingT.Run("一覧は、同梱の 16 個を、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
 		statusCode, responseBody := apiClient.call(http.MethodGet, "/templates", "")
 		templates, _ := responseBody["templates"].([]any)
-		if statusCode != http.StatusOK || len(templates) != 15 {
-			subTest.Fatalf("200 で、6 つのはず: %d %v", statusCode, responseBody)
+		if statusCode != http.StatusOK || len(templates) != 16 {
+			subTest.Fatalf("200 で、16 個のはず: %d %v", statusCode, responseBody)
 		}
 		// id で引けるようにし、並びは、id の順(code-server、mariadb、nginx、postgres、redis、wordpress)になっていることを確かめる。
 		byID := map[string]map[string]any{}
@@ -30,7 +30,7 @@ func TestTemplateAPI(testingT *testing.T) {
 				subTest.Errorf("%s: resources は返さないはず", item["id"])
 			}
 		}
-		if strings.Join(ids, ",") != "adminer,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redis,uptime-kuma,vaultwarden,wordpress" {
+		if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
 			subTest.Errorf("id の順のはず: %v", ids)
 		}
 		// 要約: postgres は deploy 1・volume 1・ingress なし・ファイル 1、nginx は ingress あり、code-server は volume と ingress あり。
@@ -42,6 +42,19 @@ func TestTemplateAPI(testingT *testing.T) {
 		codeServer, _ := byID["code-server"]["summary"].(map[string]any)
 		if nginx["ingress"] != true || codeServer["ingress"] != true || codeServer["volumes"] != float64(1) {
 			subTest.Errorf("nginx と code-server は ingress あり、code-server は volume 1: %v %v", nginx, codeServer)
+		}
+	})
+	testingT.Run("一覧と詳細に、版(version と versions)が入る。詳細は、?version= で版を指定でき、README を返す。無い版は 404", func(subTest *testing.T) {
+		_, listBody := apiClient.call(http.MethodGet, "/templates", "")
+		first, _ := listBody["templates"].([]any)[0].(map[string]any)
+		versions, _ := first["versions"].([]any)
+		statusCode, detail := apiClient.call(http.MethodGet, "/templates/nginx?version=1.0.0", "")
+		missingStatus, _ := apiClient.call(http.MethodGet, "/templates/nginx?version=9.9.9", "")
+		if first["version"] != "1.0.0" || len(versions) < 1 || statusCode != http.StatusOK || detail["version"] != "1.0.0" || detail["readme"] == "" || missingStatus != http.StatusNotFound {
+			subTest.Errorf("版が入り、README があり、無い版は 404 のはず: %v %v %d %v %d", first["version"], versions, statusCode, detail["readme"], missingStatus)
+		}
+		if _, hasReadme := first["readme"]; hasReadme {
+			subTest.Errorf("一覧には、README を入れないはず: %v", first["readme"])
 		}
 	})
 	testingT.Run("1 件: 変数の項目が入り、自動生成の password の既定値は、返さない", func(subTest *testing.T) {

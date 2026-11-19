@@ -15,8 +15,8 @@ type TemplateUseCase interface {
 	// List は、全てのテンプレートを、id の順に返す。
 	List() []template.Template
 
-	// Get は、id からテンプレートを1件返す。無ければ not_found。
-	Get(templateID string) (template.Template, error)
+	// Get は、id と版からテンプレートを1件返す。版が空なら、既定の版。無ければ not_found。
+	Get(templateID string, version string) (template.Template, error)
 }
 
 // TemplateOptionResponse は、choice の選択肢1つ。
@@ -83,6 +83,15 @@ type TemplateResponse struct {
 	// Notes は、作成が終わったあとに出す案内(${変数名} は、画面が、入力した値に置き換える)。無ければ空。
 	Notes string `json:"notes"`
 
+	// Version は、この応答の版(x.y.z)。一覧では、既定の版。
+	Version string `json:"version"`
+
+	// Versions は、選べる全ての版(新しい順)。
+	Versions []string `json:"versions"`
+
+	// Readme は、テンプレートの README.md(詳細だけ。一覧では空)。
+	Readme string `json:"readme,omitempty"`
+
 	// Variables は、入力欄の定義。
 	Variables []TemplateVariableResponse `json:"variables"`
 
@@ -130,7 +139,7 @@ func (templateController *TemplateController) List(echoContext *echo.Context) er
 	return echoContext.JSON(http.StatusOK, response)
 }
 
-// Get は、GET /templates/:templateId のハンドラー。テンプレートを1件返す。
+// Get は、GET /templates/:templateId のハンドラー。テンプレートを1件返す(クエリ ?version=x.y.z で版を指定。省略は、既定の版)。
 //
 // 引数:
 //   - echoContext: Echo のリクエストのコンテキスト。
@@ -139,11 +148,14 @@ func (templateController *TemplateController) List(echoContext *echo.Context) er
 //   - 無ければ not_found。
 func (templateController *TemplateController) Get(echoContext *echo.Context) error {
 	// ビジネスルールに、取得を任せる。
-	found, getError := templateController.templateUseCase.Get(echoContext.Param("templateId"))
+	found, getError := templateController.templateUseCase.Get(echoContext.Param("templateId"), echoContext.QueryParam("version"))
 	if getError != nil {
 		return getError
 	}
-	return echoContext.JSON(http.StatusOK, newTemplateResponse(found))
+	// 詳細では、README も返す。
+	response := newTemplateResponse(found)
+	response.Readme = found.Metadata.Readme
+	return echoContext.JSON(http.StatusOK, response)
 }
 
 // newTemplateResponse は、テンプレートを、レスポンスの形にする。
@@ -175,5 +187,5 @@ func newTemplateResponse(found template.Template) TemplateResponse {
 		}
 		variables = append(variables, response)
 	}
-	return TemplateResponse{ID: found.Metadata.ID, Name: found.Metadata.Name, Description: found.Metadata.Description, Icon: found.Metadata.Icon, Category: found.Metadata.Category, Notes: found.Metadata.Notes, Variables: variables, Summary: found.Summarize()}
+	return TemplateResponse{ID: found.Metadata.ID, Name: found.Metadata.Name, Description: found.Metadata.Description, Icon: found.Metadata.Icon, Category: found.Metadata.Category, Notes: found.Metadata.Notes, Version: found.Metadata.Version, Versions: append([]string{}, found.Metadata.Versions...), Variables: variables, Summary: found.Summarize()}
 }

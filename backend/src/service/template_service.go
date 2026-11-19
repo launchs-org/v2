@@ -33,17 +33,18 @@ func (templateService *TemplateService) List() []template.Template {
 	return templateService.registry.List()
 }
 
-// Get は、id からテンプレートを1件返す。
+// Get は、id と版からテンプレートを1件返す。
 //
 // 引数:
 //   - templateID: テンプレートの id。
+//   - version: 版(x.y.z)。空なら、既定の版。
 //
 // 戻り値:
 //   - テンプレート。
-//   - 無ければ not_found。
-func (templateService *TemplateService) Get(templateID string) (template.Template, error) {
-	// 一覧から引く。
-	found, exists := templateService.registry.Get(templateID)
+//   - テンプレートか版が無ければ not_found。
+func (templateService *TemplateService) Get(templateID string, version string) (template.Template, error) {
+	// 登録簿から引く。
+	found, exists := templateService.registry.GetVersion(templateID, version)
 	if !exists {
 		return template.Template{}, apperror.New(apperror.KindNotFound, "テンプレートが見つかりません")
 	}
