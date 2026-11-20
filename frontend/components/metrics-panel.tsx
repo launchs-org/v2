@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type MouseEvent } from "react"
 import useSWR from "swr"
 import { authenticatedFetcher } from "@/lib/api"
 import type { MetricPoint, MetricsResponse } from "@/lib/types"
@@ -39,6 +39,24 @@ function LineChart({ title, points, format, color }: { title: string; points: { 
     drawing = true
   }
   const latest = measured[measured.length - 1]
+  // カーソルの下の点(測れた点のうち、いちばん近いもの)。無ければ null。
+  const [hovered, setHovered] = useState<{ time: number; value: number } | null>(null)
+  /** カーソルの横の位置から、時刻を求め、いちばん近い測れた点を選ぶ。 */
+  function handleMove(event: MouseEvent<HTMLDivElement>) {
+    // グラフの枠の位置と幅を取る。
+    const box = event.currentTarget.getBoundingClientRect()
+    if (measured.length === 0 || box.width === 0) return
+    // カーソルの位置を、0〜1 の割合にして、時刻にする。
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width))
+    const targetTime = first + ratio * span
+    // いちばん近い点を探す。
+    let nearest = measured[0]
+    for (const point of measured) if (Math.abs(point.time - targetTime) < Math.abs(nearest.time - targetTime)) nearest = point
+    setHovered(nearest)
+  }
+  // 点の位置(枠に対する割合)。
+  const hoverLeft = hovered ? ((hovered.time - first) / span) * 100 : 0
+  const hoverTop = hovered ? ((CHART_HEIGHT - (hovered.value / maximum) * (CHART_HEIGHT - 8) - 4) / CHART_HEIGHT) * 100 : 0
   return (
     <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div className="row" style={{ alignItems: "baseline" }}>
@@ -46,10 +64,24 @@ function LineChart({ title, points, format, color }: { title: string; points: { 
         <span className="mono" style={{ fontSize: 13 }}>{latest ? `いま ${format(latest.value)}` : "データなし"}</span>
         {measured.length > 0 && <span className="faint mono" style={{ fontSize: 12, marginLeft: 12 }}>最大 {format(Math.max(...measured.map((point) => point.value)))}</span>}
       </div>
+      <div style={{ position: "relative" }} onMouseMove={handleMove} onMouseLeave={() => setHovered(null)}>
       <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={title} style={{ width: "100%", height: 110, display: "block" }}>
         <line x1="0" y1={CHART_HEIGHT - 4} x2={CHART_WIDTH} y2={CHART_HEIGHT - 4} stroke="var(--border, #8884)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         <path d={path} fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
       </svg>
+      {hovered && (
+        <>
+          {/* カーソルに沿った縦線と点。 */}
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: `${hoverLeft}%`, width: 1, background: "var(--border, #8886)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", left: `${hoverLeft}%`, top: `${hoverTop}%`, width: 9, height: 9, marginLeft: -4.5, marginTop: -4.5, borderRadius: "50%", background: color, border: "2px solid var(--bg, #fff)", pointerEvents: "none" }} />
+          {/* 実際の値と時刻。右の端では、左に寄せて出す。 */}
+          <div className="mono" style={{ position: "absolute", top: 0, left: `${hoverLeft}%`, transform: hoverLeft > 70 ? "translateX(calc(-100% - 8px))" : "translateX(8px)", background: "var(--card, #fff)", border: "1px solid var(--border, #8884)", borderRadius: 8, padding: "4px 8px", fontSize: 12, whiteSpace: "nowrap", pointerEvents: "none", boxShadow: "0 4px 14px rgba(0,0,0,.12)" }}>
+            <div style={{ fontWeight: 600 }}>{format(hovered.value)}</div>
+            <div className="faint">{new Date(hovered.time).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</div>
+          </div>
+        </>
+      )}
+      </div>
     </div>
   )
 }
