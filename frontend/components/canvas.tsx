@@ -9,7 +9,10 @@ import { selectionKey, type CanvasModel, type NodeInfo } from "@/lib/canvas-layo
 import type { Selection } from "@/lib/nav"
 
 /** ノードに持たせるデータ(React Flow の型の制約で、index signature を付ける)。 */
-type NodeData = NodeInfo & { selected: boolean; [key: string]: unknown }
+type NodeData = NodeInfo & { selected: boolean; highlighted: boolean; dimmed: boolean; highlightTag: string | null; onTagClick: (tag: string) => void; [key: string]: unknown }
+
+/** カードに出すタグの最大の数(残りは「+N」)。 */
+const MAX_CARD_TAGS = 2
 
 /** 点が、線の端から端まで流れる時間(秒)。 */
 const FLOW_SECONDS = 3
@@ -28,7 +31,7 @@ function prefersReducedMotion(): boolean {
  */
 function ResourceNode({ data }: NodeProps<Node<NodeData>>) {
   return (
-    <div className={`rf-node ${data.selected ? "sel" : ""}`} role="button" tabIndex={0} aria-label={`${data.title} の詳細を開く`}>
+    <div className={`rf-node ${data.selected ? "sel" : ""} ${data.highlighted ? "hl" : ""} ${data.dimmed ? "dim" : ""}`} role="button" tabIndex={0} aria-label={`${data.title} の詳細を開く`}>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       {data.pending && <span className="pend" title="反映待ちの変更があります" />}
       <div className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
@@ -36,11 +39,15 @@ function ResourceNode({ data }: NodeProps<Node<NodeData>>) {
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="nm" title={data.title}>{data.title}</div>
           <div className="sub">{data.subtitle}</div>
+        {data.extra && <div className="url mono" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.href ? <a href={data.href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{data.extra.replace("https://", "")}</a> : data.extra}</div>}
         </div>
       </div>
       <div className="foot">
         <Badge status={data.status} />
-        {data.extra && <span className="url mono">{data.href ? <a href={data.href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{data.extra.replace("https://", "")}</a> : data.extra}</span>}
+
+          {/* 選んだタグは、必ず見えるように、先頭に出す。押すと、同じタグのカードが強調される(もう一度押すと解除)。 */}
+          {[...(data.tags ?? [])].sort((first, second) => Number(second === data.highlightTag) - Number(first === data.highlightTag)).slice(0, MAX_CARD_TAGS).map((tag) => <button key={tag} type="button" className={`tagchip nodrag nopan ${tag === data.highlightTag ? "on" : ""}`} title={`タグ ${tag}(押すと、同じタグを強調)`} onClick={(event) => { event.stopPropagation(); data.onTagClick(tag) }}>{tag}</button>)}
+          {(data.tags ?? []).length > MAX_CARD_TAGS && <span className="tagmore" title={(data.tags ?? []).slice(MAX_CARD_TAGS).join("、")}>+{(data.tags ?? []).length - MAX_CARD_TAGS}</span>}
       </div>
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>
@@ -106,12 +113,14 @@ const edgeTypes = { flow: FlowEdge }
  * @param props.selection いま、右のパネルで開いているカード。
  * @param props.onSelect カードを押したとき。
  * @param props.onBackgroundClick 何もない所を押したとき(パネルを閉じる)。
+ * @param props.highlightTag 強調するタグ(そのタグの deploy のカードを強調し、他は薄くする)。無ければ null。
+ * @param props.onTagClick カードのタグを押したとき(強調の切り替え)。
  */
-export function Canvas({ model, selection, onSelect, onBackgroundClick }: { model: CanvasModel; selection: Selection | null; onSelect: (selection: Selection) => void; onBackgroundClick: () => void }) {
+export function Canvas({ model, selection, onSelect, onBackgroundClick, highlightTag, onTagClick }: { model: CanvasModel; selection: Selection | null; onSelect: (selection: Selection) => void; onBackgroundClick: () => void; highlightTag: string | null; onTagClick: (tag: string) => void }) {
   // deploy のパネルを「service」のタブで開いているときは、service のカードを強調し、それ以外は deploy のカードを強調する。
   const selectedKey = selection?.kind === "deploy" && selection.tab === "service" ? `service:${model.nodes.find((node) => node.kind === "service" && node.deployId === selection.id)?.id ?? ""}` : selectionKey(selection)
   // モデルから、React Flow のノードと線を作る(選択の変化でも、作り直す)。
-  const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: node.kind === "internet" ? "internet" : "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey } })), [model.nodes, selectedKey])
+  const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: node.kind === "internet" ? "internet" : "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey, highlighted: Boolean(highlightTag) && (node.tags ?? []).includes(highlightTag as string), dimmed: Boolean(highlightTag) && !(node.tags ?? []).includes(highlightTag as string), highlightTag, onTagClick } })), [model.nodes, selectedKey, highlightTag, onTagClick])
   const edges = useMemo<Edge[]>(() => model.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "flow", className: edge.pending ? "pending" : edge.live ? "live" : "", data: { label: edge.label, live: edge.live } })), [model.edges])
   return (
     <ReactFlow

@@ -22,6 +22,8 @@ export type NodeInfo = {
   href?: string
   /** 未適用の変更があるか(橙の点)。 */
   pending: boolean
+  /** カードに出す、タグ(昇順)。 */
+  tags?: string[]
 }
 
 /** 線の情報。 */
@@ -91,7 +93,7 @@ export function buildCanvas(input: { deploys: DeployDetail[]; ingresses: Ingress
 
   // ingress のカード(左の列)。
   input.ingresses.forEach((ingress, row) => {
-    nodes.push({ key: nodeKey("ingress", ingress.ingressId), kind: "ingress", id: ingress.ingressId, title: ingress.host, subtitle: `ルール ${ingress.rules.length} 件`, status: ingress.status, extra: `https://${ingress.host}`, href: `https://${ingress.host}`, pending: ingress.pending_rules !== null, x: COLUMN_STEP, y: row * ROW_STEP })
+    nodes.push({ key: nodeKey("ingress", ingress.ingressId), kind: "ingress", id: ingress.ingressId, tags: ingress.tags ?? [], title: ingress.host, subtitle: `ルール ${ingress.rules.length} 件`, status: ingress.status, extra: `https://${ingress.host}`, href: `https://${ingress.host}`, pending: ingress.pending_rules !== null, x: COLUMN_STEP, y: row * ROW_STEP })
   })
 
   // deploy のカード(中央の列)。
@@ -101,7 +103,7 @@ export function buildCanvas(input: { deploys: DeployDetail[]; ingresses: Ingress
     const ports = deploy.service?.ports.map((port) => `:${port.port}`).join(" ") ?? ""
     const running = deploy.pods.filter((pod) => pod.status === "running").length
     const pending = deploy.config.pending_env !== null || deploy.config.pending_command !== null || deploy.config.pending_args !== null || deploy.volumes.pending_mounts !== null || Boolean(deploy.service?.pending_ports)
-    nodes.push({ key: nodeKey("deploy", deploy.deployId), kind: "deploy", id: deploy.deployId, title: shortImage(deploy.imageRef), subtitle: `${deploy.spec} · ${running}/${deploy.replicas} 台${ports ? ` · ${ports}` : ""}`, status: deploy.status, pending, x: COLUMN_STEP * 3, y: row * ROW_STEP })
+    nodes.push({ key: nodeKey("deploy", deploy.deployId), kind: "deploy", id: deploy.deployId, title: shortImage(deploy.imageRef), subtitle: `${deploy.spec} · ${running}/${deploy.replicas} 台${ports ? ` · ${ports}` : ""}`, status: deploy.status, tags: deploy.tags ?? [], pending, x: COLUMN_STEP * 3, y: row * ROW_STEP })
   })
 
   // service のカード(ingress と deploy の間の列)。service を持つ deploy ごとに、1枚。
@@ -111,14 +113,14 @@ export function buildCanvas(input: { deploys: DeployDetail[]; ingresses: Ingress
     const service = deploy.service
     if (!service) continue
     const ports = service.ports.map((port) => `${port.port}/${port.protocol}`).join("  ")
-    nodes.push({ key: nodeKey("service", service.serviceId), kind: "service", id: service.serviceId, deployId: deploy.deployId, title: service.dnsName ? service.dnsName.split(".")[0]! : service.serviceId, subtitle: ports || "ポートなし", status: service.status, extra: service.clusterIP ?? undefined, pending: Boolean(service.pending_ports), x: COLUMN_STEP * 2, y: serviceRow * ROW_STEP })
+    nodes.push({ key: nodeKey("service", service.serviceId), kind: "service", id: service.serviceId, tags: service.tags ?? [], deployId: deploy.deployId, title: service.dnsName ? service.dnsName.split(".")[0]! : service.serviceId, subtitle: ports || "ポートなし", status: service.status, extra: service.clusterIP ?? undefined, pending: Boolean(service.pending_ports), x: COLUMN_STEP * 2, y: serviceRow * ROW_STEP })
     serviceNodeByDeploy.set(deploy.deployId, nodeKey("service", service.serviceId))
     serviceRow += 1
   }
 
   // volume のカード(右の列)。
   input.volumes.forEach((volume, row) => {
-    nodes.push({ key: nodeKey("volume", volume.volumeId), kind: "volume", id: volume.volumeId, title: volume.name, subtitle: `${volume.sizeMB.toLocaleString("ja-JP")} MB${volume.pending_sizeMB !== null ? ` → ${volume.pending_sizeMB.toLocaleString("ja-JP")} MB` : ""}`, status: volume.status, pending: volume.pending_sizeMB !== null, x: COLUMN_STEP * 4, y: row * ROW_STEP })
+    nodes.push({ key: nodeKey("volume", volume.volumeId), kind: "volume", id: volume.volumeId, tags: volume.tags ?? [], title: volume.name, subtitle: `${volume.sizeMB.toLocaleString("ja-JP")} MB${volume.pending_sizeMB !== null ? ` → ${volume.pending_sizeMB.toLocaleString("ja-JP")} MB` : ""}`, status: volume.status, pending: volume.pending_sizeMB !== null, x: COLUMN_STEP * 4, y: row * ROW_STEP })
   })
 
   // 「インターネット」のカード(左端の列。縦は、ingress の並びの真ん中)。ingress が 1 つでもあるときだけ出す。

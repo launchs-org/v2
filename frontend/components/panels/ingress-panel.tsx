@@ -8,6 +8,7 @@ import type { ProjectViewProps } from "@/lib/nav"
 import { usePending } from "@/lib/pending"
 import type { IngressDetail, IngressRule } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
+import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 import { IngressAccessLog, updateAccessLogEnabled } from "@/components/panels/ingress-access-log"
 
@@ -181,6 +182,8 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
             <ApplyBar title="反映待ちの変更" busy={busy || locked} onDiscard={() => void run(async () => { await api.post(`${path}/discard`); notify("破棄しました") })} onApply={() => void run(async () => { await api.post(`${path}/apply`); notify("反映を開始しました") })} />
           </div>
         )}
+        {/* タグは、一番下。 */}
+        <TagEditor tags={detail.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
       </PanelFrame>
       {confirming && (
         <Modal title="Ingress を削除しますか?" description={detail.host} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>

@@ -25,6 +25,9 @@ type DeploySummaryResponse struct {
 	// Replicas は、希望するレプリカ数。
 	Replicas int `json:"replicas"`
 
+	// Tags は、deploy のタグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// ImageRef は、起動しているイメージ。
 	ImageRef string `json:"imageRef"`
 
@@ -93,5 +96,5 @@ func (deployController *DeployController) ListByProject(echoContext *echo.Contex
 //   - 一覧の1件。
 func newDeploySummaryResponse(deploy model.Deploy) DeploySummaryResponse {
 	// 日時を JST の文字列にして、項目を写す。
-	return DeploySummaryResponse{DeployID: deploy.ID, Status: deploy.Status, Spec: deploy.Spec, Replicas: deploy.Replicas, ImageRef: deploy.ImageRef, CreatedAt: jst.Format(deploy.CreatedAt)}
+	return DeploySummaryResponse{DeployID: deploy.ID, Status: deploy.Status, Spec: deploy.Spec, Replicas: deploy.Replicas, Tags: deploy.TagList(), ImageRef: deploy.ImageRef, CreatedAt: jst.Format(deploy.CreatedAt)}
 }

@@ -97,6 +97,9 @@ type Deploy struct {
 	// PendingConfigMapMounts は、まだ適用していない ConfigMap のマウントの構成。変更が無ければ nil。空の配列は、全て外す変更。
 	PendingConfigMapMounts datatypes.JSON `gorm:"column:pending_configmap_mounts"`
 
+	// Tags は、タグ(文字列の JSON の配列。nil なら、データベースの既定の空の配列)。タグ単位の一斉削除と、メトリクスの集計に使う。
+	Tags datatypes.JSON `gorm:"column:tags;default:'[]'"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 

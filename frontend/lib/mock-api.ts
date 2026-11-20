@@ -1,4 +1,6 @@
 import type {
+  MetricPoint,
+  MetricsResponse,
   Template,
   TemplateApplyProgress,
   TemplateApplyStep,
@@ -345,9 +347,25 @@ function makePods(deploy: DeployDetail) {
   deploy.logPods = deploy.pods.map((pod) => ({ podId: pod.podId, running: true, startedAt: now(), endedAt: null }))
 }
 
+/** 見せかけのメトリクス(30 秒ごとの点。波のある値)。 */
+function mockMetrics(range: string): MetricsResponse {
+  const hours = range === "24h" ? 24 : range === "6h" ? 6 : 1
+  const count = Math.min(120, hours * 120)
+  const step = (hours * 3600 * 1000) / count
+  const end = Date.now()
+  const points: MetricPoint[] = Array.from({ length: count }, (_, index) => ({
+    at: new Date(end - (count - 1 - index) * step).toISOString(),
+    cpuMillicores: Math.round(180 + 120 * Math.sin(index / 9) + (index % 7) * 6),
+    memoryBytes: Math.round((310 + 40 * Math.sin(index / 25) + index * 0.2) * 1024 * 1024),
+    pods: 2, readyPods: 2, restarts: index > count * 0.7 ? 1 : 0,
+  }))
+  return { range: range as MetricsResponse["range"], points }
+}
+
 function makeDeployListItem(deploy: DeployDetail): DeployListItem {
   return {
     deployId: deploy.deployId,
+    tags: deploy.tags ?? [],
     status: deploy.status,
     spec: deploy.spec,
     replicas: deploy.replicas,
@@ -427,6 +445,18 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           delete buildsByProject[projectId]
           result = undefined
         }
+      } else if (resource === "tags" && !segments[5]) {
+        // タグの一覧(deploy の数つき)と、タグ単位の一斉削除。
+        const counts = new Map<string, number>()
+        for (const deploy of getProjectDeploys(projectId)) for (const tag of deploy.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+        result = { tags: [...counts].sort().map(([tag, deployCount]) => ({ tag, deployCount, volumeCount: 0, serviceCount: 0, ingressCount: 0 })) }
+      } else if (resource === "tags" && segments[5] === "deploys" && method === "DELETE") {
+        const tag = decodeURIComponent(segments[4])
+        const accepted = getProjectDeploys(projectId).filter((deploy) => (deploy.tags ?? []).includes(tag)).map((deploy) => deploy.deployId)
+        for (const deployId of accepted) delete deployDetails[deployId]
+        result = { accepted: accepted.map((id) => ({ kind: "deploy", id, message: "" })), failed: [] }
+      } else if ((resource === "metrics") || (resource === "tags" && segments[5] === "metrics")) {
+        result = mockMetrics(url.searchParams.get("range") ?? "1h")
       } else if (resource === "deploys") result = { deploys: getProjectDeploys(projectId).map(makeDeployListItem), nextCursor: null }
       else if (resource === "volumes") {
         const list = getVolumeList(projectId)
@@ -590,6 +620,10 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
       if (!deploy) throw new Error("デプロイが見つかりません")
       const action = segments[4]
       if (!action && method === "GET") result = clone(deploy)
+      else if (action === "tags" && method === "PUT") {
+        deploy.tags = [...new Set((payload.tags as string[]).map((tag) => tag.trim()).filter(Boolean))].sort()
+        result = { deployId: deploy.deployId, tags: deploy.tags }
+      } else if (action === "metrics" && method === "GET") result = mockMetrics(url.searchParams.get("range") ?? "1h")
       else if (action === "scale" && method === "POST") {
         deploy.replicas = Math.max(0, Math.min(5, Number(payload.replicas ?? deploy.replicas)))
         deploy.status = "active"

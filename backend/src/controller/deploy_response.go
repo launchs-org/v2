@@ -62,6 +62,9 @@ type DeployResponse struct {
 	// Replicas は、希望するレプリカ数。
 	Replicas int `json:"replicas"`
 
+	// Tags は、deploy のタグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// Pods は、いま存在する Pod の一覧(watcher が DB に書いた観測値。作られた順)。無ければ空の配列。
 	Pods []PodResponse `json:"pods"`
 
@@ -123,6 +126,7 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		Pods:      []PodResponse{},
 		LogPods:   []LogPodResponse{},
 		ImageRef:  deploy.ImageRef,
+		Tags:      deploy.TagList(),
 		CreatedAt: jst.Format(deploy.CreatedAt),
 		Config: DeployConfigResponse{
 			Env:            jsonOrNull(deploy.Env),
