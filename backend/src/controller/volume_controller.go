@@ -46,6 +46,9 @@ type ResizeVolumeRequest struct {
 
 // VolumeResponse は、volume 1件のレスポンス(作成、一覧、取得)。
 type VolumeResponse struct {
+	// Tags は、タグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// VolumeID は、volume の ID。
 	VolumeID string `json:"volumeId"`
 
@@ -100,7 +103,7 @@ func NewVolumeController(volumeUseCase VolumeUseCase) *VolumeController {
 //   - レスポンス(mountedBy は含めない)。
 func newVolumeResponse(volume model.Volume) VolumeResponse {
 	// 値を写す。
-	return VolumeResponse{VolumeID: volume.ID, Name: volume.Name, Status: volume.Status, PendingSizeMB: volume.PendingSizeMB, SizeMB: volume.SizeMB}
+	return VolumeResponse{VolumeID: volume.ID, Tags: volume.TagList(), Name: volume.Name, Status: volume.Status, PendingSizeMB: volume.PendingSizeMB, SizeMB: volume.SizeMB}
 }
 
 // Create は、POST /projects/:projectId/volumes のハンドラー。

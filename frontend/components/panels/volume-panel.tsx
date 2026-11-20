@@ -7,6 +7,7 @@ import { revalidateProject } from "@/lib/revalidate"
 import type { ProjectViewProps } from "@/lib/nav"
 import type { QuotaResponse, Volume } from "@/lib/types"
 import { ApplyBar, Badge, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
+import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 
 /** quota が取れないときの、ボリューム 1 つの大きさの上限(MB)。 */
@@ -111,6 +112,7 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
           {mounted.map((deployId) => <button key={deployId} className="opt" type="button" onClick={() => nav.openDeploy(deployId, "mounts")}><span className="mono">{deployId}</span></button>)}
         </div>
         <button className="btn danger" type="button" disabled={locked || busy || mounted.length > 0} onClick={() => setConfirming(true)}>{mounted.length > 0 ? "マウント中は削除できません" : "削除"}</button>
+        <TagEditor tags={volume.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
       </PanelFrame>
       {confirming && (
         <Modal title="ボリュームを削除しますか?" description={volume.name} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>

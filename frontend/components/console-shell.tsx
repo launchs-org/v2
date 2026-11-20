@@ -12,6 +12,8 @@ import { ProjectsView } from "@/components/views/projects-view"
 import { CanvasView } from "@/components/views/canvas-view"
 import { ConfigMapsView } from "@/components/views/configmaps-view"
 import { EventsView } from "@/components/views/events-view"
+import { TagsView } from "@/components/views/tags-view"
+import { MetricsView } from "@/components/views/metrics-view"
 import { TasksView } from "@/components/views/tasks-view"
 import { LogsView } from "@/components/views/logs-view"
 import { SettingsView } from "@/components/views/settings-view"
@@ -19,10 +21,10 @@ import { QuotaView } from "@/components/views/quota-view"
 import { AccountView } from "@/components/views/account-view"
 
 /** 画面の名前。 */
-const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", configmaps: "ConfigMap", tasks: "タスク", events: "イベント", logs: "ログ", settings: "設定" }
+const LABEL: Record<View, string> = { projects: "プロジェクト", quota: "クォータ", account: "アカウント設定", canvas: "構成図", configmaps: "ConfigMap", tags: "タグ", metrics: "メトリクス", tasks: "タスク", events: "イベント", logs: "ログ", settings: "設定" }
 
 /** プロジェクトの中のタブ(上のバー)。 */
-const PROJECT_TABS: View[] = ["canvas", "configmaps", "tasks", "events", "logs", "settings"]
+const PROJECT_TABS: View[] = ["canvas", "configmaps", "tags", "metrics", "tasks", "events", "logs", "settings"]
 
 /** 最後に開いたプロジェクトを覚えるキー(localStorage)。 */
 const LAST_PROJECT_KEY = "launchs.lastProject"
@@ -136,6 +138,8 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
         {data && !project && PROJECT_TABS.includes(view) && <div className="page"><ProjectsView projects={projects} refreshInterval={refreshInterval} onRefresh={mutate} nav={nav} search="" createTick={0} /></div>}
         {project && view === "canvas" && <CanvasView project={project} refreshInterval={refreshInterval} nav={nav} selection={selection} deployTab={deployTab} onDeployTabChange={setDeployTab} wizardOpen={wizardOpen} onWizardClose={() => setWizardOpen(false)} />}
         {project && view === "configmaps" && <div className="page"><ConfigMapsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
+        {project && view === "tags" && <div className="page"><TagsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
+        {project && view === "metrics" && <div className="page"><MetricsView project={project} refreshInterval={refreshInterval} /></div>}
         {project && view === "tasks" && <div className="page fill"><TasksView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "events" && <div className="page fill"><EventsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}
         {project && view === "logs" && <div className="page fill"><LogsView project={project} refreshInterval={refreshInterval} nav={nav} /></div>}

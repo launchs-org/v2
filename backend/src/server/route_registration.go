@@ -50,7 +50,8 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	podRepository := repository.NewDeployObservationRepository(dependencies.Database)
 	deployLogService := service.NewDeployLogService(deployRepository, repository.NewDeployLogQueryRepository(dependencies.Database))
 	serviceRepository := repository.NewServiceRepository(dependencies.Database)
-	deployController := controller.NewDeployController(service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter), deployLogService, service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
+	deployService := service.NewDeployService(deployRepository, podRepository, dependencies.DeployWorkflowStarter)
+	deployController := controller.NewDeployController(deployService, deployLogService, service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
 	apiGroup.POST("/deploy", deployController.Create)
 	apiGroup.GET("/projects/:projectId/deploys", deployController.ListByProject)
 	// テンプレート(同梱の YAML を、起動時に読み込んだもの)の一覧と取得。データベースには触らない。
@@ -95,7 +96,8 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/deploy/:deployId/configmap-mounts/apply", deployController.ApplyConfigMapMounts)
 	apiGroup.POST("/deploy/:deployId/configmap-mounts/discard", deployController.DiscardConfigMapMounts)
 
-	serviceController := controller.NewServiceController(service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter))
+	serviceService := service.NewServiceService(serviceRepository, dependencies.ServiceWorkflowStarter)
+	serviceController := controller.NewServiceController(serviceService)
 	apiGroup.POST("/deploy/:deployId/service", serviceController.Create)
 	apiGroup.GET("/deploy/:deployId/service", serviceController.Get)
 	apiGroup.DELETE("/deploy/:deployId/service", serviceController.Delete)
@@ -105,7 +107,8 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 
 	// ingress(プロジェクトの外向きの入り口)。
 	ingressRepository := repository.NewIngressRepository(dependencies.Database)
-	ingressController := controller.NewIngressController(service.NewIngressService(ingressRepository, dependencies.IngressWorkflowStarter, dependencies.IngressHostGenerator))
+	ingressService := service.NewIngressService(ingressRepository, dependencies.IngressWorkflowStarter, dependencies.IngressHostGenerator)
+	ingressController := controller.NewIngressController(ingressService)
 	apiGroup.POST("/projects/:projectId/ingresses", ingressController.Create)
 	apiGroup.GET("/projects/:projectId/ingresses", ingressController.List)
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId", ingressController.Get)
@@ -131,7 +134,22 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 		volumeMaxSizeMB = defaultVolumeMaxSizeMB
 	}
 	volumeRepository := repository.NewVolumeRepository(dependencies.Database)
-	volumeController := controller.NewVolumeController(service.NewVolumeService(volumeRepository, dependencies.VolumeWorkflowStarter, volumeMaxSizeMB))
+	volumeService := service.NewVolumeService(volumeRepository, dependencies.VolumeWorkflowStarter, volumeMaxSizeMB)
+	volumeController := controller.NewVolumeController(volumeService)
+
+	// タグ(deploy、volume、service、ingress に付ける。タグ単位の一斉削除)と、メトリクス(deploy・プロジェクト・タグごとの CPU やメモリ)。
+	tagController := controller.NewDeployTagController(
+		service.NewDeployTagService(repository.NewDeployTagRepository(dependencies.Database), service.TagDeleters{Deploy: deployService, Service: serviceService, Volume: volumeService, Ingress: ingressService}),
+		service.NewDeployMetricService(repository.NewDeployMetricRepository(dependencies.Database), deployRepository))
+	apiGroup.PUT("/deploy/:deployId/tags", tagController.SetTags)
+	apiGroup.PUT("/deploy/:deployId/service/tags", tagController.SetServiceTags)
+	apiGroup.PUT("/projects/:projectId/volumes/:volumeId/tags", tagController.SetVolumeTags)
+	apiGroup.PUT("/projects/:projectId/ingresses/:ingressId/tags", tagController.SetIngressTags)
+	apiGroup.GET("/deploy/:deployId/metrics", tagController.DeployMetrics)
+	apiGroup.GET("/projects/:projectId/tags", tagController.ListTags)
+	apiGroup.DELETE("/projects/:projectId/tags/:tag/deploys", tagController.DeleteByTag)
+	apiGroup.GET("/projects/:projectId/metrics", tagController.ProjectMetrics)
+	apiGroup.GET("/projects/:projectId/tags/:tag/metrics", tagController.TagMetrics)
 	// 自分の上限(クォータ)と使用量。
 	quotaController := controller.NewQuotaController(service.NewQuotaService(repository.NewQuotaRepository(dependencies.Database), volumeMaxSizeMB))
 	apiGroup.GET("/quota", quotaController.Get)

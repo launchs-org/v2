@@ -221,7 +221,7 @@ func (applyTemplateActivities *ApplyTemplateActivities) CreateTemplateVolume(req
 		return workflow.TemplateStepResult{ResourceID: step.ID}, nil
 	}
 	// 行を作る。
-	volume := model.Volume{ID: step.ID, ProjectID: apply.ProjectID, UserID: apply.UserID, Name: resourceName(apply, step.Name), SizeMB: step.Volume.SizeMB}
+	volume := model.Volume{ID: step.ID, ProjectID: apply.ProjectID, UserID: apply.UserID, Name: resourceName(apply, step.Name), SizeMB: step.Volume.SizeMB, Tags: mustJSON(model.TemplateDeployTags(apply.TemplateID, apply.ID))}
 	if createError := applyTemplateActivities.volumeStore.Create(requestContext, &volume); createError != nil {
 		return workflow.TemplateStepResult{}, nonRetryableIfRule(createError)
 	}
@@ -353,6 +353,8 @@ func (applyTemplateActivities *ApplyTemplateActivities) CreateTemplateDeploy(req
 	}
 	deploy := model.Deploy{ID: step.ID, ProjectID: apply.ProjectID, UserID: apply.UserID, ImageRef: image, Spec: deployPlan.Spec, Replicas: deployPlan.Replicas, Status: model.DeployStatusPending}
 	deploy.Env = mustJSON(env)
+	// テンプレートから作った deploy には、タグ(template:<id> と apply:<適用の識別>)を、自動で付ける。タグ単位の一斉削除に使う。
+	deploy.Tags = mustJSON(model.TemplateDeployTags(apply.TemplateID, apply.ID))
 	if command != "" {
 		deploy.Command = &command
 	}
@@ -397,7 +399,7 @@ func (applyTemplateActivities *ApplyTemplateActivities) CreateTemplateService(re
 		return workflow.TemplateStepResult{ResourceID: step.ID}, nil
 	}
 	// 公開する deploy の ID は、計画から決まる。
-	service := model.Service{ID: step.ID, DeployID: plan.IDOf(templateplan.StepDeploy, step.Service.Deploy), UserID: apply.UserID, Ports: mustJSON(step.Service.Ports)}
+	service := model.Service{ID: step.ID, DeployID: plan.IDOf(templateplan.StepDeploy, step.Service.Deploy), UserID: apply.UserID, Ports: mustJSON(step.Service.Ports), Tags: mustJSON(model.TemplateDeployTags(apply.TemplateID, apply.ID))}
 	if createError := applyTemplateActivities.serviceStore.Create(requestContext, &service); createError != nil {
 		return workflow.TemplateStepResult{}, nonRetryableIfRule(createError)
 	}
@@ -425,7 +427,7 @@ func (applyTemplateActivities *ApplyTemplateActivities) CreateTemplateIngress(re
 	if _, findError := applyTemplateActivities.ingressStore.FindForWorker(requestContext, step.ID); findError != nil {
 		created := false
 		for _, host := range plan.Hosts {
-			ingress := model.Ingress{ID: step.ID, ProjectID: apply.ProjectID, UserID: apply.UserID, Host: host}
+			ingress := model.Ingress{ID: step.ID, ProjectID: apply.ProjectID, UserID: apply.UserID, Host: host, Tags: mustJSON(model.TemplateDeployTags(apply.TemplateID, apply.ID))}
 			createError := applyTemplateActivities.ingressStore.Create(requestContext, &ingress)
 			if errors.Is(createError, repository.ErrIngressHostTaken) {
 				continue

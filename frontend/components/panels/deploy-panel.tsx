@@ -8,6 +8,8 @@ import type { DeployTab, ProjectViewProps } from "@/lib/nav"
 import type { DeployDetail, ServicePort, VolumeListResponse } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, isBusyStatus, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import { LogTail } from "@/components/log-tail"
+import { TagEditor } from "@/components/tag-editor"
+import { MetricsPanel } from "@/components/metrics-panel"
 import { ConfigMapMountsTab } from "@/components/panels/configmap-mounts-tab"
 import { PanelFrame } from "@/components/panels/panel-frame"
 
@@ -15,7 +17,7 @@ import { PanelFrame } from "@/components/panels/panel-frame"
 type DiffLine = { cls: "d-add" | "d-chg" | "d-del"; text: string }
 
 const TABS: { key: DeployTab; label: string }[] = [
-  { key: "overview", label: "概要" }, { key: "config", label: "起動設定" }, { key: "mounts", label: "マウント" }, { key: "configmap", label: "ConfigMap" }, { key: "service", label: "Service" }, { key: "logs", label: "ログ" },
+  { key: "overview", label: "概要" }, { key: "config", label: "起動設定" }, { key: "mounts", label: "マウント" }, { key: "configmap", label: "ConfigMap" }, { key: "service", label: "Service" }, { key: "metrics", label: "メトリクス" }, { key: "logs", label: "ログ" },
 ]
 const MAX_REPLICAS = 5
 const PORT_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -130,7 +132,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
   const hasConfigMapPending = (data.configmapMounts?.pending_mounts ?? null) !== null
   const hasServicePending = Boolean(data.service?.pending_ports)
   const hasPending = hasConfigPending || hasMountsPending || hasConfigMapPending || hasServicePending
-  const pendingTabs: Record<DeployTab, boolean> = { overview: false, config: hasConfigPending, mounts: hasMountsPending, configmap: hasConfigMapPending, service: hasServicePending, logs: false }
+  const pendingTabs: Record<DeployTab, boolean> = { overview: false, config: hasConfigPending, mounts: hasMountsPending, configmap: hasConfigMapPending, service: hasServicePending, metrics: false, logs: false }
   const lockedMessage = data.status === "applying" ? "反映中です。完了するまで編集・削除はできません。" : data.status === "pending" ? "起動中です。完了するまで編集はできません。" : data.status === "deleting" ? "削除処理中です。" : ""
 
   return (
@@ -154,6 +156,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
         {tab === "mounts" && <MountsTab data={data} projectId={project.projectId} locked={locked} busy={busy} run={run} />}
         {tab === "configmap" && <ConfigMapMountsTab nav={props.nav} deployId={data.deployId} projectId={project.projectId} refreshInterval={refreshInterval} locked={locked} busy={busy} run={run} />}
         {tab === "service" && <ServiceTab data={data} locked={locked} busy={busy} run={run} />}
+        {tab === "metrics" && <MetricsPanel path={`/api/v1/deploy/${encodeURIComponent(data.deployId)}`} refreshInterval={refreshInterval} />}
         {tab === "logs" && <LogsTab data={data} refreshInterval={refreshInterval} />}
       </PanelFrame>
       {confirmDelete && (
@@ -202,6 +205,7 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
         <div><dt>Mounts</dt><dd>{mountCount} 件</dd></div>
         <div><dt>Service</dt><dd className="mono">{data.service ? data.service.serviceId : "なし"}</dd></div>
       </dl></div>
+      <TagEditor tags={data.tags ?? []} save={(next) => run(() => api.put(`${path}/tags`, { tags: next }), "タグを更新しました")} />
       {hasPending && <div className="applybar"><span className="pdot" /><div className="grow"><b>このデプロイに未反映の変更があります</b><div className="mut" style={{ fontSize: 13 }}>起動設定・マウント・Service のタブの、青い点を確認してください。</div></div></div>}
     </>
   )
@@ -398,6 +402,7 @@ function ServiceTab({ data, locked, busy, run }: TabProps) {
             <button className="btn danger" type="button" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)} disabled={locked || busy || service.status === "pending" || service.status === "deleting"}>Service を削除</button>
           </div>
           {editor}
+          <TagEditor tags={service.tags ?? []} save={(next) => run(() => api.put(`${path}/service/tags`, { tags: next }), "タグを更新しました")} />
         </div>
         <div className="col">
           {pending ? (
@@ -438,3 +443,4 @@ function LogsTab({ data, refreshInterval }: { data: DeployDetail; refreshInterva
     </div>
   )
 }
+

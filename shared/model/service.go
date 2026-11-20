@@ -74,6 +74,9 @@ type Service struct {
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 
+	// Tags は、タグ(文字列の JSON の配列。nil なら、データベースの既定の空の配列)。タグ単位の一斉削除に使う。
+	Tags datatypes.JSON `gorm:"column:tags;default:'[]'"`
+
 	// UpdatedAt は、更新日時。
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 }

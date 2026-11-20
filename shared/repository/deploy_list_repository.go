@@ -38,7 +38,7 @@ func (deployRepository *DeployRepository) ListByProject(requestContext context.C
 	}
 	// 新しい順に並べる検索を組み立てる(次のページがあるかを知るため、1件多く読む)。一覧に要らない、環境変数などの大きな列は、読まない。
 	query := deployRepository.database.WithContext(requestContext).
-		Select("id", "project_id", "user_id", "image_ref", "spec", "replicas", "status", "created_at", "updated_at").
+		Select("id", "project_id", "user_id", "image_ref", "spec", "replicas", "status", "tags", "created_at", "updated_at").
 		Where(&model.Deploy{ProjectID: projectID}).
 		Order("created_at DESC, id DESC").
 		Limit(limit + 1)

@@ -62,6 +62,9 @@ type IngressRuleResponse struct {
 
 // IngressResponse は、ingress 1件のレスポンス(作成と取得)。
 type IngressResponse struct {
+	// Tags は、タグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// IngressID は、ingress の ID。
 	IngressID string `json:"ingressId"`
 
@@ -83,6 +86,9 @@ type IngressResponse struct {
 
 // IngressSummaryResponse は、一覧に含める、ingress の概要。
 type IngressSummaryResponse struct {
+	// Tags は、タグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// IngressID は、ingress の ID。
 	IngressID string `json:"ingressId"`
 
@@ -171,7 +177,7 @@ func (ingressController *IngressController) List(echoContext *echo.Context) erro
 	// レスポンスにする。
 	response := ListIngressesResponse{Ingresses: make([]IngressSummaryResponse, 0, len(ingresses))}
 	for _, ingress := range ingresses {
-		response.Ingresses = append(response.Ingresses, IngressSummaryResponse{IngressID: ingress.ID, Host: ingress.Host})
+		response.Ingresses = append(response.Ingresses, IngressSummaryResponse{IngressID: ingress.ID, Tags: ingress.TagList(), Host: ingress.Host})
 	}
 	if nextPosition != nil {
 		nextCursor := pagination.EncodeCursor(*nextPosition)
@@ -311,7 +317,7 @@ func newIngressResponse(ingress model.Ingress) IngressResponse {
 			pendingRules = []IngressRuleResponse{}
 		}
 	}
-	return IngressResponse{IngressID: ingress.ID, Host: ingress.Host, Rules: rules, PendingRules: pendingRules, Status: ingress.Status, AccessStats: ingress.AccessStats}
+	return IngressResponse{IngressID: ingress.ID, Tags: ingress.TagList(), Host: ingress.Host, Rules: rules, PendingRules: pendingRules, Status: ingress.Status, AccessStats: ingress.AccessStats}
 }
 
 // ingressRuleResponses は、JSON のルールの一覧を、レスポンスの形にする。読めないときは nil。
