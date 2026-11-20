@@ -1,10 +1,12 @@
 "use client"
 
-import { useMemo, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { api } from "@/lib/api"
 import { buildCanvas } from "@/lib/canvas-layout"
 import type { ProjectViewProps, Selection } from "@/lib/nav"
 import { usePending } from "@/lib/pending"
+import { revalidateProject } from "@/lib/revalidate"
+import type { TagDeleteResponse } from "@/lib/types"
 import { validateProjectName } from "@/lib/project-name"
 import { Canvas } from "@/components/canvas"
 import { KindIcon, type Kind } from "@/components/kind-icon"
@@ -77,11 +79,49 @@ export function CanvasView(props: CanvasViewProps) {
     else void createIngress()
   }
 
+  // いま強調しているタグ(カードのタグか、上のタグ一覧を押して切り替える。同じタグをもう一度押すと解除)。
+  const [highlightTag, setHighlightTag] = useState<string | null>(null)
+  /** タグの強調を切り替える。 */
+  const toggleHighlightTag = useCallback((tag: string) => setHighlightTag((current) => (current === tag ? null : tag)), [])
+  // プロジェクトの deploy に付いているタグと、その数(タグの昇順)。強調中のタグが、無くなったら、解除する。
+  const projectTags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const node of model.nodes) for (const tag of node.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    return [...counts].sort(([first], [second]) => (first < second ? -1 : 1))
+  }, [model.nodes])
+  // タグの一斉削除の確認。
+  const [confirmTagDelete, setConfirmTagDelete] = useState(false)
+  /** 強調中のタグの付いたものを、まとめて削除する(「タグ」タブと同じ API。受け付けた数と失敗を知らせる)。 */
+  async function deleteHighlightedTag() {
+    if (!highlightTag) return
+    setBusy(true)
+    try {
+      const result = await api.delete<TagDeleteResponse>(`/api/v1/projects/${encodeURIComponent(project.projectId)}/tags/${encodeURIComponent(highlightTag)}/deploys`)
+      setConfirmTagDelete(false)
+      setToast(result.failed.length === 0 ? { message: `${result.accepted.length} 個の削除を始めました`, error: false } : { message: `${result.accepted.length} 個の削除を始め、${result.failed.length} 個は受け付けられませんでした(${result.failed[0].kind}: ${result.failed[0].message})`, error: true })
+      await pending.refresh()
+      await revalidateProject(project.projectId)
+    } catch (caught) {
+      setToast({ message: caught instanceof Error ? caught.message : "削除できませんでした", error: true })
+    } finally {
+      setBusy(false)
+    }
+  }
+  useEffect(() => { if (highlightTag && !projectTags.some(([tag]) => tag === highlightTag)) setHighlightTag(null) }, [highlightTag, projectTags])
+
   return (
     <div className="stage">
       <div className="canvas-wrap">
         {firstLoad && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><LoadingState label="構成を読み込んでいます" /></div>}
-        {!firstLoad && !empty && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} />}
+        {!firstLoad && !empty && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} highlightTag={highlightTag} onTagClick={toggleHighlightTag} />}
+        {!firstLoad && !empty && projectTags.length > 0 && (
+          <div className="tagbar" role="group" aria-label="タグで強調">
+            <span className="faint" style={{ fontSize: 12 }}>タグ</span>
+            {projectTags.map(([tag, count]) => <button key={tag} type="button" className={`tagchip ${tag === highlightTag ? "on" : ""}`} aria-pressed={tag === highlightTag} onClick={() => toggleHighlightTag(tag)}>{tag}<span className="faint"> {count}</span></button>)}
+            {highlightTag && <button type="button" className="btn sm ghost" onClick={() => setHighlightTag(null)}>解除</button>}
+            {highlightTag && <button type="button" className="btn sm danger" onClick={() => setConfirmTagDelete(true)} disabled={busy}>このタグを削除</button>}
+          </div>
+        )}
         {empty && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 24 }}>
             <div className="card pad" style={{ maxWidth: 460, textAlign: "center", display: "flex", flexDirection: "column", gap: 14, alignItems: "center", boxShadow: "0 10px 30px rgba(32,33,36,.08)" }}>
@@ -113,6 +153,12 @@ export function CanvasView(props: CanvasViewProps) {
 
       {props.wizardOpen && <WizardLauncher project={project} nav={nav} onClose={props.onWizardClose} />}
       {volumeModal && <CreateVolumeModal projectId={project.projectId} onClose={() => setVolumeModal(false)} onCreated={async (volumeId) => { setVolumeModal(false); await pending.refresh(); nav.select({ kind: "volume", id: volumeId }) }} />}
+      {confirmTagDelete && highlightTag && (
+        <Modal title={`タグ「${highlightTag}」のものを、削除しますか?`} description={`この図で、このタグの付いたもの(${projectTags.find(([tag]) => tag === highlightTag)?.[1] ?? 0} 個)を、まとめて削除します。volume のデータも消えます。元に戻せません。反映中・起動中のものは受け付けられず、deploy が消えるまで volume は「使用中」で受け付けられないことがあります(少し待って、もう一度押してください)。`} onClose={() => setConfirmTagDelete(false)}
+          footer={<><button className="btn" type="button" onClick={() => setConfirmTagDelete(false)}>キャンセル</button><button className="btn danger" type="button" onClick={() => void deleteHighlightedTag()} disabled={busy}>まとめて削除</button></>}>
+          <div />
+        </Modal>
+      )}
       {toast && <ToastNotice message={toast.message} type={toast.error ? "error" : "success"} onDismiss={() => setToast(null)} />}
     </div>
   )

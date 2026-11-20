@@ -60,6 +60,9 @@ type ServicePortResponse struct {
 
 // ServiceResponse は、service のレスポンスのボディ。
 type ServiceResponse struct {
+	// Tags は、タグ(昇順。無ければ空の配列)。
+	Tags []string `json:"tags"`
+
 	// ServiceID は、service の ID。
 	ServiceID string `json:"serviceId"`
 
@@ -217,6 +220,7 @@ func newServicePorts(requests []ServicePortRequest) ([]model.ServicePort, error)
 func newServiceResponse(service model.Service) ServiceResponse {
 	return ServiceResponse{
 		ServiceID:    service.ID,
+		Tags:         service.TagList(),
 		Ports:        servicePortResponses(service.Ports),
 		PendingPorts: pendingServicePortResponses(service.PendingPorts),
 		Status:       service.Status,

@@ -8,6 +8,7 @@ import type { ProjectViewProps } from "@/lib/nav"
 import { usePending } from "@/lib/pending"
 import type { IngressDetail, IngressRule } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
+import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 import { IngressAccessLog, updateAccessLogEnabled } from "@/components/panels/ingress-access-log"
 
@@ -136,6 +137,7 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
         actions={<button className="btn sm danger" type="button" disabled={locked || busy} onClick={() => setConfirming(true)}>削除</button>}
         onClose={onClose}
       >
+        <TagEditor tags={detail.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
         {/* 公開 URL。 */}
         <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>

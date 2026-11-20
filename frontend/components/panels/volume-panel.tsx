@@ -7,6 +7,7 @@ import { revalidateProject } from "@/lib/revalidate"
 import type { ProjectViewProps } from "@/lib/nav"
 import type { QuotaResponse, Volume } from "@/lib/types"
 import { ApplyBar, Badge, LoadingState, Modal, ToastNotice, isBusyStatus } from "@/components/ui-kit"
+import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 
 /** quota が取れないときの、ボリューム 1 つの大きさの上限(MB)。 */
@@ -78,6 +79,7 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
   return (
     <>
       <PanelFrame kind="volume" title={volume.name} subtitle={volume.volumeId} badge={<Badge status={volume.status} />} onClose={onClose}>
+        <TagEditor tags={volume.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
         {/* 容量と、拡大。 */}
         <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}><span className="mut">容量</span><span className="disp" style={{ fontSize: 24 }}>{sizeText(volume.sizeMB)}</span></div>

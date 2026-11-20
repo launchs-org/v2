@@ -22,6 +22,7 @@ import (
 	"launchs/watcher/src/config"
 	"launchs/watcher/src/crashloop"
 	"launchs/watcher/src/events"
+	"launchs/watcher/src/metrics"
 	"launchs/watcher/src/observer"
 	"launchs/watcher/src/retention"
 )
@@ -112,6 +113,9 @@ func run() error {
 				appLogger.Error("k8s の Event の収集が止まりました", "error", collectError)
 			}
 		}()
+
+		// ----- deploy の CPU・メモリ・再起動の回数を、一定の間隔で観測して、DB に保存する(リーダーの間だけ。24 時間分を残す) -----
+		go metrics.New(clientset, repository.NewDeployMetricRepository(appDatabase), appLogger).Run(workContext)
 
 		// ----- 異常な状態が続く deploy を探して、止める Workflow を開始する(リーダーの間だけ) -----
 		crashLoopMonitor := crashloop.NewMonitor(observationRepository, crashloop.NewTemporalStarter(temporalClient), watcherConfig.CrashLoop, crashloop.CheckInterval, appLogger)

@@ -19,6 +19,7 @@
 - [クォータ(アカウントごとの上限)](quota.md) (/quota)
 - [テンプレート](templates.md) (/templates)
 - [タスク(Workflow の履歴)](tasks.md) (/projects/:projectId/tasks)
+- [タグとメトリクス](tags.md) (/deploy/:deployId/tags、/projects/:projectId/tags、…/metrics)
 
 ## 関連
 - [Issues 一覧](../issues/README.md) — 各エンドポイントの詳細設計レビュー用Issue

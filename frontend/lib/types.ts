@@ -24,6 +24,8 @@ export type DeployListItem = {
   spec: "small" | "medium" | "large"
   replicas: number
   imageRef: string
+  /** タグ(昇順)。古い API では無い。 */
+  tags?: string[]
   createdAt: string
 }
 
@@ -33,6 +35,7 @@ export type LogPodInfo = { podId: string; running: boolean; startedAt: string; e
 export type ServicePort = { name: string; port: number; protocol: "tcp" | "udp" }
 export type ServiceInfo = {
   serviceId: string
+  tags?: string[]
   ports: ServicePort[]
   pending_ports: ServicePort[] | null
   status: "pending" | "active" | "failed" | "deleting"
@@ -78,6 +81,7 @@ export type DeployLogsResponse = { logs: string; nextSince: number }
 
 export type Volume = {
   volumeId: string
+  tags?: string[]
   name: string
   status: "active" | "creating" | "applying" | "deleting"
   sizeMB: number
@@ -89,9 +93,12 @@ export type Volume = {
 export type VolumeListResponse = { volumes: Volume[]; nextCursor: string | null }
 export type IngressRule = { path: string; serviceId: string; port: number }
 export type IngressListItem = { ingressId: string; host: string }
+/** ingress の一覧の 1 件に、タグを足した形。 */
+export type IngressTagged = { tags?: string[] }
 export type IngressListResponse = { ingresses: IngressListItem[]; nextCursor: string | null }
 export type IngressDetail = {
   ingressId: string
+  tags?: string[]
   host: string
   rules: IngressRule[]
   pending_rules: IngressRule[] | null
@@ -254,3 +261,12 @@ export type TemplateApplyProgress = {
   createdAt: string
   updatedAt: string
 }
+
+/** メトリクスの 1 点(ある時刻の、範囲全体の合計)。測れなかった値は null。 */
+export type MetricPoint = { at: string; cpuMillicores: number | null; memoryBytes: number | null; pods: number; readyPods: number; restarts: number }
+export type MetricsResponse = { range: "1h" | "6h" | "24h"; points: MetricPoint[] }
+/** プロジェクトのタグと、そのタグが付いた deploy の数。 */
+export type TagListResponse = { tags: { tag: string; deployCount: number; volumeCount: number; serviceCount: number; ingressCount: number }[] }
+/** タグの一斉削除の結果。 */
+export type TagDeleteItem = { kind: "deploy" | "volume" | "service" | "ingress"; id: string; message: string }
+export type TagDeleteResponse = { accepted: TagDeleteItem[]; failed: TagDeleteItem[] }
