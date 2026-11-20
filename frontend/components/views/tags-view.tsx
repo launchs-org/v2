@@ -21,6 +21,8 @@ export function TagsView({ project, refreshInterval, nav }: ProjectViewProps) {
   const base = `/api/v1/projects/${encodeURIComponent(project.projectId)}`
   const [selected, setSelected] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // true なら、volume は削除せずに残す。
+  const [keepVolumes, setKeepVolumes] = useState(false)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
   const { data, error, mutate } = useSWR<TagListResponse>(`${base}/tags`, authenticatedFetcher, { refreshInterval, revalidateOnFocus: true, refreshWhenHidden: false })
@@ -45,7 +47,7 @@ export function TagsView({ project, refreshInterval, nav }: ProjectViewProps) {
     if (!current) return
     setBusy(true)
     try {
-      const result = await api.delete<TagDeleteResponse>(`${base}/tags/${encodeURIComponent(current.tag)}/deploys`)
+      const result = await api.delete<TagDeleteResponse>(`${base}/tags/${encodeURIComponent(current.tag)}/deploys${keepVolumes ? "?keepVolumes=true" : ""}`)
       setConfirmDelete(false)
       setToast(result.failed.length === 0 ? { message: `${result.accepted.length} 個の削除を始めました`, type: "success" } : { message: `${result.accepted.length} 個の削除を始め、${result.failed.length} 個は受け付けられませんでした(${result.failed[0].kind}: ${result.failed[0].message})`, type: "error" })
       await mutate()
@@ -69,7 +71,7 @@ export function TagsView({ project, refreshInterval, nav }: ProjectViewProps) {
           <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div className="row">
               <h2 className="h2 grow mono">{current.tag}</h2>
-              <button className="btn danger" type="button" onClick={() => setConfirmDelete(true)} disabled={busy}>このタグのものを、まとめて削除</button>
+              <button className="btn danger" type="button" onClick={() => { setKeepVolumes(false); setConfirmDelete(true) }} disabled={busy}>このタグのものを、まとめて削除</button>
             </div>
             <div className="faint" style={{ fontSize: 12.5 }}>deploy {current.deployCount} ・ service {current.serviceCount} ・ volume {current.volumeCount} ・ ingress {current.ingressCount}</div>
             {deployMembers.map((item) => <button key={item.deployId} type="button" className="opt" onClick={() => nav.openDeploy(item.deployId)}><span className="faint">deploy</span><span className="mono">{item.deployId}</span><span className="grow" /><span className="faint">{item.status} / {item.spec}</span></button>)}
@@ -82,6 +84,7 @@ export function TagsView({ project, refreshInterval, nav }: ProjectViewProps) {
       {confirmDelete && current && (
         <Modal title={`タグ「${current.tag}」のものを、削除しますか?`} description={`${total} 個(deploy ${current.deployCount}、service ${current.serviceCount}、volume ${current.volumeCount}、ingress ${current.ingressCount})を削除します。volume のデータも消えます。ConfigMap は残ります。元に戻せません。反映中・起動中のものは、受け付けられません。deploy が消えるまで、その volume は「使用中」で、受け付けられないことがあります(少し待って、もう一度押してください)。`} onClose={() => setConfirmDelete(false)}
           footer={<><button className="btn" type="button" onClick={() => setConfirmDelete(false)}>キャンセル</button><button className="btn danger" type="button" onClick={() => void deleteAll()} disabled={busy}>まとめて削除</button></>}>
+          {current && current.volumeCount > 0 && <label className="row" style={{ gap: 8 }}><input type="checkbox" checked={keepVolumes} onChange={(event) => setKeepVolumes(event.target.checked)} />volume は削除せず、残す(データを残したいとき)</label>}
           <div className="mono">{[...deployMembers.map((item) => item.deployId), ...volumeMembers.map((item) => item.name), ...ingressMembers.map((item) => item.host)].join("\n")}</div>
         </Modal>
       )}

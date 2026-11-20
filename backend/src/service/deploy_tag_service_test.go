@@ -76,7 +76,7 @@ func TestDeleteByTag(testingT *testing.T) {
 	}}
 	tagService := NewDeployTagService(store, deleters)
 	// 一斉に削除する。
-	result, deleteError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash")
+	result, deleteError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash", false)
 	if deleteError != nil {
 		testingT.Fatalf("成功するはず: %v", deleteError)
 	}
@@ -87,12 +87,17 @@ func TestDeleteByTag(testingT *testing.T) {
 	if len(result.Accepted) != 4 || len(result.Failed) != 1 || result.Failed[0].ID != "b" || result.Failed[0].Message == "" {
 		testingT.Errorf("4 つを受け付け、b だけ失敗のはず: %+v", result)
 	}
+	// volume を残す指定なら、volume は呼ばれない。
+	calls = nil
+	if _, keepError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash", true); keepError != nil || strings.Contains(strings.Join(calls, ","), "volume") {
+		testingT.Errorf("volume は呼ばれないはず: %v %v", calls, keepError)
+	}
 	// 1 つも無いタグは not_found。
-	if _, notFoundError := NewDeployTagService(&fakeTagStore{}, deleters).DeleteByTag(context.Background(), "user", "project", "none"); apperror.KindOf(notFoundError) != apperror.KindNotFound {
+	if _, notFoundError := NewDeployTagService(&fakeTagStore{}, deleters).DeleteByTag(context.Background(), "user", "project", "none", false); apperror.KindOf(notFoundError) != apperror.KindNotFound {
 		testingT.Errorf("not_found のはず: %v", notFoundError)
 	}
 	// 不正なタグは invalid_request。
-	if _, invalidError := tagService.DeleteByTag(context.Background(), "user", "project", "Bad Tag"); apperror.KindOf(invalidError) != apperror.KindInvalidRequest {
+	if _, invalidError := tagService.DeleteByTag(context.Background(), "user", "project", "Bad Tag", false); apperror.KindOf(invalidError) != apperror.KindInvalidRequest {
 		testingT.Errorf("invalid_request のはず: %v", invalidError)
 	}
 	// SetTags は、整えて(昇順にして)保存する。

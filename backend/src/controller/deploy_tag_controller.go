@@ -16,7 +16,7 @@ import (
 type DeployTagUseCase interface {
 	SetTags(requestContext context.Context, kind string, userID string, key string, tags []string) ([]string, error)
 	ListTags(requestContext context.Context, userID string, projectID string) ([]repository.DeployTagCount, error)
-	DeleteByTag(requestContext context.Context, userID string, projectID string, tag string) (service.TagDeleteResult, error)
+	DeleteByTag(requestContext context.Context, userID string, projectID string, tag string, keepVolumes bool) (service.TagDeleteResult, error)
 }
 
 // MetricUseCase は、メトリクスのコントローラーが必要とする、ビジネスルールの操作。
@@ -144,6 +144,8 @@ func (tagController *DeployTagController) ListTags(echoContext *echo.Context) er
 // 引数:
 //   - echoContext: Echo のリクエストのコンテキスト。
 //
+// Query: keepVolumes=true で、volume は削除せずに残す。
+//
 // 戻り値:
 //   - タグが不正なら invalid_request、そのタグの deploy が無ければ not_found、未認証なら unauthorized。
 func (tagController *DeployTagController) DeleteByTag(echoContext *echo.Context) error {
@@ -153,7 +155,7 @@ func (tagController *DeployTagController) DeleteByTag(echoContext *echo.Context)
 		return userIDError
 	}
 	// 一斉に削除を受け付ける。
-	result, deleteError := tagController.tagUseCase.DeleteByTag(echoContext.Request().Context(), userID, echoContext.Param("projectId"), unescapedTagParam(echoContext))
+	result, deleteError := tagController.tagUseCase.DeleteByTag(echoContext.Request().Context(), userID, echoContext.Param("projectId"), unescapedTagParam(echoContext), echoContext.QueryParam("keepVolumes") == "true")
 	if deleteError != nil {
 		return deleteError
 	}

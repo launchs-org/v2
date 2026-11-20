@@ -132,10 +132,11 @@ var tagDeleteOrder = []string{repository.TagKindIngress, repository.TagKindServi
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: プロジェクトの ID。
 //   - tag: 削除する資源のタグ。
+//   - keepVolumes: true なら、volume は削除せずに残す(データを残したいとき)。
 //
 // 戻り値:
 //   - 受け付けた資源と、失敗の一覧。タグが不正なら invalid_request、そのタグの資源が 1 つも無ければ not_found。
-func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, userID string, projectID string, tag string) (TagDeleteResult, error) {
+func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, userID string, projectID string, tag string, keepVolumes bool) (TagDeleteResult, error) {
 	// タグを検査する。
 	normalized, normalizeError := model.NormalizeDeployTags([]string{tag})
 	if normalizeError != nil || len(normalized) != 1 {
@@ -155,6 +156,10 @@ func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, 
 	for _, kind := range tagDeleteOrder {
 		for _, resource := range resources {
 			if resource.Kind != kind {
+				continue
+			}
+			// volume を残す指定なら、volume は飛ばす。
+			if keepVolumes && kind == repository.TagKindVolume {
 				continue
 			}
 			// 種類ごとの削除を呼ぶ。
