@@ -198,7 +198,6 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
           {data.pods.length === 0 && <div className="mut">稼働中の Pod はありません。</div>}
         </div>
       </div>
-      <TagEditor tags={data.tags ?? []} save={(next) => run(() => api.put(`${path}/tags`, { tags: next }), "タグを更新しました")} />
       <div className="card pad"><dl className="kv" style={{ margin: 0 }}>
         <div><dt>Project</dt><dd className="mono">{data.projectId}</dd></div>
         <div><dt>Created</dt><dd className="mono">{formatAt(data.createdAt)}</dd></div>
@@ -206,6 +205,7 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
         <div><dt>Mounts</dt><dd>{mountCount} 件</dd></div>
         <div><dt>Service</dt><dd className="mono">{data.service ? data.service.serviceId : "なし"}</dd></div>
       </dl></div>
+      <TagEditor tags={data.tags ?? []} save={(next) => run(() => api.put(`${path}/tags`, { tags: next }), "タグを更新しました")} />
       {hasPending && <div className="applybar"><span className="pdot" /><div className="grow"><b>このデプロイに未反映の変更があります</b><div className="mut" style={{ fontSize: 13 }}>起動設定・マウント・Service のタブの、青い点を確認してください。</div></div></div>}
     </>
   )
@@ -401,8 +401,8 @@ function ServiceTab({ data, locked, busy, run }: TabProps) {
             <dl className="kv" style={{ margin: 0 }}><div><dt>DNS</dt><dd className="mono">{service.dnsName ?? "(払い出し中)"}</dd></div><div><dt>ClusterIP</dt><dd className="mono">{service.clusterIP ?? "(払い出し中)"}</dd></div></dl>
             <button className="btn danger" type="button" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)} disabled={locked || busy || service.status === "pending" || service.status === "deleting"}>Service を削除</button>
           </div>
-          <TagEditor tags={service.tags ?? []} save={(next) => run(() => api.put(`${path}/service/tags`, { tags: next }), "タグを更新しました")} />
           {editor}
+          <TagEditor tags={service.tags ?? []} save={(next) => run(() => api.put(`${path}/service/tags`, { tags: next }), "タグを更新しました")} />
         </div>
         <div className="col">
           {pending ? (

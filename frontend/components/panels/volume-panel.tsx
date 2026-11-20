@@ -79,7 +79,6 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
   return (
     <>
       <PanelFrame kind="volume" title={volume.name} subtitle={volume.volumeId} badge={<Badge status={volume.status} />} onClose={onClose}>
-        <TagEditor tags={volume.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
         {/* 容量と、拡大。 */}
         <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}><span className="mut">容量</span><span className="disp" style={{ fontSize: 24 }}>{sizeText(volume.sizeMB)}</span></div>
@@ -113,6 +112,7 @@ export function VolumePanel({ project, refreshInterval, nav, volumeId, onClose }
           {mounted.map((deployId) => <button key={deployId} className="opt" type="button" onClick={() => nav.openDeploy(deployId, "mounts")}><span className="mono">{deployId}</span></button>)}
         </div>
         <button className="btn danger" type="button" disabled={locked || busy || mounted.length > 0} onClick={() => setConfirming(true)}>{mounted.length > 0 ? "マウント中は削除できません" : "削除"}</button>
+        <TagEditor tags={volume.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
       </PanelFrame>
       {confirming && (
         <Modal title="ボリュームを削除しますか?" description={volume.name} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>

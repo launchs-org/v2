@@ -137,7 +137,6 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
         actions={<button className="btn sm danger" type="button" disabled={locked || busy} onClick={() => setConfirming(true)}>削除</button>}
         onClose={onClose}
       >
-        <TagEditor tags={detail.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
         {/* 公開 URL。 */}
         <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
@@ -183,6 +182,8 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
             <ApplyBar title="反映待ちの変更" busy={busy || locked} onDiscard={() => void run(async () => { await api.post(`${path}/discard`); notify("破棄しました") })} onApply={() => void run(async () => { await api.post(`${path}/apply`); notify("反映を開始しました") })} />
           </div>
         )}
+        {/* タグは、一番下。 */}
+        <TagEditor tags={detail.tags ?? []} save={async (next) => { await api.put(`${path}/tags`, { tags: next }); await revalidateProject(project.projectId) }} />
       </PanelFrame>
       {confirming && (
         <Modal title="Ingress を削除しますか?" description={detail.host} onClose={() => setConfirming(false)} footer={<><button className="btn" type="button" onClick={() => setConfirming(false)}>キャンセル</button><button className="btn warn" type="button" disabled={busy} onClick={() => void run(async () => { await api.delete(path); setConfirming(false); notify("削除を始めました"); await revalidateProject(project.projectId) })}>削除</button></>}>

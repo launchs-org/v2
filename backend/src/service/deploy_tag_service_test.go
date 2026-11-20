@@ -76,28 +76,23 @@ func TestDeleteByTag(testingT *testing.T) {
 	}}
 	tagService := NewDeployTagService(store, deleters)
 	// 一斉に削除する。
-	result, deleteError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash", false)
+	result, deleteError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash")
 	if deleteError != nil {
 		testingT.Fatalf("成功するはず: %v", deleteError)
 	}
 	// ingress、service(deploy の ID で指す)、deploy、volume の順に呼ばれ、deploy の b だけが失敗として返る。
-	if strings.Join(calls, ",") != "ingress:i,service:a,deploy:a,volume:v" {
+	if strings.Join(calls, ",") != "ingress:i,service:a,deploy:a" {
 		testingT.Errorf("呼ぶ順が違う: %v", calls)
 	}
-	if len(result.Accepted) != 4 || len(result.Failed) != 1 || result.Failed[0].ID != "b" || result.Failed[0].Message == "" {
-		testingT.Errorf("4 つを受け付け、b だけ失敗のはず: %+v", result)
-	}
-	// volume を残す指定なら、volume は呼ばれない。
-	calls = nil
-	if _, keepError := tagService.DeleteByTag(context.Background(), "user", "project", "template:redash", true); keepError != nil || strings.Contains(strings.Join(calls, ","), "volume") {
-		testingT.Errorf("volume は呼ばれないはず: %v %v", calls, keepError)
+	if len(result.Accepted) != 3 || len(result.Failed) != 1 || result.Failed[0].ID != "b" || result.Failed[0].Message == "" {
+		testingT.Errorf("3 つ(volume は除く)を受け付け、b だけ失敗のはず: %+v", result)
 	}
 	// 1 つも無いタグは not_found。
-	if _, notFoundError := NewDeployTagService(&fakeTagStore{}, deleters).DeleteByTag(context.Background(), "user", "project", "none", false); apperror.KindOf(notFoundError) != apperror.KindNotFound {
+	if _, notFoundError := NewDeployTagService(&fakeTagStore{}, deleters).DeleteByTag(context.Background(), "user", "project", "none"); apperror.KindOf(notFoundError) != apperror.KindNotFound {
 		testingT.Errorf("not_found のはず: %v", notFoundError)
 	}
 	// 不正なタグは invalid_request。
-	if _, invalidError := tagService.DeleteByTag(context.Background(), "user", "project", "Bad Tag", false); apperror.KindOf(invalidError) != apperror.KindInvalidRequest {
+	if _, invalidError := tagService.DeleteByTag(context.Background(), "user", "project", "Bad Tag"); apperror.KindOf(invalidError) != apperror.KindInvalidRequest {
 		testingT.Errorf("invalid_request のはず: %v", invalidError)
 	}
 	// SetTags は、整えて(昇順にして)保存する。

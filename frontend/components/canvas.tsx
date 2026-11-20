@@ -39,6 +39,7 @@ function ResourceNode({ data }: NodeProps<Node<NodeData>>) {
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="nm" title={data.title}>{data.title}</div>
           <div className="sub">{data.subtitle}</div>
+        {data.extra && <div className="url mono" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.href ? <a href={data.href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{data.extra.replace("https://", "")}</a> : data.extra}</div>}
         </div>
       </div>
       <div className="foot">
@@ -47,7 +48,6 @@ function ResourceNode({ data }: NodeProps<Node<NodeData>>) {
           {/* 選んだタグは、必ず見えるように、先頭に出す。押すと、同じタグのカードが強調される(もう一度押すと解除)。 */}
           {[...(data.tags ?? [])].sort((first, second) => Number(second === data.highlightTag) - Number(first === data.highlightTag)).slice(0, MAX_CARD_TAGS).map((tag) => <button key={tag} type="button" className={`tagchip nodrag nopan ${tag === data.highlightTag ? "on" : ""}`} title={`タグ ${tag}(押すと、同じタグを強調)`} onClick={(event) => { event.stopPropagation(); data.onTagClick(tag) }}>{tag}</button>)}
           {(data.tags ?? []).length > MAX_CARD_TAGS && <span className="tagmore" title={(data.tags ?? []).slice(MAX_CARD_TAGS).join("、")}>+{(data.tags ?? []).length - MAX_CARD_TAGS}</span>}
-        {data.extra && <span className="url mono">{data.href ? <a href={data.href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{data.extra.replace("https://", "")}</a> : data.extra}</span>}
       </div>
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>

@@ -119,24 +119,23 @@ type TagDeleteResult struct {
 	Failed []TagDeleteItem
 }
 
-// tagDeleteOrder は、一斉削除で、削除を受け付ける順(外から内へ。volume は、使っている deploy より後)。
-var tagDeleteOrder = []string{repository.TagKindIngress, repository.TagKindService, repository.TagKindDeploy, repository.TagKindVolume}
+// tagDeleteOrder は、一斉削除で、削除を受け付ける順(外から内へ。volume は、データを守るため、一斉削除の対象にしない)。
+var tagDeleteOrder = []string{repository.TagKindIngress, repository.TagKindService, repository.TagKindDeploy}
 
-// DeleteByTag は、プロジェクトの中で、タグが付いた資源(ingress、service、deploy、volume)の削除を、全て受け付ける。
+// DeleteByTag は、プロジェクトの中で、タグが付いた資源(ingress、service、deploy)の削除を、全て受け付ける。volume は、データを守るため、削除しない(個別に消す)。
 //
 // 1 つの削除が失敗しても、他は続ける(失敗は、結果に入れる)。1 つの削除の規則(反映中は conflict、deploy が使っている volume は conflict など)は、そのまま適用される。
-// 削除の完了は非同期。deploy が消えるまで、その volume は「使用中」で受け付けられないことがあるので、そのときは、少し待って、もう一度呼ぶ。
+// 削除の完了は非同期。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: プロジェクトの ID。
 //   - tag: 削除する資源のタグ。
-//   - keepVolumes: true なら、volume は削除せずに残す(データを残したいとき)。
 //
 // 戻り値:
 //   - 受け付けた資源と、失敗の一覧。タグが不正なら invalid_request、そのタグの資源が 1 つも無ければ not_found。
-func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, userID string, projectID string, tag string, keepVolumes bool) (TagDeleteResult, error) {
+func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, userID string, projectID string, tag string) (TagDeleteResult, error) {
 	// タグを検査する。
 	normalized, normalizeError := model.NormalizeDeployTags([]string{tag})
 	if normalizeError != nil || len(normalized) != 1 {
@@ -151,15 +150,11 @@ func (tagService *DeployTagService) DeleteByTag(requestContext context.Context, 
 	if len(resources) == 0 {
 		return TagDeleteResult{}, apperror.New(apperror.KindNotFound, "そのタグの資源が見つかりません")
 	}
-	// 決めた順(ingress、service、deploy、volume)に、1 つずつ、削除を受け付ける。
+	// 決めた順(ingress、service、deploy)に、1 つずつ、削除を受け付ける。
 	result := TagDeleteResult{Accepted: []TagDeleteItem{}, Failed: []TagDeleteItem{}}
 	for _, kind := range tagDeleteOrder {
 		for _, resource := range resources {
 			if resource.Kind != kind {
-				continue
-			}
-			// volume を残す指定なら、volume は飛ばす。
-			if keepVolumes && kind == repository.TagKindVolume {
 				continue
 			}
 			// 種類ごとの削除を呼ぶ。

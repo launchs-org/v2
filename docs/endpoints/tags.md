@@ -28,11 +28,10 @@ deploy・volume・service・ingress に**タグ**を付けて、タグ単位で�
 
 ### DELETE /projects/:projectId/tags/:tag/deploys
 
-タグが付いた資源の削除を、**一斉に受け付ける**(完了は非同期。各資源の削除と同じ規則で、反映中などは受け付けられない)。順番は **ingress → service → deploy → volume**。1 つが失敗しても、他は続ける。`:tag` の `:` は、`%3A` に符号化されていてよい。
+タグが付いた資源の削除を、**一斉に受け付ける**(完了は非同期。各資源の削除と同じ規則で、反映中などは受け付けられない)。順番は **ingress → service → deploy**。**volume と ConfigMap は、データを守るため、対象にしない**(タグが付いていても残す。個別に削除する)。1 つが失敗しても、他は続ける。`:tag` の `:` は、`%3A` に符号化されていてよい。
 
-- Query: `keepVolumes=true` で、volume は削除せずに残す(データを残したいとき)。
-- Response `200`: `{"accepted": [{"kind": "deploy", "id": "deploy-...", "message": ""}], "failed": [{"kind": "volume", "id": "volume-...", "message": "..."}]}`(`kind` は deploy / volume / service / ingress)
-- deploy が消えるまで、その volume は「使用中」で受け付けられないことがある。失敗した分は、少し待って、同じ呼び出しでやり直す。
+- Response `200`: `{"accepted": [{"kind": "deploy", "id": "deploy-...", "message": ""}], "failed": [{"kind": "volume", "id": "volume-...", "message": "..."}]}`(`kind` は deploy / service / ingress)
+- 失敗した分は、状態が落ち着いてから、同じ呼び出しでやり直せる。
 - Errors: `invalid_request`(タグが不正)、`not_found`(そのタグの資源が無い)、`unauthorized`
 
 ## メトリクス
