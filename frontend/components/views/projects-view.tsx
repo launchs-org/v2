@@ -9,13 +9,10 @@ import type { DeployListResponse, Project, VolumeListResponse } from "@/lib/type
 import { Badge, EmptyState, Modal, ToastNotice } from "@/components/ui-kit"
 import { TasksView } from "@/components/views/tasks-view"
 
-/** 表の列幅(モックと同じ)。 */
-const COLS = { "--cols": "1.4fr 1fr 90px 100px 130px 190px" } as React.CSSProperties
-
 type ProjectsViewProps = Pick<ProjectViewProps, "nav" | "refreshInterval"> & { search: string; createTick: number; projects: Project[]; onRefresh: () => Promise<unknown> }
 
 /**
- * プロジェクト1行(デプロイ数とボリューム数は、行ごとに取る)。
+ * プロジェクトのカード 1 枚(デプロイ数とボリューム数は、カードごとに取る)。カード全体を押すと、そのプロジェクトを開く。
  *
  * @param props.project プロジェクト。
  * @param props.refreshInterval 自動更新の間隔。
@@ -23,22 +20,32 @@ type ProjectsViewProps = Pick<ProjectViewProps, "nav" | "refreshInterval"> & { s
  * @param props.onRename 名前変更のボタンが押されたとき。
  * @param props.onDelete 削除のボタンが押されたとき。
  */
-function ProjectRow({ project, refreshInterval, nav, onRename, onDelete }: { project: Project; refreshInterval: number; nav: ProjectsViewProps["nav"]; onRename: () => void; onDelete: () => void }) {
+function ProjectCard({ project, refreshInterval, nav, onRename, onDelete }: { project: Project; refreshInterval: number; nav: ProjectsViewProps["nav"]; onRename: () => void; onDelete: () => void }) {
   const base = `/api/v1/projects/${encodeURIComponent(project.projectId)}`
   const { data: deploys } = useSWR<DeployListResponse>(`${base}/deploys?limit=100`, authenticatedFetcher, { refreshInterval })
   const { data: volumes } = useSWR<VolumeListResponse>(`${base}/volumes?limit=100`, authenticatedFetcher, { refreshInterval })
   // 削除中・削除失敗の間は、開けない・変えられない(削除失敗は、削除をやり直せる)。
   const locked = project.status === "deleting"
   return (
-    <div className="tr" style={COLS}>
-      <button className="lnk" type="button" style={{ fontSize: 14 }} onClick={() => nav.openProject(project)} disabled={locked}>{project.name}</button>
-      <span className="faint mono" style={{ wordBreak: "break-all", fontSize: 11.5 }}>{project.projectId.slice(0, 22)}</span>
-      <span className="mono">{deploys ? deploys.deploys.length : "…"}</span>
-      <span className="mono">{volumes ? volumes.volumes.length : "…"}</span>
-      <span><Badge status={project.status} /></span>
-      <div className="row" style={{ gap: 6, flexWrap: "nowrap", justifyContent: "flex-end" }}>
-        <button className="btn sm" type="button" onClick={onRename} disabled={project.status !== "active"}>名前変更</button>
-        <button className="btn sm danger" type="button" onClick={onDelete} disabled={locked}>削除</button>
+    <div className={`pcard ${locked ? "locked" : ""}`}>
+      {/* カード全体を、開くボタンにする(下の操作ボタンは、別に押せる)。 */}
+      <button className="pcard-open" type="button" onClick={() => nav.openProject(project)} disabled={locked} aria-label={`${project.name} を開く`}>
+        <div className="row" style={{ gap: 12, flexWrap: "nowrap", alignItems: "flex-start" }}>
+          <span className="pavatar" aria-hidden>{project.name.slice(0, 1).toUpperCase()}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="pname disp" title={project.name}>{project.name}</div>
+            <div className="faint mono pid">{project.projectId.slice(0, 22)}</div>
+          </div>
+          <Badge status={project.status} />
+        </div>
+        <div className="pstats">
+          <div><b className="mono">{deploys ? deploys.deploys.length : "…"}</b><span className="faint">デプロイ</span></div>
+          <div><b className="mono">{volumes ? volumes.volumes.length : "…"}</b><span className="faint">ボリューム</span></div>
+        </div>
+      </button>
+      <div className="pcard-foot">
+        <button className="btn sm ghost" type="button" onClick={onRename} disabled={project.status !== "active"}>名前変更</button>
+        <button className="btn sm ghost danger" type="button" onClick={onDelete} disabled={locked}>削除</button>
       </div>
     </div>
   )
@@ -121,11 +128,12 @@ export function ProjectsView({ projects, refreshInterval, onRefresh, nav, search
       <div><h1 className="h1 disp">プロジェクト</h1></div>
       {projects.length === 0 && <EmptyState title="プロジェクトがありません" description="右上のボタンから、最初のプロジェクトを作成してください。" />}
       {projects.length > 0 && (
-        <div className="card tscroll"><div className="tinner">
-          <div className="tr th" style={COLS}><span>名前</span><span>ID</span><span>デプロイ</span><span>ボリューム</span><span>状態</span><span /></div>
-          {rows.map((project) => <ProjectRow key={project.projectId} project={project} refreshInterval={refreshInterval} nav={nav} onRename={() => { setTarget(project); setName(project.name); setError(""); setModal("rename") }} onDelete={() => { setTarget(project); setModal("delete") }} />)}
-          {rows.length === 0 && <div className="tr mut" style={{ "--cols": "1fr" } as React.CSSProperties}>一致するプロジェクトがありません。</div>}
-        </div></div>
+        <div className="pgrid">
+          {rows.map((project) => <ProjectCard key={project.projectId} project={project} refreshInterval={refreshInterval} nav={nav} onRename={() => { setTarget(project); setName(project.name); setError(""); setModal("rename") }} onDelete={() => { setTarget(project); setModal("delete") }} />)}
+          {/* 新しく作るカード(上のバーの「作成」と同じ)。 */}
+          <button className="pcard pnew" type="button" onClick={() => { setName(""); setError(""); setModal("create") }}><span className="pplus" aria-hidden>+</span><span>新しいプロジェクト</span></button>
+          {rows.length === 0 && <div className="mut" style={{ gridColumn: "1 / -1" }}>一致するプロジェクトがありません。</div>}
+        </div>
       )}
       {/* 全てのプロジェクトのタスク(作成・削除を含む。削除したプロジェクトのものも)。 */}
       <div style={{ marginTop: 28 }}>
