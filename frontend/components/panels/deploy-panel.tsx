@@ -1,5 +1,6 @@
 "use client"
 
+import { DeployImageCard } from "@/components/deploy-image-card"
 import { useEffect, useState } from "react"
 import useSWR from "swr"
 import { revalidateProject } from "@/lib/revalidate"
@@ -152,7 +153,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
           {TABS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={`tab ${tab === item.key ? "on" : ""}`} onClick={() => onTabChange(item.key)}>{item.label}{pendingTabs[item.key] && <span className="pdot" />}</button>)}
         </div>
         {/* 開いているタブの中身。 */}
-        {tab === "overview" && <OverviewTab data={data} locked={locked} busy={busy} hasPending={hasPending} run={run} onTabChange={onTabChange} />}
+        {tab === "overview" && <OverviewTab data={data} locked={locked} busy={busy} hasPending={hasPending} run={run} onTabChange={onTabChange} refreshInterval={refreshInterval} />}
         {tab === "config" && <ConfigTab data={data} locked={locked} busy={busy} run={run} />}
         {tab === "mounts" && <MountsTab data={data} projectId={project.projectId} locked={locked} busy={busy} run={run} />}
         {tab === "configmap" && <ConfigMapMountsTab nav={props.nav} deployId={data.deployId} projectId={project.projectId} refreshInterval={refreshInterval} locked={locked} busy={busy} run={run} />}
@@ -171,7 +172,7 @@ export function DeployPanel(props: ProjectViewProps & { deployId: string; tab: D
 type TabProps = { data: DeployDetail; locked: boolean; busy: boolean; run: (action: () => Promise<unknown>, done: string) => Promise<void> }
 
 /** 概要タブ: スケール、Pod、詳細、未反映の知らせ。 */
-function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabProps & { hasPending: boolean; onTabChange: (tab: DeployTab) => void }) {
+function OverviewTab({ data, locked, busy, hasPending, run, onTabChange, refreshInterval }: TabProps & { hasPending: boolean; onTabChange: (tab: DeployTab) => void; refreshInterval: number }) {
   const path = `/api/v1/deploy/${encodeURIComponent(data.deployId)}`
   const [wanted, setWanted] = useState(data.replicas)
   // サーバーの台数が変わったら(反映が終わったら)、下書きも合わせる。
@@ -199,6 +200,7 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
           {data.pods.length === 0 && <div className="mut">稼働中の Pod はありません。</div>}
         </div>
       </div>
+      <DeployImageCard deployId={data.deployId} imageRef={data.imageRef} refreshInterval={refreshInterval} />
       <div className="card pad"><dl className="kv" style={{ margin: 0 }}>
         <div><dt>Project</dt><dd className="mono">{data.projectId}</dd></div>
         <div><dt>Created</dt><dd className="mono">{formatAt(data.createdAt)}</dd></div>

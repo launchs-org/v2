@@ -277,6 +277,12 @@ export type ApiToken = { tokenId: string; name: string; scope: string[]; deploys
 export type ApiTokenListResponse = { tokens: ApiToken[] }
 export type ApiTokenCreateResponse = ApiToken & { token: string }
 
+/** イメージの更新履歴の 1 件(反映の結果は、applied か failed)。 */
+export type ImageHistoryItem = { previousImageRef: string; imageRef: string; result: "applied" | "failed"; at: string }
+
+/** イメージの更新履歴の応答(新しい順)。 */
+export type ImageHistoryResponse = { history: ImageHistoryItem[] }
+
 /** 招待の状態(有効、使用済み、期限切れ、取り消し済み)。 */
 export type InvitationStatus = "active" | "used" | "expired" | "revoked"
 

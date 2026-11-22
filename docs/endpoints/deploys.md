@@ -166,6 +166,15 @@
 - Note: deploy のログも deploy の削除と一緒に削除される
 - Note: 起動中("pending")の間も 409 を返す。削除に失敗した("delete_failed")deploy は、もう一度削除を呼んでやり直せる(リトライの期限は 15 分で、超えると "delete_failed" になる)
 
+### デプロイ イメージの更新履歴
+- Get: /deploy/:deployId/image-history
+- Response (200)
+```json
+{"history": [{"previousImageRef": "ghcr.io/acme/app:old", "imageRef": "ghcr.io/acme/app:new", "result": "applied", "at": "2026-11-22T20:11:00+09:00"}]}
+```
+- Note: イメージを入れ替える反映(`PUT /deploy/:deployId/image` と webhook、`config/apply`)が**終わるたび**に、1 件増える。新しい順で、最大 50 件。無ければ空の配列。
+- Note: `result` は `applied`(反映に成功)か `failed`(失敗。試したイメージが `imageRef`)。この機能を入れる前の入れ替えは、残っていない。deploy を消すと、履歴も消える。deploy が無い、または他のユーザーのものなら 404。API トークンは、`read` 以上で呼べる。
+
 ### デプロイ ログ取得
 - Get: /deploy/:deployId/logs
 - Header
