@@ -91,6 +91,9 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.GET("/projects/:projectId/events", eventController.List)
 	apiGroup.GET("/deploy/:deployId", deployController.Get)
 	apiGroup.GET("/deploy/:deployId/logs", deployController.GetLogs)
+	// イメージの更新履歴(config/apply の流れでイメージを入れ替えた結果。新しい順)。
+	deployImageHistoryController := controller.NewDeployImageHistoryController(service.NewDeployImageHistoryService(deployRepository, repository.NewDeployImageHistoryRepository(dependencies.Database)))
+	apiGroup.GET("/deploy/:deployId/image-history", deployImageHistoryController.List)
 	apiGroup.DELETE("/deploy/:deployId", deployController.Delete)
 	apiGroup.POST("/deploy/:deployId/scale", deployController.Scale)
 	apiGroup.GET("/deploy/:deployId/config", deployController.GetConfig)

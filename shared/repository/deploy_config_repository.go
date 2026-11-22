@@ -172,9 +172,26 @@ func (deployRepository *DeployRepository) CommitConfigResult(requestContext cont
 		if findError != nil {
 			return apperror.Wrap(apperror.KindInternal, "deploy を取得できませんでした", findError)
 		}
+		// 確定の前に、入れ替えようとしているイメージと、いまのイメージを控える(確定すると、pending が空になる)。
+		attemptedImage := ""
+		if deploy.PendingImageRef != nil {
+			attemptedImage = *deploy.PendingImageRef
+		}
+		previousImage := deploy.ImageRef
 		// モデルに、結果の確定を任せる(applying でなければ、何も変わらない)。
 		if !deploy.CommitConfig(succeeded) {
 			return nil
+		}
+		// イメージを入れ替える反映だったときは、結果(成功か失敗か)を、更新履歴に残す。
+		if attemptedImage != "" {
+			result := model.ImageHistoryResultFailed
+			if succeeded {
+				result = model.ImageHistoryResultApplied
+			}
+			history := model.DeployImageHistory{DeployID: deploy.ID, PreviousImageRef: previousImage, ImageRef: attemptedImage, Result: result}
+			if historyError := transaction.Create(&history).Error; historyError != nil {
+				return apperror.Wrap(apperror.KindInternal, "イメージの更新履歴を保存できませんでした", historyError)
+			}
 		}
 		// 変えた deploy を保存する(正式な値と pending は、NULL も含めて、全ての列を書く)。
 		if saveError := transaction.Save(&deploy).Error; saveError != nil {
