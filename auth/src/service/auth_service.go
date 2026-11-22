@@ -256,20 +256,30 @@ func (authService *AuthService) Refresh(requestContext context.Context, refreshT
 
 // Me は、access token の持ち主の情報を返す。
 //
-// access token は、有効期限だけで管理する(失効はしない)ので、トークンの claims から返す(DB は見ない)。
+// ユーザーの ID と名前は、access token の claims から取る。役割(user か admin)は、昇格や降格がすぐに反映されるよう、DB から最新を読む。
 //
 // 引数:
+//   - requestContext: キャンセルや期限を伝える context。
 //   - accessToken: access token の文字列。
 //
 // 戻り値:
-//   - ユーザーの ID と、ユーザー名。使えない access token は unauthorized。
-func (authService *AuthService) Me(accessToken string) (string, string, error) {
+//   - ユーザーの ID、ユーザー名、役割。使えない access token や、存在しないユーザーは unauthorized。
+func (authService *AuthService) Me(requestContext context.Context, accessToken string) (string, string, string, error) {
 	// 署名・期限・種類を確かめる。
 	claims, parseError := authService.tokenService.Parse(accessToken, token.TypeAccess)
 	if parseError != nil {
-		return "", "", errInvalidRefreshToken
+		return "", "", "", errInvalidRefreshToken
 	}
-	return claims.Subject, claims.Name, nil
+	// 役割は、最新の状態を、DB から読む。
+	user, found, findError := authService.userStore.FindByID(requestContext, claims.Subject)
+	if findError != nil {
+		return "", "", "", findError
+	}
+	// ユーザーが消えているときは、使えない access token として扱う。
+	if !found {
+		return "", "", "", errInvalidRefreshToken
+	}
+	return claims.Subject, claims.Name, user.Role, nil
 }
 
 // Logout は、refresh token を無効にする。以後、その refresh token では、access token を取れない。

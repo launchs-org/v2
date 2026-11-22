@@ -25,7 +25,7 @@ type AuthUseCase interface {
 	Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, turnstileToken string) (string, error)
 	LoginHistory(requestContext context.Context, accessToken string, limit int) ([]model.LoginEvent, error)
 	Refresh(requestContext context.Context, refreshToken string) (string, error)
-	Me(accessToken string) (string, string, error)
+	Me(requestContext context.Context, accessToken string) (string, string, string, error)
 	Logout(requestContext context.Context, refreshToken string) error
 }
 
@@ -69,6 +69,9 @@ type MeResponse struct {
 
 	// UserName は、ユーザー名。
 	UserName string `json:"userName"`
+
+	// Role は、役割(user か admin)。画面が、管理者向けの項目を出すかの判断に使う(権限の判定は、各 API が、毎回 DB で行う)。
+	Role string `json:"role"`
 }
 
 // LoginEventResponse は、ログイン履歴1件のレスポンス。
@@ -262,11 +265,11 @@ func (authController *AuthController) Me(echoContext *echo.Context) error {
 		return tokenError
 	}
 	// 持ち主の情報を取り出す。
-	userID, userName, meError := authController.authUseCase.Me(accessToken)
+	userID, userName, role, meError := authController.authUseCase.Me(echoContext.Request().Context(), accessToken)
 	if meError != nil {
 		return meError
 	}
-	return echoContext.JSON(http.StatusOK, MeResponse{UserID: userID, UserName: userName})
+	return echoContext.JSON(http.StatusOK, MeResponse{UserID: userID, UserName: userName, Role: role})
 }
 
 // Logout は、POST /logout のハンドラー。refresh token を無効にする。
