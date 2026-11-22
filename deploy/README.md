@@ -42,6 +42,10 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。**環境�
    backend と auth の initContainer が、マイグレーション(up のみ)を流す。Temporal は、起動前にスキーマを作り、`temporal-namespace` の Job が、`default` の namespace を作る(Job は、完了の 10 分後に消える)。PostgreSQL と Temporal が立ち上がるまで、backend、worker、watcher は、再起動をくり返すことがある(待てば落ち着く)。
 5. **確認する**: `curl https://<ホスト名>/healthz`(backend)と、`https://<ホスト名>/` の画面。最初の管理者は、`settings/secret.yaml` の名前とパスワードでログインできる(auth が、起動時に、管理者が 1 人もいなければ作る)。作ったあと、`AUTH_BOOTSTRAP_ADMIN_PASSWORD` は、Secret から消してよい。
 
+## クラスター側の前提と、本番 Talos(launchs.org)の手順
+運用で困ったときは [FAQ.md](FAQ.md)(Q&A)。
+`cluster/README.md` に、本体の外で必要なもの(metrics-server、Traefik のプラグイン `launchs-edge` と `launchs-stats`、Cloudflare の設定、環境ごとの設定の値)と、その手順がある。`settings/config.launchs.org.example.yaml` は、本番の `config.yaml` の例(適用の対象ではない)。
+
 ## 運用(更新、マイグレーション、バックアップ)
 更新の手順、マイグレーションのしくみと決まり、バックアップと復元、ロールバック、よくある問題は、[OPERATIONS.md](OPERATIONS.md) にまとめています。更新の前に、読んでください。
 
