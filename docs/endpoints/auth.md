@@ -104,7 +104,7 @@
 ```
 - Response (200)
 ```json
-{"userId": "userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8", "userName": "user1"}
+{"userId": "userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8", "userName": "user1", "role": "user"}
 ```
 
 ### ログイン履歴
