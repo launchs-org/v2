@@ -1,11 +1,14 @@
 package server
 
 import (
+	"fmt"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"launchs/backend/src/middlewares"
+	"launchs/shared/apitoken"
 	"launchs/shared/template"
 	"launchs/templates"
+	"os"
 
 	"launchs/backend/src/controller"
 	"launchs/backend/src/service"
@@ -32,8 +35,18 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	if authentication == nil {
 		authentication = middlewares.NewDevAuthenticationMiddleware("")
 	}
+	// API トークン(機械向けの JWT)。署名の秘密(環境変数 API_TOKEN_SECRET)が無いときは、機能を無効にする。
+	apiTokenSigner := newAPITokenSigner()
+	apiTokenRepository := repository.NewAPITokenRepository(dependencies.Database)
+	// 接頭辞 lkt_ のトークンは API トークンとして、それ以外は、利用者のログインの JWT として認証する。
+	authentication = middlewares.NewTokenDispatchMiddleware(authentication, apiTokenSigner, apiTokenRepository)
 	// /api/v1 のグループを作り、認証のミドルウェアを付ける。
 	apiGroup := echoServer.Group("/api/v1", authentication)
+	// API トークンの発行・一覧・失効(ログインしたユーザーだけ。API トークンでは呼べない)。
+	apiTokenController := controller.NewAPITokenController(service.NewAPITokenService(apiTokenRepository, apiTokenSigner))
+	apiGroup.POST("/api-tokens", apiTokenController.Create)
+	apiGroup.GET("/api-tokens", apiTokenController.List)
+	apiGroup.DELETE("/api-tokens/:tokenId", apiTokenController.Revoke)
 
 	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)
@@ -82,6 +95,9 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.GET("/deploy/:deployId/config", deployController.GetConfig)
 	apiGroup.PUT("/deploy/:deployId/config", deployController.UpdateConfig)
 	apiGroup.POST("/deploy/:deployId/config/apply", deployController.ApplyConfig)
+	apiGroup.PUT("/deploy/:deployId/image", deployController.UpdateImage)
+	// 自動デプロイの webhook(/api/v1 の外。トークンはヘッダーで渡し、webhook の中で確かめる)。
+	echoServer.POST("/hooks/deploy", controller.NewWebhookController(deployService, apiTokenSigner, apiTokenRepository).DeployWebhook)
 	apiGroup.POST("/deploy/:deployId/config/discard", deployController.DiscardConfig)
 	apiGroup.GET("/deploy/:deployId/mounts", deployController.GetMounts)
 	apiGroup.PUT("/deploy/:deployId/mounts", deployController.UpdateMounts)
@@ -185,3 +201,24 @@ const configMapRequestBodyLimitBytes = 3 * 1024 * 1024
 
 // defaultVolumeMaxSizeMB は、volume の大きさの上限の既定値(MB)。
 const defaultVolumeMaxSizeMB = 5120
+
+// newAPITokenSigner は、環境変数 API_TOKEN_SECRET から、API トークンの署名を作る。
+//
+// 未設定、または短すぎるときは nil(API トークンの機能は無効になる)。
+//
+// 戻り値:
+//   - 署名・検証するもの。無効なら nil。
+func newAPITokenSigner() *apitoken.Signer {
+	// 秘密を読む(空なら、機能を使わない)。
+	secret := os.Getenv("API_TOKEN_SECRET")
+	if secret == "" {
+		return nil
+	}
+	signer, signerError := apitoken.NewSigner([]byte(secret), nil)
+	if signerError != nil {
+		// 短い秘密のまま動かさない(気づけるよう、標準エラー出力に書く)。
+		fmt.Fprintln(os.Stderr, "API_TOKEN_SECRET が使えないため、API トークンを無効にした:", signerError)
+		return nil
+	}
+	return signer
+}

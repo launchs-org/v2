@@ -112,3 +112,51 @@ func (deployController *DeployController) ApplyConfig(echoContext *echo.Context)
 	// 空のオブジェクトを返す。
 	return echoContext.JSON(http.StatusOK, struct{}{})
 }
+
+// UpdateDeployImageRequest は、イメージの更新のリクエストのボディ。
+type UpdateDeployImageRequest struct {
+	// ImageRef は、新しいイメージ。空白を含まず、512文字まで。
+	ImageRef string `json:"imageRef" validate:"required,max=512,imageref"`
+
+	// Apply が true のときは、保存したあと、続けて反映(config/apply)も開始する(機械から1回で更新するため)。
+	Apply bool `json:"apply"`
+}
+
+// UpdateImage は、deploy のイメージを、まだ適用しない値として保存する(PUT /deploy/:deployId/image)。
+//
+// apply が true なら、続けて反映も開始する。現在と同じイメージなら、何も変えず、applied は false で返す。
+//
+// 引数:
+//   - echoContext: Echo のリクエストのコンテキスト。
+//
+// 戻り値:
+//   - ボディが不正なら invalid_request、無い・他人のものなら not_found、
+//     反映中・削除の途中・起動中なら conflict、未認証なら unauthorized。
+func (deployController *DeployController) UpdateImage(echoContext *echo.Context) error {
+	// 認証したユーザーの ID を取り出す。
+	userID, userIDError := middlewares.UserIDFrom(echoContext)
+	if userIDError != nil {
+		return userIDError
+	}
+	// ボディを読み込み、validate タグで検証する。
+	var request UpdateDeployImageRequest
+	if bindError := bindAndValidate(echoContext, &request); bindError != nil {
+		return bindError
+	}
+	deployID := echoContext.Param("deployId")
+	// イメージを、まだ適用しない値として保存する。
+	changed, updateError := deployController.deployUseCase.UpdateImage(echoContext.Request().Context(), userID, deployID, request.ImageRef)
+	if updateError != nil {
+		return updateError
+	}
+	// 反映の指定があり、変更を保存したときだけ、反映を始める。
+	applied := false
+	if request.Apply && changed {
+		if applyError := deployController.deployUseCase.ApplyConfig(echoContext.Request().Context(), userID, deployID); applyError != nil {
+			return applyError
+		}
+		applied = true
+	}
+	// 保存したか(changed)と、反映を始めたか(applied)を返す。
+	return echoContext.JSON(http.StatusOK, map[string]bool{"changed": changed, "applied": applied})
+}

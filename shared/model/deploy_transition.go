@@ -85,6 +85,11 @@ func (deploy *Deploy) CommitConfig(succeeded bool) bool {
 		deploy.PendingCommand = nil
 		deploy.PendingArgs = nil
 	}
+	// 適用するイメージがあるときは、正式なイメージにして、pending を空に戻す。
+	if deploy.PendingImageRef != nil {
+		deploy.ImageRef = *deploy.PendingImageRef
+		deploy.PendingImageRef = nil
+	}
 	// 落ち着いた状態にする。
 	deploy.Status = deploy.SettledStatus()
 	return true
