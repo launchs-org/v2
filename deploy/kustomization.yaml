@@ -1,13 +1,11 @@
-# launchs の本番向けのマニフェスト。この場所で、`kubectl apply -k .` する(手順は README.md)。
+# launchs の本番向けのマニフェスト(本体)。この場所で、`kubectl apply -k .` する(手順は README.md)。
+# 環境ごとの設定(ConfigMap `launchs-config` と、Secret)は、ここには含めない。`settings/` に置いて、別に、先に適用する(`kubectl apply -k settings/`)。
 # namespace は、各ファイルに明記している(accessstats の Role は、Traefik の namespace に置くため、namespace の一括指定は使わない)。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - namespace.yaml
-  - config.yaml
-  # 秘密(gitignore。secret.example.yaml をコピーして作る)。
-  - secret.yaml
   - rbac.yaml
   - postgres.yaml
   - temporal.yaml
