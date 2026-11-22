@@ -83,6 +83,10 @@ func (applyDeployConfigActivities *ApplyDeployConfigActivities) ApplyPendingConf
 	pendingDeploy.Env = deploy.PendingEnv
 	pendingDeploy.Command = deploy.PendingCommand
 	pendingDeploy.Args = deploy.PendingArgs
+	// 更新するイメージがあるときは、そのイメージで組み立てる。
+	if deploy.PendingImageRef != nil {
+		pendingDeploy.ImageRef = *deploy.PendingImageRef
+	}
 	definition, definitionError := newDeploymentDefinition(pendingDeploy, spec)
 	if definitionError != nil {
 		return 0, temporal.NewNonRetryableApplicationError(definitionError.Error(), "InvalidDeployment", definitionError)

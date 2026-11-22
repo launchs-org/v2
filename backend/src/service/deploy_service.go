@@ -21,6 +21,7 @@ type DeployStore interface {
 	ListByProject(requestContext context.Context, userID string, projectID string, limit int, after *pagination.Position) ([]model.Deploy, *pagination.Position, error)
 	DeleteUnstarted(requestContext context.Context, deployID string) error
 	SavePendingConfig(requestContext context.Context, userID string, deployID string, env datatypes.JSON, command *string, args datatypes.JSON) error
+	SavePendingImage(requestContext context.Context, userID string, deployID string, imageRef string) (bool, error)
 	DiscardPendingConfig(requestContext context.Context, userID string, deployID string) error
 	BeginConfigApply(requestContext context.Context, userID string, deployID string) (string, error)
 	RevertApply(requestContext context.Context, deployID string, previousStatus string) error

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API と自動デプロイ | launchs 利用ガイド</title>
+<meta name="description" content="launchs を、プログラムや CI から操作する方法(API トークン、API の一覧、自動デプロイ)をまとめました。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<aside class="side">
+<a class="brand" href="index.html"><span class="logo">L</span>launchs</a>
+<p class="tag">利用ガイド<br>はじめての人にも、やさしく。</p>
+<div class="group">
+<a class="nav" href="index.html">ホーム</a>
+</div>
+<h2>はじめに</h2>
+<div class="group">
+<a class="nav" href="start.html">はじめてのガイド</a>
+<a class="nav" href="concepts.html">しくみと言葉</a>
+</div>
+<h2>機能ごとの使い方</h2>
+<div class="group">
+<a class="nav" href="deploy.html">アプリを動かす(デプロイ)</a>
+<a class="nav" href="publish.html">インターネットに公開する</a>
+<a class="nav" href="storage.html">データと設定ファイル</a>
+<a class="nav" href="templates.html">テンプレートで一括作成</a>
+<a class="nav" href="monitoring.html">様子を見る(ログ・イベント・タスク)</a>
+<a class="nav" href="account.html">アカウントと上限</a>
+<a class="nav" href="api.html" aria-current="page">API と自動デプロイ</a>
+</div>
+<h2>困ったとき</h2>
+<div class="group">
+<a class="nav" href="faq.html">困ったとき(FAQ)</a>
+</div>
+</aside>
+<main>
+<div class="crumb"><a href="index.html">ホーム</a> ／ API と自動デプロイ</div>
+<h1>API と自動デプロイ</h1><p class="lead">画面でできることは、<b>API</b> からも、できます。CI やスクリプトから操作したり、新しいイメージを作ったときに、自動で入れ替えたりできます。</p>
+
+<h2 class="sec" id="start">はじめかた(3 ステップ)</h2>
+<ol class="steps">
+<li><b>トークンを作る</b> — <span class="ui">アカウント設定</span>(または、プロジェクトの<span class="ui">設定</span>)の<span class="ui">API トークン</span>で、<span class="ui">トークンを発行</span>を押します。<b>トークンは、発行したときの 1 度しか表示されません</b>。保存してください。</li>
+<li><b>呼んでみる</b> — <code>Authorization: Bearer &lt;トークン&gt;</code> を付けて、API を呼びます。</li>
+<li><b>要らなくなったら失効</b> — 一覧の<span class="ui">失効</span>で、すぐに使えなくなります。</li>
+</ol>
+<pre><code>curl -H "Authorization: Bearer lkt_…" https://&lt;このサービスのホスト&gt;/api/v1/projects</code></pre>
+
+<h2 class="sec" id="auth">認証: 2 種類のトークン</h2>
+<div class="table-wrap"><table><thead><tr><th></th><th>API トークン(<code>lkt_…</code>)</th><th>ログインのトークン</th></tr></thead><tbody>
+<tr><td>使う場面</td><td><b>機械(CI、スクリプト)</b></td><td>画面(ブラウザ)</td></tr>
+<tr><td>有効期間</td><td>発行のときに決める(30 日・90 日・1 年・無期限)</td><td>15 分(更新しながら使う)</td></tr>
+<tr><td>できること</td><td>権限と対象を、絞れる</td><td>あなたと同じ全て</td></tr>
+<tr><td>取り消し</td><td>一覧から失効(すぐ効く)</td><td>ログアウト</td></tr>
+</tbody></table></div>
+<h3>API トークンの権限</h3>
+<div class="table-wrap"><table><thead><tr><th>権限</th><th>できること</th></tr></thead><tbody>
+<tr><td><b>読み取り専用</b></td><td>見るだけ(GET)。状態の監視向け</td></tr>
+<tr><td><b>全ての操作</b></td><td>作成・更新・削除も、あなたと同じ。<b>ただし、API トークンの管理は、できません</b>(トークンが、別のトークンを作れないように)</td></tr>
+<tr><td><b>イメージの更新だけ</b></td><td>1 つの deploy の、イメージの更新と、自動デプロイ(webhook)だけ。deploy の画面で発行します</td></tr>
+</tbody></table></div>
+<div class="note tip"><b>対象を絞る</b><p>プロジェクトの<span class="ui">設定</span>で発行したトークンは、<b>そのプロジェクトだけ</b>を操作できます。CI には、必要なものだけに絞ったトークンを渡してください。絞ったトークンでは、プロジェクトの外の操作(<code>GET /projects</code> の一覧や、<code>POST /deploy</code> での作成)は、まだできません。</p></div>
+<div class="note warn"><b>トークンは、パスワードと同じ</b><p>リポジトリに書いたり、チャットに貼ったりしないでください。CI の「シークレット」に入れます。漏れたかもしれないときは、すぐ失効します。</p></div>
+
+<h2 class="sec" id="rules">基本のルール</h2>
+<ul>
+<li><b>URL</b> は <code>/api/v1/…</code>。本文は JSON(<code>Content-Type: application/json</code>)。</li>
+<li><b>エラー</b>は <code>{"error": {"code": "not_found", "message": "…"}}</code> の形。主な <code>code</code> は、<code>invalid_request</code>(400)、<code>unauthorized</code>(401)、<code>forbidden</code>(403)、<code>not_found</code>(404)、<code>conflict</code>(409。反映中など)。</li>
+<li><b>一覧</b>は <code>limit</code>(最大 100)と <code>cursor</code>(前回の <code>nextCursor</code>)で、ページをめくります。</li>
+<li><b>変更は「保存 → 反映」の 2 段階</b>です。<code>PUT …/config</code> のような変更は、まず<b>反映待ち</b>として保存され、<code>POST …/apply</code> で、はじめて実際に反映されます(<code>POST …/discard</code> で破棄)。反映は<b>非同期</b>で、すぐに応答します。結果は、deploy の <code>status</code>(<code>applying</code> → <code>active</code> か <code>failed</code>)を、<code>GET /deploy/:deployId</code> で確かめます。</li>
+<li>反映中(<code>applying</code>)の deploy への変更は、<code>409</code> になります。少し待って、やり直してください。</li>
+</ul>
+
+<h2 class="sec" id="endpoints">API の一覧</h2>
+<p>パスは、<code>/api/v1</code> を省いて書いています。ここに無い詳細(項目、例)は、リポジトリの <code>docs/endpoints/</code> にあります。</p>
+<h3 id="projects">プロジェクト</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>GET</code></td><td><code>/projects</code></td><td>一覧</td></tr>
+<tr><td><code>POST</code></td><td><code>/projects</code></td><td>作成</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId</code></td><td>取得</td></tr>
+<tr><td><code>PATCH</code></td><td><code>/projects/:projectId</code></td><td>名前の変更</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/projects/:projectId</code></td><td>削除(中のものも全て消えます)</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/events</code></td><td>イベント</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/tasks</code></td><td>タスク(操作の履歴)</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/tasks/:taskId</code></td><td>タスクの詳細</td></tr>
+<tr><td><code>GET</code></td><td><code>/quota</code></td><td>自分の上限と使用量</td></tr>
+</tbody></table></div>
+<h3 id="deploys">デプロイ(アプリの起動)</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>POST</code></td><td><code>/deploy</code></td><td>イメージから作成</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/deploys</code></td><td>一覧</td></tr>
+<tr><td><code>GET</code></td><td><code>/deploy/:deployId</code></td><td>詳細(状態、設定、反映待ちの変更)</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/deploy/:deployId</code></td><td>削除</td></tr>
+<tr><td><code>POST</code></td><td><code>/deploy/:deployId/scale</code></td><td>台数の変更</td></tr>
+<tr><td><code>PUT</code></td><td><code>/deploy/:deployId/image</code></td><td><b>イメージの更新</b>(<code>apply: true</code> で、続けて反映)</td></tr>
+<tr><td><code>GET</code></td><td><code>/deploy/:deployId/logs</code></td><td>ログ</td></tr>
+<tr><td><code>GET</code></td><td><code>/deploy/:deployId/metrics</code></td><td>CPU・メモリ</td></tr>
+</tbody></table></div>
+<h3 id="config">起動設定・マウント・ファイル</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>GET / PUT</code></td><td><code>/deploy/:deployId/config</code></td><td>環境変数・コマンド・引数(PUT は、反映待ちとして保存)</td></tr>
+<tr><td><code>POST</code></td><td><code>/deploy/:deployId/config/apply</code></td><td>反映する</td></tr>
+<tr><td><code>POST</code></td><td><code>/deploy/:deployId/config/discard</code></td><td>反映待ちを破棄</td></tr>
+<tr><td><code>GET / PUT</code></td><td><code>/deploy/:deployId/mounts</code></td><td>ボリュームのマウント(<code>/mounts/apply</code>、<code>/mounts/discard</code> も同じ)</td></tr>
+<tr><td><code>GET / PUT</code></td><td><code>/deploy/:deployId/files</code></td><td>ファイル(<code>/files/apply</code>、<code>/files/discard</code> も同じ)</td></tr>
+<tr><td><code>GET / PUT</code></td><td><code>/deploy/:deployId/configmap-mounts</code></td><td>ConfigMap のマウント(<code>/apply</code>、<code>/discard</code> も同じ)</td></tr>
+</tbody></table></div>
+<h3 id="service">Service・Ingress</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>POST / GET / PATCH / DELETE</code></td><td><code>/deploy/:deployId/service</code></td><td>Service の作成・取得・ポートの変更・削除(<code>/apply</code>、<code>/discard</code>)</td></tr>
+<tr><td><code>POST / GET</code></td><td><code>/projects/:projectId/ingresses</code></td><td>Ingress(公開 URL)の作成・一覧</td></tr>
+<tr><td><code>GET / PUT / PATCH / DELETE</code></td><td><code>/projects/:projectId/ingresses/:ingressId</code></td><td>取得・ルールの変更・アクセス集計の切り替え・削除(<code>/apply</code>、<code>/discard</code>)</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/ingresses/:ingressId/access-stats</code></td><td>アクセスの集計</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/ingresses/:ingressId/access-logs</code></td><td>アクセスログ</td></tr>
+</tbody></table></div>
+<h3 id="storage">ボリューム・ConfigMap</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>POST / GET</code></td><td><code>/projects/:projectId/volumes</code></td><td>作成・一覧</td></tr>
+<tr><td><code>GET / PATCH / DELETE</code></td><td><code>/projects/:projectId/volumes/:volumeId</code></td><td>取得・名前の変更・削除</td></tr>
+<tr><td><code>PATCH</code></td><td><code>/projects/:projectId/volumes/:volumeId/size</code></td><td>大きさの変更(<code>/apply</code>、<code>/discard</code>)</td></tr>
+<tr><td><code>POST / GET</code></td><td><code>/projects/:projectId/configmaps</code></td><td>ConfigMap の作成・一覧</td></tr>
+<tr><td><code>GET / PUT / PATCH / DELETE</code></td><td><code>/configmaps/:configMapId</code></td><td>取得・新しい版・名前の変更・削除</td></tr>
+<tr><td><code>GET</code></td><td><code>/configmaps/:configMapId/revisions</code></td><td>版の一覧</td></tr>
+<tr><td><code>GET</code></td><td><code>/configmaps/:configMapId/usage</code></td><td>どの deploy が使っているか</td></tr>
+</tbody></table></div>
+<h3 id="others">タグ・メトリクス・テンプレート</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>PUT</code></td><td><code>/deploy/:deployId/tags</code></td><td>deploy のタグ(volume、service、ingress も、同じ形)</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/tags</code></td><td>タグの一覧</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/projects/:projectId/tags/:tag/deploys</code></td><td>タグのものを、まとめて削除</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/metrics</code></td><td>プロジェクトのメトリクス</td></tr>
+<tr><td><code>GET</code></td><td><code>/projects/:projectId/tags/:tag/metrics</code></td><td>タグのメトリクス</td></tr>
+<tr><td><code>GET</code></td><td><code>/templates</code></td><td>テンプレートの一覧(<code>/templates/:templateId</code> で詳細)</td></tr>
+<tr><td><code>POST</code></td><td><code>/projects/:projectId/templates/:templateId/apply</code></td><td>テンプレートから、まとめて作成</td></tr>
+</tbody></table></div>
+<h3 id="tokens">API トークン</h3>
+<div class="table-wrap"><table><thead><tr><th>メソッド</th><th>パス</th><th>説明</th></tr></thead><tbody>
+<tr><td><code>POST</code></td><td><code>/api-tokens</code></td><td>発行(<b>ログインした人だけ</b>)</td></tr>
+<tr><td><code>GET</code></td><td><code>/api-tokens</code></td><td>一覧</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/api-tokens/:tokenId</code></td><td>失効</td></tr>
+</tbody></table></div>
+
+<h2 class="sec" id="autodeploy">自動デプロイ(webhook)</h2>
+<p>新しいイメージを作ったときに、CI から 1 回呼ぶだけで、deploy のイメージを入れ替えて、反映します。</p>
+<ol class="steps">
+<li>deploy の<span class="ui">概要</span>にある<span class="ui">自動デプロイ(webhook)</span>で、<span class="ui">トークンを発行</span>を押します。(この deploy の、イメージの更新だけができるトークンです)</li>
+<li>CI のシークレットに、トークンを入れます。</li>
+<li>イメージを push したあと、次を呼びます。</li>
+</ol>
+<pre><code>curl -X POST https://&lt;このサービスのホスト&gt;/hooks/deploy \
+  -H "X-Launchs-Token: $LAUNCHS_TOKEN" \
+  -d '{"tag":"v2"}'</code></pre>
+<div class="table-wrap"><table><thead><tr><th>本文</th><th>意味</th></tr></thead><tbody>
+<tr><td><code>{"tag":"v2"}</code></td><td>いまのイメージの、<b>タグだけ</b>を差し替える(<code>ghcr.io/org/app:v1</code> → <code>…:v2</code>)</td></tr>
+<tr><td><code>{"imageRef":"ghcr.io/org/app:v2"}</code></td><td>イメージを、まるごと指定する</td></tr>
+<tr><td>Docker Hub の webhook の形式</td><td>そのまま使えます(<code>push_data.tag</code>)</td></tr>
+</tbody></table></div>
+<ul>
+<li>応答は <code>{"changed": true, "applied": true}</code>。<b>同じイメージなら、何も起きません</b>(<code>changed: false</code>)。CI が、何度呼んでも安全です。</li>
+<li>反映中は <code>409</code> です。少し待って、もう一度呼んでください。</li>
+<li>反映に失敗したら、元のイメージのままで、動き続けます。</li>
+<li>タグに <code>latest</code> だけを使うと、「変わった」と判断できません。<b>コミットの ID など、毎回違うタグ</b>を付けてください。</li>
+</ul>
+<h3>GitHub Actions の例</h3>
+<p>deploy の<span class="ui">自動デプロイ(webhook)</span>の<span class="ui">GitHub Actions で自動デプロイ</span>を押すと、3 つの手順で案内されます。<ol class="steps"><li><b>YAML を作る</b> — 対象のブランチ、ビルドするフォルダ、ビルドの方法(<b>Railpack</b>=Dockerfile なし、または <b>Dockerfile</b>)を選ぶと、YAML ができます。ダウンロードして、リポジトリの <code>.github/workflows/</code> に置き、push します。どのリポジトリに置いても動きます。</li><li><b>Secrets を登録</b> — GitHub の <b>Settings → Secrets and variables → Actions</b> に、<code>LAUNCHS_URL</code> と <code>LAUNCHS_TOKEN</code> を登録します(値は、画面からコピーできます)。</li><li><b>ghcr を公開</b> — 最初の実行のあと、パッケージを <b>Public</b> にします。</li></ol>トークンは、YAML ではなく、Secrets に入れます。発行済みのトークンは、<span class="ui">トークンを表示</span>で、もう一度見られます。</p>
+<div class="note warn"><b>ghcr.io を使うとき</b><p>GitHub のパッケージは、最初は<b>非公開</b>です。launchs は、非公開のイメージを取得できないので、GitHub の Packages の設定で、<b>公開(Public)</b>にしてください。</p></div>
+<pre><code>- name: launchs に反映
+  run: |
+    curl -fsS -X POST "${{ secrets.LAUNCHS_URL }}/hooks/deploy" \
+      -H "X-Launchs-Token: ${{ secrets.LAUNCHS_TOKEN }}" \
+      -d "{\"tag\":\"${{ github.sha }}\"}"</code></pre>
+<div class="pager"><a href="account.html"><small>← 前へ</small>アカウントと上限</a><a class="next" href="faq.html"><small>次へ →</small>困ったとき(FAQ)</a></div>
+<footer>このガイドは、launchs の画面の言葉に合わせて書いています。画面が変わったときは、このガイドも更新します。</footer>
+</main>
+</div>
+</body>
+</html>

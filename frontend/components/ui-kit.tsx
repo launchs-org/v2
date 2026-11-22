@@ -80,7 +80,7 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   return <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px", gap: 10 }}><AlertCircle size={15} />{message}{onRetry && <button className="btn sm" type="button" onClick={onRetry}>再試行</button>}</div>
 }
 
-export function Modal({ title, description, onClose, children, footer }: { title: string; description?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
+export function Modal({ title, description, onClose, children, footer, wide = false }: { title: string; description?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
   const dialogRef = useRef<HTMLElement>(null)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
@@ -122,7 +122,7 @@ export function Modal({ title, description, onClose, children, footer }: { title
 
   return (
     <div className="modalbg" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby={description ? "modal-description" : undefined} tabIndex={-1}>
+      <section ref={dialogRef} className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby={description ? "modal-description" : undefined} tabIndex={-1}>
         <div className="row"><h2 id="modal-title" className="h2 grow" style={{ fontSize: 18 }}>{title}</h2><button className="btn ico ghost" type="button" onClick={onClose} aria-label="閉じる"><X size={18} /></button></div>
         {description && <div id="modal-description" className="mut">{description}</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>{children}</div>

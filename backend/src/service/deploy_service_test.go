@@ -52,6 +52,12 @@ func (fakeStore *fakeDeployStore) DeleteUnstarted(_ context.Context, deployID st
 }
 
 // SavePendingConfig は、何もせず成功する。
+// SavePendingImage は、イメージの更新の保存を、何もせずに成功させる(このテストでは使わない)。
+func (fakeStore *fakeDeployStore) SavePendingImage(_ context.Context, _ string, _ string, _ string) (bool, error) {
+	// 変更なしとして返す。
+	return false, nil
+}
+
 func (fakeStore *fakeDeployStore) SavePendingConfig(_ context.Context, _ string, _ string, _ datatypes.JSON, _ *string, _ datatypes.JSON) error {
 	return nil
 }

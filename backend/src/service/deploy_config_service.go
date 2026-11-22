@@ -93,3 +93,21 @@ func (deployService *DeployService) ApplyConfig(requestContext context.Context, 
 	}
 	return apperror.Wrap(apperror.KindInternal, "起動設定の反映を開始できませんでした", startError)
 }
+
+// UpdateImage は、deploy のイメージを、まだ適用しない値として保存する。
+//
+// 反映は、起動設定の適用(ApplyConfig)と同じ流れ。現在と同じイメージなら、何も保存しない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - deployID: イメージを更新する deploy の ID。
+//   - imageRef: 新しいイメージの参照。
+//
+// 戻り値:
+//   - 保存したら true。現在と同じイメージで、何もしなかったら false。
+//   - deploy が無い、または他のユーザーのものなら not_found。反映中や削除の途中なら conflict。
+func (deployService *DeployService) UpdateImage(requestContext context.Context, userID string, deployID string, imageRef string) (bool, error) {
+	// 保存を、保存先に任せる。
+	return deployService.deployStore.SavePendingImage(requestContext, userID, deployID, imageRef)
+}

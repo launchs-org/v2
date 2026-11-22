@@ -59,6 +59,9 @@ spec:
               value: http://auth:8080/auth/.well-known/jwks.json
             - name: AUTH_REQUIRE_JWKS
               value: "true"
+            - name: API_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: API_TOKEN_SECRET}
           envFrom:
             - configMapRef:
                 name: launchs-config

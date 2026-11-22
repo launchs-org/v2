@@ -2,4 +2,5 @@ tmp/
 .env
 node_modules
 .pnpm-store
-
+# Monaco Editor の写し(frontend/scripts/copy-monaco.mjs が作る)
+frontend/public/monaco/

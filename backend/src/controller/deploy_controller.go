@@ -21,6 +21,7 @@ type DeployUseCase interface {
 	ListPods(requestContext context.Context, userID string, deployID string) ([]model.DeployPod, error)
 	UpdateConfig(requestContext context.Context, userID string, deployID string, env map[string]string, command *string, args []string) error
 	DiscardConfig(requestContext context.Context, userID string, deployID string) error
+	UpdateImage(requestContext context.Context, userID string, deployID string, imageRef string) (bool, error)
 	ApplyConfig(requestContext context.Context, userID string, deployID string) error
 	UpdateMounts(requestContext context.Context, userID string, deployID string, mounts []model.MountSpec) error
 	DiscardMounts(requestContext context.Context, userID string, deployID string) error
