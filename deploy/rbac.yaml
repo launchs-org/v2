@@ -88,7 +88,7 @@ subjects:
   - {kind: ServiceAccount, name: logcollector, namespace: launchs}
 ---
 # accessstats: Traefik の namespace の Pod のログだけを読む(Role。他の namespace は読めない)。
-# Traefik の namespace を変えたときは、この namespace も変える(config.yaml の ACCESS_STATS_TRAEFIK_NAMESPACE と同じ)。
+# Traefik の namespace を変えたときは、この namespace も変える(settings/config.yaml の ACCESS_STATS_TRAEFIK_NAMESPACE と同じ)。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
