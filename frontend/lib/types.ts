@@ -276,3 +276,24 @@ export type TagDeleteResponse = { accepted: TagDeleteItem[]; failed: TagDeleteIt
 export type ApiToken = { tokenId: string; name: string; scope: string[]; deploys: string[]; projects: string[]; expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null; createdAt: string }
 export type ApiTokenListResponse = { tokens: ApiToken[] }
 export type ApiTokenCreateResponse = ApiToken & { token: string }
+
+/** 招待の状態(有効、使用済み、期限切れ、取り消し済み)。 */
+export type InvitationStatus = "active" | "used" | "expired" | "revoked"
+
+/** 招待の 1 件(コードは含まない。コードは、発行のときだけ分かる)。 */
+export type Invitation = {
+  invitationId: string
+  note: string
+  status: InvitationStatus
+  createdBy: string
+  createdAt: string
+  expiresAt: string
+  usedBy: string | null
+  usedAt: string | null
+}
+
+/** 招待の一覧の応答。 */
+export type InvitationListResponse = { invitations: Invitation[]; nextCursor: string | null }
+
+/** 招待を発行した応答(code は、このときだけ分かる)。 */
+export type InvitationCreateResponse = { invitationId: string; code: string; expiresAt: string }
