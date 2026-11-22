@@ -1,5 +1,6 @@
 "use client"
 
+import { MarkdownView } from "@/components/markdown-view"
 import { useEffect, useRef, useState } from "react"
 import useSWR from "swr"
 import { Activity, BarChart3, Box, Code2, Database, GitBranch, Globe, HardDrive, Mail, PenTool, Server, ShieldCheck, StickyNote, Workflow, type LucideIcon } from "lucide-react"
@@ -59,6 +60,8 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
   const [phase, setPhase] = useState<Phase>("pick")
   const [category, setCategory] = useState("all")
   const [selected, setSelected] = useState<Template | null>(null)
+  // 選んだテンプレートの使い方(README の Markdown。一覧には無いので、選んだあとに、詳細から読む)。
+  const [usage, setUsage] = useState("")
   // 選んでいる版(x.y.z)。版を変えると、その版の入力欄と案内を読み込み直す。
   const [loadingVersion, setLoadingVersion] = useState(false)
   const [fields, setFields] = useState<Record<string, FieldState>>({})
@@ -111,6 +114,9 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
     setRevealed({})
     setError("")
     setPhase("form")
+    // 使い方(README)を、詳細から読む。読めなくても、作る操作は、止めない。
+    setUsage("")
+    void api.get<Template>(`/api/v1/templates/${encodeURIComponent(template.id)}`).then((detail) => setUsage(detail.readme ?? "")).catch(() => setUsage(""))
   }
 
   /**
@@ -307,6 +313,12 @@ export function TemplateWizard({ project, nav, onClose }: { project: Project; na
           {phase === "form" && selected && (
             <>
               <div className="mut">{selected.description}</div>
+              {usage && (
+                <details className="card pad" open>
+                  <summary style={{ cursor: "pointer", fontWeight: 500 }}>使い方と説明</summary>
+                  <div style={{ marginTop: 10 }}><MarkdownView source={usage} /></div>
+                </details>
+              )}
               {selected.versions.length > 1 && (
                 <div className="field">
                   <label className="lbl" htmlFor="template-version">版</label>
