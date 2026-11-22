@@ -383,3 +383,11 @@ button.alog-toggle { font-family: inherit; }
 .secretrow .nm{font:500 13px 'Roboto Mono',monospace}
 .secretrow .vl{font:12.5px 'Roboto Mono',monospace;word-break:break-all;color:var(--mut)}
 @media (max-width:640px){.secretrow{grid-template-columns:1fr}}
+
+/* 上のバーのタブと、詳細パネルのタブは、狭い画面でも隠れないよう、横にスクロールできるようにする。 */
+.topnav .tabs { flex-wrap: nowrap; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.topnav .tab { flex: none; }
+.panel .tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.panel .tab { flex: none; }
+/* 詳細パネルは、全体を縦に収め、中身(.panel-body)だけがスクロールするようにする。 */
+.panel { overflow: hidden; }
