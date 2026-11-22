@@ -64,7 +64,7 @@ webhook 用(`deploy:image`)のトークンは、deploy の「自動デプロイ�
 
 ### GitHub Actions
 
-画面の「GitHub Actions の YAML」が、イメージの build と push、webhook の呼び出しまでを含んだ workflow を作る(コピー、ファイル保存)。手で書くなら、次のとおり。
+deploy の画面の「**GitHub Actions で自動デプロイ**」が、3 ステップで案内する(① 対象のブランチ、ビルドするフォルダ、**Railpack / Dockerfile** を選んで YAML を作る → ダウンロードして push、② Secrets(`LAUNCHS_URL`、`LAUNCHS_TOKEN`)の登録、③ ghcr.io のパッケージを公開にする)。YAML は、どのリポジトリに置いても動き、イメージの名前(`ghcr.io/<持ち主>/launchs-<deploy の ID>`)は、YAML の中で作る。手で書くなら、次のとおり。
 
 ```yaml
 - name: launchs に反映

@@ -9,7 +9,7 @@ ENV NEXT_PUBLIC_LAUNCHS_API_MODE=live NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable
 
 # 開発サーバーを動かす(nginx が、/ をここ(3000)へ、/api と /auth を backend と auth へ振り分ける)
-CMD [ "sh", "-c", "pnpm install --no-frozen-lockfile && pnpm exec next dev --hostname 0.0.0.0 --port 3000" ]
+CMD [ "sh", "-c", "pnpm install --no-frozen-lockfile && node scripts/copy-monaco.mjs && pnpm exec next dev --hostname 0.0.0.0 --port 3000" ]
 
 # ビルド: Next.js を、単独で動かせる形(standalone)で、ビルドする。
 FROM node:24-slim AS Build
@@ -36,6 +36,8 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 
 COPY --from=Build /app/.next/standalone ./
 COPY --from=Build /app/.next/static ./.next/static
+# 公開するファイル(Monaco Editor など。ビルドの前に、scripts/copy-monaco.mjs が作る)
+COPY --from=Build /app/public ./public
 # 非 root で動かす(node イメージの node ユーザー)
 USER node
 EXPOSE 3000

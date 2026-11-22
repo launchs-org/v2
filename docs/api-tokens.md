@@ -48,7 +48,12 @@
 ## 5.5 トークンの再表示と、GitHub Actions の YAML
 
 - **webhook 用(`deploy:image`)のトークンだけ、あとから、もう一度見られる**(`GET /api-tokens/:id/reveal`)。本体は保存せず、保存してある内容から、同じ秘密で作り直す(HS512 は決定的)。権限の広いトークン(`read`、`write`)は、発行のときの 1 度だけ。
-- deploy の画面の「GitHub Actions の YAML」が、workflow を作る(`frontend/lib/github-actions-workflow.ts`)。いまのイメージから push 先を決め、毎回違うタグ(コミットの ID)でイメージを作って push し、webhook を呼ぶ。トークンと URL は、YAML に書かず、GitHub の Secrets(`LAUNCHS_URL`、`LAUNCHS_TOKEN`)を読む。ghcr.io のパッケージは非公開で作られるので、公開にする注意を、YAML の先頭に書く。
+- deploy の画面の「GitHub Actions で自動デプロイ」が、3 ステップの案内(`frontend/components/github-actions-guide.tsx`)と、workflow(`frontend/lib/github-actions-workflow.ts`)を出す。
+  1. **YAML を作る**: 対象のブランチ、ビルドするフォルダ、ビルドの方法(**Railpack**: `iloveitaly/github-action-railpack` / **Dockerfile**: `docker/build-push-action`)を決める → ダウンロードして、リポジトリの `.github/workflows/` に置いて push する手順。
+  2. **Secrets を登録**: `LAUNCHS_URL` と `LAUNCHS_TOKEN` を、値のコピーつきで並べる(トークンは、その場で、発行・表示)。GitHub での登録のしかた(画面と `gh secret set`)。
+  3. **ghcr を公開**: 最初の実行のあと、パッケージを Public にする手順。
+- **YAML は、どのリポジトリに置いても動く**。イメージの名前は、YAML の中で、`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/launchs-<deploy の ID(deploy- なし)>` と作る(ghcr.io は小文字だけ。deploy ごとに違う名前なので、重ならない)。タグはコミットの ID。webhook には、`imageRef` で完全な参照を渡す。トークンと URL は、YAML に書かず、Secrets から読む。
+- Railpack の action は `@master`(動く先が変わる)。YAML のコメントに、慣れたらコミットの ID に固定する、と書いてある。実際の GitHub Actions での通しは、まだ。
 
 ## 6. 画面
 
