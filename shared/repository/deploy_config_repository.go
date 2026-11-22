@@ -40,7 +40,8 @@ func (deployRepository *DeployRepository) SavePendingConfig(requestContext conte
 		}
 		// 現在の値と同じ内容なら、変更が無いので、pending は保存せず空(NULL)にする(以前の pending も消える)。
 		pendingToSave := model.Deploy{PendingEnv: env, PendingCommand: command, PendingArgs: args}
-		if sameConfig(deploy, env, command, args) {
+		// ただし、更新するイメージの pending があるときは、起動設定の pending も、一緒に適用するために残す。
+		if sameConfig(deploy, env, command, args) && deploy.PendingImageRef == nil {
 			pendingToSave = model.Deploy{}
 		}
 		// 3つの列を、nil のものも含めて、まとめて更新する(更新日時は Gorm が更新する)。
@@ -78,13 +79,13 @@ func (deployRepository *DeployRepository) DiscardPendingConfig(requestContext co
 			return lockError
 		}
 		// 3つとも無いときは、破棄するものが無い。保存のたびに env は必ず入るので、env で判定できる。
-		if len(deploy.PendingEnv) == 0 && deploy.PendingCommand == nil && len(deploy.PendingArgs) == 0 {
+		if len(deploy.PendingEnv) == 0 && deploy.PendingCommand == nil && len(deploy.PendingArgs) == 0 && deploy.PendingImageRef == nil {
 			return apperror.New(apperror.KindConflict, "破棄する起動設定の変更がありません")
 		}
-		// 3つの列を NULL に戻す(更新日時は Gorm が更新する)。
+		// 4つの列(イメージの pending を含む)を NULL に戻す(更新日時は Gorm が更新する)。
 		updateError := transaction.Model(&model.Deploy{}).
 			Where(&model.Deploy{ID: deployID}).
-			Select("pending_env", "pending_command", "pending_args").
+			Select("pending_env", "pending_command", "pending_args", "pending_image_ref").
 			Updates(&model.Deploy{}).Error
 		// データベースのエラーは、内部エラーにして返す。
 		if updateError != nil {

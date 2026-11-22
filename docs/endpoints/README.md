@@ -20,6 +20,8 @@
 - [テンプレート](templates.md) (/templates)
 - [タスク(Workflow の履歴)](tasks.md) (/projects/:projectId/tasks)
 - [タグとメトリクス](tags.md) (/deploy/:deployId/tags、/projects/:projectId/tags、…/metrics)
+- [API トークンと webhook](api_tokens.md) (/api-tokens、/hooks/deploy、/deploy/:deployId/image)
 
 ## 関連
+- [API ガイド(開発者向け)](../api/README.md) — 使う側の入口(認証、流れ、例、落とし穴)。仕様の正本は、このフォルダ
 - [Issues 一覧](../issues/README.md) — 各エンドポイントの詳細設計レビュー用Issue

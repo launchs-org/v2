@@ -34,6 +34,9 @@ type DeployConfigResponse struct {
 
 	// PendingArgs は、まだ適用していない起動引数。
 	PendingArgs json.RawMessage `json:"pending_args"`
+
+	// PendingImageRef は、まだ適用していないイメージ。更新が無ければ null。
+	PendingImageRef *string `json:"pending_image_ref"`
 }
 
 // DeployVolumesResponse は、deploy のボリュームのマウント設定のレスポンス。
@@ -129,12 +132,13 @@ func newDeployResponse(deploy model.Deploy) DeployResponse {
 		Tags:      deploy.TagList(),
 		CreatedAt: jst.Format(deploy.CreatedAt),
 		Config: DeployConfigResponse{
-			Env:            jsonOrNull(deploy.Env),
-			PendingEnv:     jsonOrNull(deploy.PendingEnv),
-			Command:        deploy.Command,
-			PendingCommand: deploy.PendingCommand,
-			Args:           jsonOrNull(deploy.Args),
-			PendingArgs:    jsonOrNull(deploy.PendingArgs),
+			Env:             jsonOrNull(deploy.Env),
+			PendingEnv:      jsonOrNull(deploy.PendingEnv),
+			Command:         deploy.Command,
+			PendingCommand:  deploy.PendingCommand,
+			Args:            jsonOrNull(deploy.Args),
+			PendingArgs:     jsonOrNull(deploy.PendingArgs),
+			PendingImageRef: deploy.PendingImageRef,
 		},
 		Volumes: DeployVolumesResponse{Mounts: mounts, PendingMounts: pendingMounts},
 		Files:   newFilesResponse(deploy),

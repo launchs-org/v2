@@ -11,7 +11,7 @@ spec:
     - web
   routes:
     - kind: Rule
-      match: Host(`www.shconn.org`) && (PathPrefix(`/api/`) || Path(`/healthz`))
+      match: Host(`www.shconn.org`) && (PathPrefix(`/api/`) || PathPrefix(`/hooks/`) || Path(`/healthz`))
       services:
         - name: backend
           port: 8080

@@ -9,6 +9,7 @@ import type { DeployDetail, ServicePort, VolumeListResponse } from "@/lib/types"
 import { ApplyBar, Badge, DiffBox, ErrorState, isBusyStatus, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 import { LogTail } from "@/components/log-tail"
 import { TagEditor } from "@/components/tag-editor"
+import { DeployWebhookCard } from "@/components/deploy-webhook-card"
 import { MetricsPanel } from "@/components/metrics-panel"
 import { ConfigMapMountsTab } from "@/components/panels/configmap-mounts-tab"
 import { PanelFrame } from "@/components/panels/panel-frame"
@@ -206,6 +207,7 @@ function OverviewTab({ data, locked, busy, hasPending, run, onTabChange }: TabPr
         <div><dt>Service</dt><dd className="mono">{data.service ? data.service.serviceId : "なし"}</dd></div>
       </dl></div>
       <TagEditor tags={data.tags ?? []} save={(next) => run(() => api.put(`${path}/tags`, { tags: next }), "タグを更新しました")} />
+      <DeployWebhookCard deployId={data.deployId} />
       {hasPending && <div className="applybar"><span className="pdot" /><div className="grow"><b>このデプロイに未反映の変更があります</b><div className="mut" style={{ fontSize: 13 }}>起動設定・マウント・Service のタブの、青い点を確認してください。</div></div></div>}
     </>
   )

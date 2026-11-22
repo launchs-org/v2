@@ -73,6 +73,9 @@ type Deploy struct {
 	// PendingEnv は、まだ適用していない環境変数。変更が無ければ nil。
 	PendingEnv datatypes.JSON `gorm:"column:pending_env"`
 
+	// PendingImageRef は、まだ適用していないイメージ。更新が無ければ nil。立てるときは、起動設定の pending(env、command、args)も一緒に作る。
+	PendingImageRef *string `gorm:"column:pending_image_ref"`
+
 	// PendingCommand は、まだ適用していない起動コマンド。
 	PendingCommand *string `gorm:"column:pending_command"`
 
