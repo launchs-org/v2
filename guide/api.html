@@ -163,7 +163,7 @@
 <li>タグに <code>latest</code> だけを使うと、「変わった」と判断できません。<b>コミットの ID など、毎回違うタグ</b>を付けてください。</li>
 </ul>
 <h3>GitHub Actions の例</h3>
-<p>deploy の<span class="ui">自動デプロイ(webhook)</span>の<span class="ui">GitHub Actions で自動デプロイ</span>を押すと、3 つの手順で案内されます。<ol class="steps"><li><b>YAML を作る</b> — 対象のブランチ、ビルドするフォルダ、ビルドの方法(<b>Railpack</b>=Dockerfile なし、または <b>Dockerfile</b>)を選ぶと、YAML ができます。ダウンロードして、リポジトリの <code>.github/workflows/</code> に置き、push します。どのリポジトリに置いても動きます。</li><li><b>Secrets を登録</b> — GitHub の <b>Settings → Secrets and variables → Actions</b> に、<code>LAUNCHS_URL</code> と <code>LAUNCHS_TOKEN</code> を登録します(値は、画面からコピーできます)。</li><li><b>ghcr を公開</b> — 最初の実行のあと、パッケージを <b>Public</b> にします。</li></ol>トークンは、YAML ではなく、Secrets に入れます。発行済みのトークンは、<span class="ui">トークンを表示</span>で、もう一度見られます。</p>
+<p>deploy の<span class="ui">自動デプロイ(webhook)</span>の<span class="ui">GitHub Actions で自動デプロイ</span>を押すと、3 つの手順で案内されます。<ol class="steps"><li><b>YAML を作る</b> — 対象のブランチ、ビルドするフォルダ、ビルドの方法(<b>Railpack</b>=Dockerfile なし、または <b>Dockerfile</b>)を選ぶと、YAML ができます。ダウンロードして、リポジトリの <code>.github/workflows/</code> に置き、push します。どのリポジトリに置いても動きます。</li><li><b>Secrets を登録</b> — GitHub の <b>Settings → Secrets and variables → Actions</b> に、<code>LAUNCHS_URL</code> と <code>LAUNCHS_TOKEN</code> を登録します(値は、画面からコピーできます)。</li><li><b>ghcr を公開</b> — 最初の実行のあと、パッケージを <b>Public</b> にします。</li></ol>作った workflow は、対象のブランチへの <b>push で自動</b>で動き、リポジトリの <b>Actions</b> タブの <span class="ui">Run workflow</span> からは<b>手動</b>でも動かせます。トークンは、YAML ではなく、Secrets に入れます。発行済みのトークンは、<span class="ui">トークンを表示</span>で、もう一度見られます。</p>
 <div class="note warn"><b>ghcr.io を使うとき</b><p>GitHub のパッケージは、最初は<b>非公開</b>です。launchs は、非公開のイメージを取得できないので、GitHub の Packages の設定で、<b>公開(Public)</b>にしてください。</p></div>
 <pre><code>- name: launchs に反映
   run: |

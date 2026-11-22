@@ -121,7 +121,7 @@ export function GithubPushGuide({ branch }: { branch: string }) {
     { title: "ファイル名を入力する", body: <>名前の欄に、次の文字を入力します。<code className="mono">/</code> を打つと、自動でフォルダになります。<div className="row" style={{ marginTop: 6 }}><span className="mono" style={{ background: "var(--panel2)", padding: "2px 8px", borderRadius: 4 }}>.github/workflows/launchs-deploy.yml</span></div></>, picture: <PictureFileName /> },
     { title: "YAML を貼る", body: <>上の「YAML」の<b>コピー</b>ボタンで、中身を全部コピーして、大きな入力欄に貼ります。(ダウンロードしたファイルを、テキストエディタで開いて、全部コピーしても同じです)</>, picture: <PictureContent /> },
     { title: <>「Commit changes」で、<span className="mono">{target}</span> に保存する</>, body: <>右上の <b>Commit changes...</b> を押します。出てきた画面で、<b>Commit directly to the <span className="mono">{target}</span> branch</b> を選び、<b>Commit changes</b> を押します。これで、YAML が、リポジトリに置かれます。<br /><span className="faint" style={{ fontSize: 12.5 }}>YAML の「対象のブランチ」と、ここで保存するブランチを、同じにします。違うブランチに保存すると、動きません。</span></>, picture: <PictureCommit /> },
-    { title: "「Actions」タブで、動いたことを確かめる", body: <>リポジトリの <b>Actions</b> タブを開きます。保存した直後に、<b>Deploy to launchs</b> が動き始めます。<b>緑のチェック</b>が付けば、成功です(数分かかります)。</>, picture: <PictureActions /> },
+    { title: "「Actions」タブで、動いたことを確かめる", body: <>リポジトリの <b>Actions</b> タブを開きます。保存した直後に、<b>Deploy to launchs</b> が動き始めます。<b>緑のチェック</b>が付けば、成功です(数分かかります)。<br /><span className="faint" style={{ fontSize: 12.5 }}>この後は、<b>{target}</b> に push するたびに、自動で動きます。<b>手動</b>で動かすときは、Actions タブの左で <b>Deploy to launchs</b> を選び、右の <b>Run workflow</b> → <b>Run workflow</b> を押します。</span></>, picture: <PictureActions /> },
   ]
   return (
     <div className="col" style={{ gap: 14 }}>

@@ -75,9 +75,11 @@ export function buildGithubActionsWorkflow(options: WorkflowOptions): string {
 #        (GitHub のパッケージは、最初は非公開。launchs は、非公開のイメージを取得できない)
 name: Deploy to launchs
 
+# 動くとき: ${branch} ブランチへの push(自動)と、Actions タブの「Run workflow」(手動)。
 on:
   push:
     branches: [${branch}]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -99,8 +101,13 @@ jobs:
           password: \${{ secrets.GITHUB_TOKEN }}
 ${build}      - name: launchs に反映
         run: |
-          curl -fsS -X POST "\${{ secrets.LAUNCHS_URL }}/hooks/deploy" \\
+          # 失敗したとき、原因が分かるよう、HTTP の番号と、返事の中身を出す(401: トークン、403: アクセスの制限、409: 反映中)。
+          status=$(curl -sS --max-time 30 -o response.txt -w "%{http_code}" -X POST "\${{ secrets.LAUNCHS_URL }}/hooks/deploy" \\
             -H "X-Launchs-Token: \${{ secrets.LAUNCHS_TOKEN }}" \\
-            -d "{\\"imageRef\\":\\"${image}:\${{ github.sha }}\\"}"
+            -d "{\\"imageRef\\":\\"${image}:\${{ github.sha }}\\"}")
+          echo "HTTP $status"
+          cat response.txt
+          echo
+          case "$status" in 2*) ;; *) exit 1 ;; esac
 `
 }
