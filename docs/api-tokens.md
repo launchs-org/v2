@@ -52,6 +52,7 @@
   1. **YAML を作る**: 対象のブランチ、ビルドするフォルダ、ビルドの方法(**Railpack**: `iloveitaly/github-action-railpack` / **Dockerfile**: `docker/build-push-action`)を決める → ダウンロードして、リポジトリの `.github/workflows/` に置いて push する手順。
   2. **Secrets を登録**: `LAUNCHS_URL` と `LAUNCHS_TOKEN` を、値のコピーつきで並べる(トークンは、その場で、発行・表示)。GitHub での登録のしかた(画面と `gh secret set`)。
   3. **ghcr を公開**: 最初の実行のあと、パッケージを Public にする手順。
+- **動くとき**: 対象のブランチへの push(自動)と、Actions タブの「Run workflow」(手動。`workflow_dispatch`)。
 - **YAML は、どのリポジトリに置いても動く**。イメージの名前は、YAML の中で、`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/launchs-<deploy の ID(deploy- なし)>` と作る(ghcr.io は小文字だけ。deploy ごとに違う名前なので、重ならない)。タグはコミットの ID。webhook には、`imageRef` で完全な参照を渡す。トークンと URL は、YAML に書かず、Secrets から読む。
 - Railpack の action は `@master`(動く先が変わる)。YAML のコメントに、慣れたらコミットの ID に固定する、と書いてある。実際の GitHub Actions での通しは、まだ。
 
