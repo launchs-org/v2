@@ -4,6 +4,7 @@ import useSWR from "swr"
 import { authenticatedFetcher } from "@/lib/api"
 import { shortDateTime } from "@/lib/format-date"
 import type { LoginEventsResponse, User } from "@/lib/types"
+import { ApiTokenSection } from "@/components/api-token-section"
 import { Badge, ErrorState, LoadingState } from "@/components/ui-kit"
 
 /** 失敗の理由を、画面に出す言葉にする。 */
@@ -29,6 +30,7 @@ export function AccountView({ user, refreshInterval, onLogout }: { user: User; r
           <div><dt>ユーザー ID</dt><dd className="mono">{user.userId}</dd></div>
         </dl>
       </div>
+      <ApiTokenSection refreshInterval={refreshInterval} />
       <div className="card tscroll"><div className="tinner">
         <div className="pad" style={{ paddingBottom: 8 }}><h2 className="h2">最近のログイン</h2></div>
         <div className="tr th" style={{ "--cols": "170px 110px 110px 1fr 1.6fr" } as React.CSSProperties}><span>日時</span><span>種類</span><span>結果</span><span>IP</span><span>ブラウザ</span></div>

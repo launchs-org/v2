@@ -50,6 +50,7 @@ export type DeployConfig = {
   pending_command: string | null
   args: string[] | null
   pending_args: string[] | null
+  pending_image_ref?: string | null
 }
 /** deploy が、共有の ConfigMap の 1 ファイルを、1 つの path にマウントする指定(docs/endpoints/deploys.md)。 */
 export type ConfigMapMount = {
@@ -270,3 +271,8 @@ export type TagListResponse = { tags: { tag: string; deployCount: number; volume
 /** タグの一斉削除の結果。 */
 export type TagDeleteItem = { kind: "deploy" | "volume" | "service" | "ingress"; id: string; message: string }
 export type TagDeleteResponse = { accepted: TagDeleteItem[]; failed: TagDeleteItem[] }
+
+/** API トークン(機械が API を呼ぶための JWT)の情報。トークンの本体は、発行したときだけ返る。 */
+export type ApiToken = { tokenId: string; name: string; scope: string[]; deploys: string[]; projects: string[]; expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null; createdAt: string }
+export type ApiTokenListResponse = { tokens: ApiToken[] }
+export type ApiTokenCreateResponse = ApiToken & { token: string }
