@@ -94,7 +94,7 @@ export function DeployWebhookCard({ deployId, imageRef }: { deployId: string; im
         </div>
       )}
       {message && <div className="err" role="alert">{message}</div>}
-      {issued && <TokenRevealModal token={issued} example={example(issued)} onClose={() => setIssued(null)} />}
+      {issued && <TokenRevealModal token={issued} example={example(issued)} reusable onClose={() => setIssued(null)} />}
       {showWorkflow && <WorkflowModal imageRef={imageRef} onClose={() => setShowWorkflow(false)} />}
       {revokingId && (
         <Modal title="この webhook のトークンを失効させますか?" description="このトークンは、すぐに使えなくなります。呼び出し側(CI など)の設定も、新しいトークンに直す必要があります。" onClose={() => setRevokingId(null)}

@@ -32,11 +32,18 @@ export function CopyButton({ text, label = "コピー" }: { text: string; label?
   return <button className="btn sm" type="button" onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800) }) }}>{copied ? "コピーしました" : label}</button>
 }
 
-/** 発行したトークンを、1度だけ見せる画面(あとからは、見られない)。 */
-export function TokenRevealModal({ token, example, onClose }: { token: string; example?: string; onClose: () => void }) {
+/**
+ * トークンを見せる画面。権限の広いトークン(既定)は、発行のときの 1 度しか見られない。
+ * 再表示できるもの(deploy 用)は、reusable を渡して、そう伝える。
+ *
+ * @param props.token トークンの本体。
+ * @param props.example 使い方の例。
+ * @param props.reusable あとから、もう一度見られるときは true(deploy 用のトークン)。
+ */
+export function TokenRevealModal({ token, example, reusable = false, onClose }: { token: string; example?: string; reusable?: boolean; onClose: () => void }) {
   return (
-    <Modal title="トークンを発行しました" description="この画面を閉じると、トークンは二度と表示できません。いま、安全な場所に保存してください。" onClose={onClose}
-      footer={<button className="btn primary" type="button" onClick={onClose}>保存したので閉じる</button>}>
+    <Modal title={reusable ? "トークン" : "トークンを発行しました"} description={reusable ? "このトークンは、deploy の「自動デプロイ」の「トークンを表示」で、あとから、もう一度見られます。漏れたときは、失効してください。" : "この画面を閉じると、トークンは二度と表示できません。いま、安全な場所に保存してください。"} onClose={onClose}
+      footer={<button className="btn primary" type="button" onClick={onClose}>{reusable ? "閉じる" : "保存したので閉じる"}</button>}>
       <div className="col" style={{ gap: 14 }}>
         <div className="col" style={{ gap: 6 }}>
           <div className="row"><b style={{ fontSize: 13 }}>トークン</b><span className="grow" /><CopyButton text={token} /></div>
