@@ -363,3 +363,11 @@ button.alog-toggle { font-family: inherit; }
 .pnew{align-items:center;justify-content:center;gap:8px;min-height:176px;border-style:dashed;background:transparent;color:var(--mut);cursor:pointer}
 .pnew:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,#fff)}
 .pplus{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;border:1.5px solid currentColor;font-size:22px;line-height:1}
+
+/* API トークンの画面: コードの枠、権限の選択カード、期限の選択 */
+.codebox{padding:12px 14px;background:#F8F9FA;border:1px solid var(--line);border-radius:8px;font:12.5px/1.6 'Roboto Mono',monospace;word-break:break-all;white-space:pre-wrap;user-select:all}
+.scopecard{display:flex;flex-direction:column;gap:2px;width:100%;padding:12px 14px;text-align:left;background:#fff;border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.scopecard:hover{background:var(--panel2)}
+.scopecard.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,#fff);box-shadow:0 0 0 1px var(--accent)}
+.scopecard b{font-weight:500;color:var(--text)}
+.scopecard span{font-size:12.5px;color:var(--mut)}

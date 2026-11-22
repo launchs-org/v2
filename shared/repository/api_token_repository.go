@@ -132,3 +132,29 @@ func (repository *APITokenRepository) IsActive(requestContext context.Context, t
 	}
 	return true, nil
 }
+
+// FindByUser は、利用者の API トークンを 1 つ返す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - tokenID: トークンの ID。
+//
+// 戻り値:
+//   - トークンの行。無い、または他のユーザーのものなら not_found。それ以外のデータベースのエラーは internal_error。
+func (repository *APITokenRepository) FindByUser(requestContext context.Context, userID string, tokenID string) (model.APIToken, error) {
+	// 条件が空のときは拒否する。
+	if hasEmpty(userID, tokenID) {
+		return model.APIToken{}, newEmptyConditionError()
+	}
+	// 持ち主の条件つきで、1 行を読む。
+	var token model.APIToken
+	findResult := repository.database.WithContext(requestContext).Where("id = ? AND user_id = ?", tokenID, userID).Limit(1).Find(&token)
+	if findResult.Error != nil {
+		return model.APIToken{}, apperror.Wrap(apperror.KindInternal, "API トークンを取得できませんでした", findResult.Error)
+	}
+	if findResult.RowsAffected == 0 {
+		return model.APIToken{}, apperror.New(apperror.KindNotFound, "API トークンが見つかりません")
+	}
+	return token, nil
+}

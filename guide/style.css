@@ -21,6 +21,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.85 v
 a { color: var(--accent); text-underline-offset: 3px; }
 a:hover { text-decoration-thickness: 2px; }
 code { font-family: var(--mono); font-size: .9em; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: .1em .45em; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.65; }
+pre code { background: none; border: 0; padding: 0; }
 kbd, .ui { font-weight: 600; background: var(--accent-soft); color: var(--text); border-radius: 6px; padding: .05em .5em; white-space: nowrap; }
 
 /* 全体の並び: 左に目次、右に本文 */

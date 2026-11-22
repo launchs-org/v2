@@ -28,6 +28,13 @@
 - Delete: /api-tokens/:tokenId
 - Response (200): `{}`。無い、または他のユーザーのものは 404。すでに失効していても 200。失効は、すぐに効く。
 
+### deploy 用トークンの再表示
+- Get: /api-tokens/:tokenId/reveal(ログインしたユーザーだけ。API トークンでは 403)
+- Response (200): `{"token": "lkt_…"}`(`Cache-Control: no-store`)
+- Note: トークンの本体は保存していない。保存してある発行の日時、持ち主、scope、対象、期限から、**同じ秘密で、同じトークンを作り直す**(HS512 は、同じ入力から、同じ署名ができる)。
+- Note: 対象は、**`deploy:image` だけのトークン**(webhook 用)。`read`、`write` のように権限の広いものは、発行のときの 1 度だけで、409。失効、期限切れも 409。無い、他人のものは 404。
+- Note: `API_TOKEN_SECRET` を替えると、作り直したトークンも、使えなくなる(全てのトークンが失効する)。
+
 ### API トークンで API を呼ぶ
 - Header: `Authorization: Bearer lkt_…`
 - 持ち主のユーザーとして扱う(管理者の権限は無い)。署名・期限・失効が正しくなければ 401。scope と対象(`deploys`、`projects`)の範囲外の操作は 403。

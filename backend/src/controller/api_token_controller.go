@@ -19,6 +19,7 @@ type APITokenUseCase interface {
 	Create(requestContext context.Context, userID string, name string, scope []string, deploys []string, projects []string, expiresAt *time.Time) (model.APIToken, string, error)
 	List(requestContext context.Context, userID string) ([]model.APIToken, error)
 	Revoke(requestContext context.Context, userID string, tokenID string) error
+	Reveal(requestContext context.Context, userID string, tokenID string) (string, error)
 }
 
 // APITokenController は、API トークンの発行・一覧・失効の HTTP のハンドラー。
@@ -205,4 +206,28 @@ func stringList(raw []byte) []string {
 		_ = json.Unmarshal(raw, &values)
 	}
 	return values
+}
+
+// Reveal は、deploy 用のトークンの本体を、もう一度返す(GET /api-tokens/:tokenId/reveal)。
+//
+// 権限の広いトークン(read、write)は、発行のときの 1 度だけで、ここでは返さない(409)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - {"token"}。無い・他人のものなら not_found、API トークンでの呼び出しなら forbidden。
+func (apiTokenController *APITokenController) Reveal(echoContext *echo.Context) error {
+	// ログインしたユーザーだけが、見られる。
+	userID, userError := requireLoginUser(echoContext)
+	if userError != nil {
+		return userError
+	}
+	tokenText, revealError := apiTokenController.apiTokenUseCase.Reveal(echoContext.Request().Context(), userID, echoContext.Param("tokenId"))
+	if revealError != nil {
+		return revealError
+	}
+	// 本体を、キャッシュさせない。
+	echoContext.Response().Header().Set("Cache-Control", "no-store")
+	return echoContext.JSON(http.StatusOK, map[string]string{"token": tokenText})
 }

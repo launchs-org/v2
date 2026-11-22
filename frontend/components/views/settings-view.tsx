@@ -5,13 +5,14 @@ import { api } from "@/lib/api"
 import type { ProjectViewProps } from "@/lib/nav"
 import { validateProjectName } from "@/lib/project-name"
 import { Modal, ToastNotice } from "@/components/ui-kit"
+import { ApiTokenSection } from "@/components/api-token-section"
 
 /**
  * プロジェクトの設定の画面(名前の変更と、削除)。
  *
  * @param props 共通の引数と、変更したときに呼ぶ onChanged(プロジェクトの一覧を取り直す)。
  */
-export function SettingsView({ project, nav, onChanged }: ProjectViewProps & { onChanged: () => void }) {
+export function SettingsView({ project, refreshInterval, nav, onChanged }: ProjectViewProps & { onChanged: () => void }) {
   const [name, setName] = useState(project.name)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -60,6 +61,7 @@ export function SettingsView({ project, nav, onChanged }: ProjectViewProps & { o
         <div><button className="btn primary" type="button" onClick={() => void rename()} disabled={busy || !editable || name.trim() === project.name || problem !== null}>変更を保存</button></div>
         <dl className="kv" style={{ margin: 0 }}><div><dt>ID</dt><dd className="mono">{project.projectId}</dd></div></dl>
       </div>
+      <ApiTokenSection refreshInterval={refreshInterval} projectId={project.projectId} />
       <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 12, borderColor: "#FAD2CF" }}>
         <h2 className="h2" style={{ color: "var(--bad)" }}>プロジェクトの削除</h2>
         <div className="mut">デプロイ、Ingress、ボリューム(データごと)も、全て削除されます。元に戻せません。</div>

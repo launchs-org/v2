@@ -19,6 +19,7 @@ type APITokenStore interface {
 	Create(requestContext context.Context, token *model.APIToken) error
 	ListByUser(requestContext context.Context, userID string) ([]model.APIToken, error)
 	Revoke(requestContext context.Context, userID string, tokenID string) error
+	FindByUser(requestContext context.Context, userID string, tokenID string) (model.APIToken, error)
 }
 
 // APITokenService は、API トークンの発行・一覧・失効を行う。
@@ -78,11 +79,13 @@ func (service *APITokenService) Create(requestContext context.Context, userID st
 	}
 	// 署名して、保存する行を作る。
 	tokenID := model.APITokenIDPrefix + uuid.NewString()
-	tokenText, issueError := service.signer.Issue(tokenID, userID, scope, deploys, projects, expiresAt)
+	// 発行の日時は、秒に丸めて、保存する行と、トークンの iat で、同じ値にする(あとで、同じトークンを作り直せるように)。
+	issuedAt := time.Now().Truncate(time.Second)
+	tokenText, issueError := service.signer.Issue(tokenID, userID, scope, deploys, projects, issuedAt, expiresAt)
 	if issueError != nil {
 		return model.APIToken{}, "", apperror.Wrap(apperror.KindInternal, "API トークンを発行できませんでした", issueError)
 	}
-	token := model.APIToken{ID: tokenID, UserID: userID, Name: name, Scope: mustJSON(scope), Deploys: mustJSON(deploys), Projects: mustJSON(projects), ExpiresAt: expiresAt}
+	token := model.APIToken{ID: tokenID, UserID: userID, Name: name, Scope: mustJSON(scope), Deploys: mustJSON(deploys), Projects: mustJSON(projects), ExpiresAt: expiresAt, CreatedAt: issuedAt}
 	if createError := service.store.Create(requestContext, &token); createError != nil {
 		return model.APIToken{}, "", createError
 	}
@@ -130,4 +133,49 @@ func mustJSON(values []string) []byte {
 	}
 	encoded, _ := json.Marshal(values)
 	return encoded
+}
+
+// Reveal は、deploy 用(deploy:image だけ)の API トークンの本体を、もう一度返す。
+//
+// トークンの本体は保存していない。保存してある発行の日時、持ち主、scope、対象、期限から、同じ秘密で、同じトークンを作り直す
+// (HS512 は、同じ入力から、同じ署名ができる)。権限の広いトークン(read、write)は、作り直さない(発行のときの 1 度だけ)。
+// 失効したもの、期限が切れたものは、返さない。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: 持ち主のユーザー ID。
+//   - tokenID: トークンの ID。
+//
+// 戻り値:
+//   - トークンの文字列。
+//   - 無い・他人のものなら not_found。deploy 用でない、失効、期限切れは conflict。機能が無効なら service_unavailable。
+func (service *APITokenService) Reveal(requestContext context.Context, userID string, tokenID string) (string, error) {
+	// 署名の秘密が無いときは、機能が無効。
+	if service.signer == nil {
+		return "", apperror.New(apperror.KindUnavailable, "API トークンは、この環境では使えません(API_TOKEN_SECRET が未設定です)")
+	}
+	// 持ち主のトークンを読む。
+	token, findError := service.store.FindByUser(requestContext, userID, tokenID)
+	if findError != nil {
+		return "", findError
+	}
+	// 失効と期限切れは、返さない。
+	if token.RevokedAt != nil || (token.ExpiresAt != nil && !token.ExpiresAt.After(time.Now())) {
+		return "", apperror.New(apperror.KindConflict, "このトークンは、失効または期限切れです")
+	}
+	// deploy 用(deploy:image だけ)以外は、作り直さない。
+	var scope []string
+	_ = json.Unmarshal(token.Scope, &scope)
+	if len(scope) != 1 || scope[0] != apitoken.ScopeDeployImage {
+		return "", apperror.New(apperror.KindConflict, "このトークンは、発行のときの 1 度しか見られません")
+	}
+	var deploys, projects []string
+	_ = json.Unmarshal(token.Deploys, &deploys)
+	_ = json.Unmarshal(token.Projects, &projects)
+	// 同じ内容で、作り直す。
+	tokenText, issueError := service.signer.Issue(token.ID, token.UserID, scope, deploys, projects, token.CreatedAt.Truncate(time.Second), token.ExpiresAt)
+	if issueError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "API トークンを作り直せませんでした", issueError)
+	}
+	return tokenText, nil
 }

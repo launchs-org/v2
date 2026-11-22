@@ -4,10 +4,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
-// testSecret は、テスト用の署名の秘密(32 バイト以上)。
-const testSecret = "0123456789abcdef0123456789abcdef"
+// testSecret は、テスト用の署名の秘密(64 バイト以上)。
+const testSecret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // newTestSigner は、テスト用の Signer を作る。
 //
@@ -38,7 +40,7 @@ func TestNewSignerRejectsShortSecret(testingT *testing.T) {
 func TestIssueAndParse(testingT *testing.T) {
 	// 発行する。
 	signer := newTestSigner(testingT, nil)
-	tokenText, issueError := signer.Issue("apitoken-1", "user-1", []string{ScopeDeployImage}, []string{"deploy-1"}, nil, nil)
+	tokenText, issueError := signer.Issue("apitoken-1", "user-1", []string{ScopeDeployImage}, []string{"deploy-1"}, nil, time.Now(), nil)
 	if issueError != nil {
 		testingT.Fatalf("発行できません: %v", issueError)
 	}
@@ -58,11 +60,16 @@ func TestParseRejects(testingT *testing.T) {
 	// 過去の期限のトークンを、いまの時計で検証する。
 	signer := newTestSigner(testingT, nil)
 	past := time.Now().Add(-time.Hour)
-	expired, _ := signer.Issue("apitoken-1", "user-1", []string{ScopeRead}, nil, nil, &past)
-	valid, _ := signer.Issue("apitoken-2", "user-1", []string{ScopeRead}, nil, nil, nil)
-	otherSigner, _ := NewSigner([]byte("ffffffffffffffffffffffffffffffff"), nil)
-	otherToken, _ := otherSigner.Issue("apitoken-3", "user-1", []string{ScopeRead}, nil, nil, nil)
-	cases := map[string]string{"期限切れ": expired, "改ざん": valid[:len(valid)-2] + "xx", "別の秘密": otherToken, "接頭辞なし": strings.TrimPrefix(valid, Prefix)}
+	expired, _ := signer.Issue("apitoken-1", "user-1", []string{ScopeRead}, nil, nil, time.Now(), &past)
+	valid, _ := signer.Issue("apitoken-2", "user-1", []string{ScopeRead}, nil, nil, time.Now(), nil)
+	otherSigner, _ := NewSigner([]byte("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"), nil)
+	otherToken, _ := otherSigner.Issue("apitoken-3", "user-1", []string{ScopeRead}, nil, nil, time.Now(), nil)
+	// 同じ秘密で、HS256 や alg=none で作ったトークンも、拒否する(アルゴリズムの差し替え)。
+	weakClaims := Claims{Type: TokenType, Scope: []string{ScopeWrite}}
+	weakClaims.Subject, weakClaims.ID, weakClaims.Issuer = "user-1", "apitoken-4", Issuer
+	hs256Token, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, weakClaims).SignedString([]byte(testSecret))
+	noneToken, _ := jwt.NewWithClaims(jwt.SigningMethodNone, weakClaims).SignedString(jwt.UnsafeAllowNoneSignatureType)
+	cases := map[string]string{"HS256 への差し替え": Prefix + hs256Token, "alg=none": Prefix + noneToken, "期限切れ": expired, "改ざん": valid[:len(valid)-2] + "xx", "別の秘密": otherToken, "接頭辞なし": strings.TrimPrefix(valid, Prefix)}
 	// どれも ErrInvalidToken になるはず。
 	for name, tokenText := range cases {
 		if _, parseError := signer.Parse(tokenText); parseError != ErrInvalidToken {
@@ -102,5 +109,18 @@ func TestAuthorize(testingT *testing.T) {
 		if (authorizeError == nil) != testCase.allowed {
 			testingT.Errorf("%s: 結果が違う(err=%v)", testCase.name, authorizeError)
 		}
+	}
+}
+
+// TestIssueIsReproducible は、同じ内容と発行の日時で作り直すと、同じトークンになることを確認する。
+func TestIssueIsReproducible(testingT *testing.T) {
+	// 同じ入力で 2 回作る。
+	signer := newTestSigner(testingT, nil)
+	issuedAt := time.Now().Truncate(time.Second)
+	first, _ := signer.Issue("apitoken-9", "user-1", []string{ScopeDeployImage}, []string{"deploy-1"}, nil, issuedAt, nil)
+	second, _ := signer.Issue("apitoken-9", "user-1", []string{ScopeDeployImage}, []string{"deploy-1"}, nil, issuedAt, nil)
+	// 文字列が、一致するはず。
+	if first != second {
+		testingT.Fatal("同じ入力から、同じトークンができない")
 	}
 }

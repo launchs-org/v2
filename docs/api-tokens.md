@@ -13,8 +13,8 @@
 | 項目 | 決定 |
 |---|---|
 | 置き場所 | **backend の中**(別のコンテナにはしない)。発行も検証も backend |
-| 形式 | **JWT(HS256)**。接頭辞 `lkt_` を付けて渡す(ログインの JWT と見分ける) |
-| 署名の秘密 | 環境変数 `API_TOKEN_SECRET`(32 文字以上)。**空なら、機能は無効**(発行も使用も不可)。変えると、発行済みのトークンは全て使えなくなる |
+| 形式 | **JWT(HS512)**。検証では HS512 以外(HS256、alg=none)を拒否する。接頭辞 `lkt_` を付けて渡す(ログインの JWT と見分ける) |
+| 署名の秘密 | 環境変数 `API_TOKEN_SECRET`(64 文字以上)。**空なら、機能は無効**(発行も使用も不可)。変えると、発行済みのトークンは全て使えなくなる |
 | 許す操作 | claim `scope`: `read`(GET だけ)、`write`(全て)、`deploy:image`(イメージの更新だけ) |
 | 対象の絞り込み | claim `deploys`、`projects`。どちらかを指定すると、パスの deploy かプロジェクトが範囲内のものだけを許す(対象を持たない操作 `POST /deploy` などは、拒否) |
 | DB で管理するもの | **有効・無効だけ**(`api_tokens`。jti、持ち主、名前、期限、失効の日時、最終使用)。scope などの写しは、一覧の表示用 |
@@ -45,6 +45,11 @@
 - 変更があれば、イメージを更新して、反映を始める(応答 `changed`、`applied`)。同じイメージなら何もしない(CI が、同じ内容で、何度呼んでも安全)。
 - 反映中などは 409(呼び出し側で、あとから、やり直す)。
 
+## 5.5 トークンの再表示と、GitHub Actions の YAML
+
+- **webhook 用(`deploy:image`)のトークンだけ、あとから、もう一度見られる**(`GET /api-tokens/:id/reveal`)。本体は保存せず、保存してある内容から、同じ秘密で作り直す(HS512 は決定的)。権限の広いトークン(`read`、`write`)は、発行のときの 1 度だけ。
+- deploy の画面の「GitHub Actions の YAML」が、workflow を作る(`frontend/lib/github-actions-workflow.ts`)。いまのイメージから push 先を決め、毎回違うタグ(コミットの ID)でイメージを作って push し、webhook を呼ぶ。トークンと URL は、YAML に書かず、GitHub の Secrets(`LAUNCHS_URL`、`LAUNCHS_TOKEN`)を読む。ghcr.io のパッケージは非公開で作られるので、公開にする注意を、YAML の先頭に書く。
+
 ## 6. 画面
 
 - アカウント設定の「API トークン」: 発行(名前、読み取り/全て、期間)、一覧、失効。トークンの本体は、発行したときに 1 度だけ見せる。
@@ -52,7 +57,7 @@
 
 ## 7. 設定
 
-- `API_TOKEN_SECRET`: `.env.example`、`docker-compose.yaml`、本番は Secret `launchs-secret`(`deploy/secret.example.yaml`)。生成は `openssl rand -hex 32`。
+- `API_TOKEN_SECRET`: `.env.example`、`docker-compose.yaml`、本番は Secret `launchs-secret`(`deploy/secret.example.yaml`)。生成は `openssl rand -hex 64`。
 
 ## 8. これから
 

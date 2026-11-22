@@ -47,6 +47,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/api-tokens", apiTokenController.Create)
 	apiGroup.GET("/api-tokens", apiTokenController.List)
 	apiGroup.DELETE("/api-tokens/:tokenId", apiTokenController.Revoke)
+	apiGroup.GET("/api-tokens/:tokenId/reveal", apiTokenController.Reveal)
 
 	// データベースを使うプロジェクトのリポジトリを作る。
 	projectRepository := repository.NewProjectRepository(dependencies.Database)

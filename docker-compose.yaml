@@ -17,7 +17,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
       # access token を検証する公開鍵(auth の JWKS)。auth を起動せずに backend だけを試すときは、これを消して、DEV_USER_ID=user-dev にする。
       AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
-      # API トークン(機械向けの JWT)の署名の秘密(32 文字以上)。空なら、API トークンの機能は無効。
+      # API トークン(機械向けの JWT)の署名の秘密(64 文字以上)。空なら、API トークンの機能は無効。
       API_TOKEN_SECRET: ${API_TOKEN_SECRET:-}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default

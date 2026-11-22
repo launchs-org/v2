@@ -1,6 +1,7 @@
 // Package apitoken は、機械が API を呼ぶための JWT(API トークン)の発行・検証・権限の判定を行う。
 //
-// 署名は HS256(backend だけが、発行も検証も行うので、共通の秘密で足りる)。
+// 署名は HS512(backend だけが、発行も検証も行うので、共通の秘密で足りる)。秘密は 64 バイト以上(HS512 の鍵の長さ)にし、
+// 検証では HS512 だけを受け付ける(アルゴリズムの差し替え、alg=none を拒否する)。
 // トークンは、接頭辞 "lkt_" を付けて渡す(利用者のログインの JWT と、見分けるため)。
 // 許す操作(scope)と対象(deploys、projects)は claim に入れる。有効・無効(失効)だけを、DB で管理する。
 package apitoken
@@ -34,8 +35,8 @@ const (
 	// ScopeDeployImage は、deploy のイメージの更新(PUT /deploy/:deployId/image と webhook)だけを許す scope。deploy 用のトークン。
 	ScopeDeployImage = "deploy:image"
 
-	// MinimumSecretLength は、署名の秘密の最低の長さ(バイト)。
-	MinimumSecretLength = 32
+	// MinimumSecretLength は、署名の秘密の最低の長さ(バイト)。HS512 のハッシュの長さ(64 バイト)に合わせる。
+	MinimumSecretLength = 64
 
 	// imageRoutePath は、イメージの更新のルート(Echo に登録したパターン)。
 	imageRoutePath = "/api/v1/deploy/:deployId/image"
@@ -85,7 +86,7 @@ type Signer struct {
 // NewSigner は、Signer を作る。
 //
 // 引数:
-//   - secret: 署名の秘密。32 バイト以上。
+//   - secret: 署名の秘密。64 バイト以上。
 //   - now: 現在時刻を返す関数(nil なら time.Now)。
 //
 // 戻り値:
@@ -110,19 +111,20 @@ func NewSigner(secret []byte, now func() time.Time) (*Signer, error) {
 //   - scope: 許す操作。
 //   - deploys: 操作できる deploy の ID(空なら絞らない)。
 //   - projects: 操作できるプロジェクトの ID(空なら絞らない)。
+//   - issuedAt: 発行の日時(iat)。同じ値で作り直すと、同じトークンの文字列になる(HS512 は、同じ入力から、同じ署名ができる)。
 //   - expiresAt: 期限。nil なら無期限。
 //
 // 戻り値:
 //   - 接頭辞 "lkt_" を付けた、トークンの文字列。
-func (signer *Signer) Issue(tokenID string, userID string, scope []string, deploys []string, projects []string, expiresAt *time.Time) (string, error) {
+func (signer *Signer) Issue(tokenID string, userID string, scope []string, deploys []string, projects []string, issuedAt time.Time, expiresAt *time.Time) (string, error) {
 	// 登録済みの claim を作る(期限が無いときは exp を入れない)。
-	registered := jwt.RegisteredClaims{Issuer: Issuer, Subject: userID, ID: tokenID, IssuedAt: jwt.NewNumericDate(signer.now())}
+	registered := jwt.RegisteredClaims{Issuer: Issuer, Subject: userID, ID: tokenID, IssuedAt: jwt.NewNumericDate(issuedAt)}
 	if expiresAt != nil {
 		registered.ExpiresAt = jwt.NewNumericDate(*expiresAt)
 	}
 	claims := Claims{RegisteredClaims: registered, Type: TokenType, Scope: scope, Deploys: deploys, Projects: projects}
 	// 署名する。
-	signed, signError := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(signer.secret)
+	signed, signError := jwt.NewWithClaims(jwt.SigningMethodHS512, claims).SignedString(signer.secret)
 	if signError != nil {
 		return "", fmt.Errorf("API トークンに署名できませんでした: %w", signError)
 	}
@@ -131,7 +133,7 @@ func (signer *Signer) Issue(tokenID string, userID string, scope []string, deplo
 
 // Parse は、API トークンを検証して、claims を返す。
 //
-// 確かめること: 接頭辞、アルゴリズムが HS256、署名、iss、期限(あるときだけ)、type が api、sub と jti がある。
+// 確かめること: 接頭辞、アルゴリズムが HS512、署名、iss、期限(あるときだけ)、type が api、sub と jti がある。
 //
 // 引数:
 //   - tokenText: 接頭辞つきのトークンの文字列。
@@ -147,7 +149,7 @@ func (signer *Signer) Parse(tokenText string) (*Claims, error) {
 	// 署名などを確かめる。
 	claims := &Claims{}
 	parsed, parseError := jwt.ParseWithClaims(rawToken, claims, func(*jwt.Token) (any, error) { return signer.secret, nil },
-		jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(Issuer), jwt.WithTimeFunc(signer.now))
+		jwt.WithValidMethods([]string{"HS512"}), jwt.WithIssuer(Issuer), jwt.WithTimeFunc(signer.now))
 	if parseError != nil || !parsed.Valid {
 		return nil, ErrInvalidToken
 	}
