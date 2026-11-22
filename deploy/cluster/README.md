@@ -71,3 +71,15 @@ curl -i -X POST https://www.launchs.org/hooks/deploy -d "{}"   # 401(backend ま
 
 ## 6. 既存の古いものの扱い
 旧 launchs(namespace `launchs-org`)は、DB の PVC が `local-path`(削除するとデータが消える)なので、**IngressRoute だけ**を外し、あとは残した。残したものを消すときは、先にデータを移す。
+
+## 7. 運用の入口
+- 更新、マイグレーション、バックアップ、戻し方: [../OPERATIONS.md](../OPERATIONS.md)
+- つまずいたとき(症状から引く): [../FAQ.md](../FAQ.md)
+- 日々の確認:
+  ```bash
+  kubectl -n launchs get pods
+  kubectl top nodes
+  kubectl -n traefik logs deploy/traefik --tail 20
+  helm list -n traefik
+  ```
+- 設定を変えたら: `kubectl apply -k settings/` のあと、該当の Deployment を再起動する。
