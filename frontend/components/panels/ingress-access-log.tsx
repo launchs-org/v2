@@ -98,8 +98,8 @@ export function IngressAccessLog({ basePath, enabled, locked, onToggle }: { base
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [auto, setAuto] = useState(true)
-  // 絞り込みの欄を開いているか(閉じても、絞り込みの条件は効いたまま)。
-  const [filtersOpen, setFiltersOpen] = useState(true)
+  // 絞り込みの欄を開いているか(最初は閉じておく。閉じても、絞り込みの条件は効いたまま)。
+  const [filtersOpen, setFiltersOpen] = useState(false)
   // 入力中の文字は、確定(Enter か、フォーカスが外れる)してから、絞り込みに使う。
   const [applied, setApplied] = useState({ ip: "", q: "" })
   const [older, setOlder] = useState<AccessLogEntry[]>([])
