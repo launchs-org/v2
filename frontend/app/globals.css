@@ -384,6 +384,10 @@ button.alog-toggle { font-family: inherit; }
 .secretrow .vl{font:12.5px 'Roboto Mono',monospace;word-break:break-all;color:var(--mut)}
 @media (max-width:640px){.secretrow{grid-template-columns:1fr}}
 
+/* 詳細パネルの中身は、縮めずに、はみ出した分を、パネル本体(.panel-body)のスクロールで見せる(縮むと、カードが潰れて、スクロールが起きない)。ログの枠だけは、残りの高さに合わせて伸び縮みさせる。 */
+.panel-body > * { flex-shrink: 0; }
+.panel-body > .card:has(.logtail) { flex-shrink: 1; }
+
 /* 上のバーのタブと、詳細パネルのタブは、狭い画面でも隠れないよう、横にスクロールできるようにする。 */
 .topnav .tabs { flex-wrap: nowrap; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .topnav .tab { flex: none; }
