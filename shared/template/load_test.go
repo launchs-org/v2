@@ -16,14 +16,14 @@ func TestLoadBundled(testingT *testing.T) {
 	if loadError != nil {
 		testingT.Fatalf("同梱のテンプレートが、読み込めるはず: %v", loadError)
 	}
-	// 同梱の 16 個が、id の順に並ぶ。
+	// 同梱の 17 個が、id の順に並ぶ。
 	listed := registry.List()
 	ids := make([]string, 0, len(listed))
 	for _, bundled := range listed {
 		ids = append(ids, bundled.Metadata.ID)
 	}
-	if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
-		testingT.Fatalf("16 個が、id の順にあるはず: %v", ids)
+	if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,hello-world,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
+		testingT.Fatalf("17 個が、id の順にあるはず: %v", ids)
 	}
 	// 同梱のテンプレートごとに、既定の入力で、値が決まり、展開できる(service の DNS 名は、仮の値)。
 	for _, bundled := range listed {
