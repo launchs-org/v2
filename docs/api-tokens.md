@@ -63,7 +63,7 @@
 
 ## 7. 設定
 
-- `API_TOKEN_SECRET`: `.env.example`、`docker-compose.yaml`、本番は Secret `launchs-secret`(`deploy/secret.example.yaml`)。生成は `openssl rand -hex 64`。
+- `API_TOKEN_SECRET`: `.env.example`、`docker-compose.yaml`、本番は Secret `launchs-secret`(`deploy/settings/secret.example.yaml`)。生成は `openssl rand -hex 64`。
 
 ## 8. これから
 

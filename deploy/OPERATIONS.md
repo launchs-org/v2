@@ -1,7 +1,7 @@
 # 本番の運用手順(リリース・マイグレーション・バックアップ)
 
 namespace `launchs` で動かしている launchs を、更新したり、戻したり、バックアップしたりする手順です。最初の導入は [README.md](README.md) を見てください。
-コマンドは、`deploy/` に、`secret.yaml` を置いた状態(`kubectl apply -k .` ができる場所)で、実行します。
+コマンドは、`deploy/` で、実行します。**環境ごとの設定(`settings/`。ConfigMap と Secret)は、本体と別に適用します**(`kubectl apply -k settings/`。`settings/secret.yaml` を置いた状態で)。本体の `kubectl apply -k .` は、設定を変えません。
 
 ## 1. 全体の流れ
 ```
@@ -169,7 +169,7 @@ kubectl -n launchs scale deploy/frontend --replicas=2
 kubectl -n launchs rollout restart deploy/backend
 ```
 - **招待コードの発行**: 管理者でログインして、`POST /auth/admin/invitations` を呼びます([docs/endpoints/auth_admin.md](../docs/endpoints/auth_admin.md))。
-- **サインアップの公開範囲**: `config.yaml` の `AUTH_SIGNUP_MODE`(`open` か `invite`)を変えて、`kubectl apply -k .` し、`rollout restart deploy/auth` します。
+- **サインアップの公開範囲**: `settings/config.yaml` の `AUTH_SIGNUP_MODE`(`open` か `invite`)を変えて、`kubectl apply -k settings/` し、`rollout restart deploy/auth` します(設定は、本体とは別に適用します)。
 
 ## 8. よくある問題
 | 症状 | 原因と対処 |
