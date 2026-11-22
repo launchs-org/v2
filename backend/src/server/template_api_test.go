@@ -12,11 +12,11 @@ func TestTemplateAPI(testingT *testing.T) {
 	// 同梱のテンプレートで動くクライアント(データベースは使わないが、他の API と同じ作りのサーバーを使う)。
 	apiClient := newProjectAPIClient(testingT, "user-a", Dependencies{})
 
-	testingT.Run("一覧は、同梱の 16 個を、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
+	testingT.Run("一覧は、同梱の 17 個を、id の順に返し、作る部品の中身(resources)は返さない", func(subTest *testing.T) {
 		statusCode, responseBody := apiClient.call(http.MethodGet, "/templates", "")
 		templates, _ := responseBody["templates"].([]any)
-		if statusCode != http.StatusOK || len(templates) != 16 {
-			subTest.Fatalf("200 で、16 個のはず: %d %v", statusCode, responseBody)
+		if statusCode != http.StatusOK || len(templates) != 17 {
+			subTest.Fatalf("200 で、17 個のはず: %d %v", statusCode, responseBody)
 		}
 		// id で引けるようにし、並びは、id の順(code-server、mariadb、nginx、postgres、redis、wordpress)になっていることを確かめる。
 		byID := map[string]map[string]any{}
