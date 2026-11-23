@@ -104,7 +104,7 @@ export function AdminUsers({ refreshInterval, currentUserId }: { refreshInterval
               ? <button className="btn sm" type="button" onClick={() => setConfirming({ user, action: "unban" })}>停止を解除</button>
               : <button className="btn sm danger" type="button" disabled={user.userId === currentUserId} onClick={() => setConfirming({ user, action: "ban" })}>停止</button>}
             <button className="btn sm" type="button" disabled={!user.locked} onClick={() => void run(`/auth/admin/users/${encodeURIComponent(user.userId)}/unlock`, "ログインのロックを解除しました")}>ロック解除</button>
-            <button className="btn sm" type="button" onClick={() => setConfirming({ user, action: "reset" })}>パスワードのリセット</button>
+            <button className="btn sm" type="button" disabled={user.role === "admin"} title={user.role === "admin" ? "管理者のパスワードは、画面からはリセットできません(サーバーのコマンドで行います)" : undefined} onClick={() => setConfirming({ user, action: "reset" })}>パスワードのリセット</button>
           </span>
         </div>
       ))}

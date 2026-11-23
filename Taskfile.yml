@@ -51,6 +51,12 @@ tasks:
     cmds:
       - docker compose run --rm -T auth go run ./auth/src admin create {{.CLI_ARGS}}
 
+  admin:reset-password:
+    desc: "ユーザーのパスワードを置き換える(管理者は、この方法だけ。例: task admin:reset-password -- alice。パスワードは、環境変数 AUTH_ADMIN_PASSWORD か、標準入力で渡す)"
+    deps: [image]
+    cmds:
+      - docker compose run --rm -T auth go run ./auth/src admin reset-password {{.CLI_ARGS}}
+
   admin:promote:
     desc: "すでにあるユーザーを管理者にする(例: task admin:promote -- alice)"
     deps: [image]

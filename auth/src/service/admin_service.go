@@ -25,6 +25,9 @@ type AdminUserStore interface {
 	// FindByID は、ID で、ユーザーを探す。
 	FindByID(requestContext context.Context, userID string) (model.User, bool, error)
 
+	// FindByNameLower は、小文字のユーザー名で、ユーザーを探す。
+	FindByNameLower(requestContext context.Context, userNameLower string) (model.User, bool, error)
+
 	// List は、ユーザーを新しい順に取得する。
 	List(requestContext context.Context, limit int, after *pagination.Position) ([]model.User, *pagination.Position, error)
 
@@ -322,6 +325,10 @@ func (adminService *AdminService) ResetPassword(requestContext context.Context, 
 	if getError != nil {
 		return "", getError
 	}
+	// 管理者のパスワードは、画面(API)からは、リセットさせない(1 人の管理者の乗っ取りが、全ての管理者の乗っ取りにならないように)。サーバーのコマンドで行う。
+	if user.Role == model.RoleAdmin {
+		return "", apperror.New(apperror.KindForbidden, "管理者のパスワードは、画面からはリセットできません(サーバーのコマンド auth admin reset-password で行います)")
+	}
 	// 一時パスワードを作り、強さの検査を通るか確かめて、ハッシュにする。
 	temporaryPassword, passwordError := newTemporaryPassword()
 	if passwordError != nil {
@@ -544,6 +551,45 @@ func (adminService *AdminService) BootstrapAdmin(requestContext context.Context,
 		return false, createError
 	}
 	return true, nil
+}
+
+// SetPasswordByCommand は、ユーザーのパスワードを、指定した値に置き換える(コマンドから使う。管理者にも使える唯一の経路)。
+//
+// 通常のサインアップと同じ強さの検査を行う。有効な refresh token は全て無効になり、ログインの失敗のロックも解ける。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userName: ユーザー名(大文字小文字は区別しない)。
+//   - plainPassword: 新しいパスワード。
+//
+// 戻り値:
+//   - ユーザーが無ければ not_found。パスワードが弱ければ invalid_request。
+func (adminService *AdminService) SetPasswordByCommand(requestContext context.Context, userName string, plainPassword string) error {
+	// ユーザーを探して、パスワードの強さを確かめる。
+	userNameLower := model.NormalizeUserName(userName)
+	user, found, findError := adminService.userStore.FindByNameLower(requestContext, userNameLower)
+	if findError != nil {
+		return findError
+	}
+	if !found {
+		return apperror.New(apperror.KindNotFound, "ユーザーが見つかりません")
+	}
+	if checkError := password.Check(user.UserName, plainPassword); checkError != nil {
+		return checkError
+	}
+	// ハッシュにして置き換え、ロックも解いて、記録する。
+	passwordHash, hashError := adminService.hasher.Hash(plainPassword)
+	if hashError != nil {
+		return apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
+	}
+	if resetError := adminService.userStore.ResetPassword(requestContext, user.ID, passwordHash); resetError != nil {
+		return resetError
+	}
+	if unlockError := adminService.failureStore.Reset(requestContext, userNameLower); unlockError != nil {
+		return unlockError
+	}
+	adminService.record("command", "password_reset_command", user.ID)
+	return nil
 }
 
 // PromoteToAdmin は、すでにあるユーザーを、管理者にする(コマンドから使う)。

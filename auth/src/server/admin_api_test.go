@@ -616,6 +616,19 @@ func TestAdminLockedAndPasswordReset(testing *testing.T) {
 	if oldRefresh := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldSession.body["token"].(string), "203.0.113.72"); oldRefresh.status != 401 {
 		testing.Errorf("古いセッションは 401 のはず: %d", oldRefresh.status)
 	}
+	// 管理者のパスワードは、画面(API)からはリセットできない(自分自身も)。コマンドの経路でだけ、置き換えられる。
+	if adminReset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+admin.userID+"/password-reset", "", admin.accessToken, "203.0.113.2"); adminReset.status != 403 {
+		testing.Errorf("管理者のリセットは 403 のはず: %d %v", adminReset.status, adminReset.body)
+	}
+	if commandError := environment.admin.SetPasswordByCommand(context.Background(), "root-admin", "Zq9-plumb-Walnut-42xv"); commandError != nil {
+		testing.Fatalf("コマンドの経路では、管理者のパスワードを置き換えられるはず: %v", commandError)
+	}
+	if weak := environment.admin.SetPasswordByCommand(context.Background(), "root-admin", "short"); weak == nil {
+		testing.Error("弱いパスワードは、拒否されるはず")
+	}
+	if replaced := login(testing, environment, "root-admin", "Zq9-plumb-Walnut-42xv", "203.0.113.80"); replaced.status != 200 {
+		testing.Errorf("置き換えたパスワードで入れるはず: %d", replaced.status)
+	}
 	// 監査ログに残り、パスワードは含まれない。
 	var detail string
 	environment.database.Raw("SELECT concat(action, target, detail) FROM admin_audit_logs WHERE action = 'password_reset'").Scan(&detail)
