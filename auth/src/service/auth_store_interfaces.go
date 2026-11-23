@@ -20,6 +20,9 @@ type UserStore interface {
 
 	// UpdatePasswordHash は、パスワードのハッシュを、新しいものにする。
 	UpdatePasswordHash(requestContext context.Context, userID string, passwordHash string) error
+
+	// ChangePassword は、本人によるパスワードの変更を保存する(変更の要求を外し、有効な refresh token を全て無効にする)。
+	ChangePassword(requestContext context.Context, userID string, passwordHash string) error
 }
 
 // RefreshTokenStore は、ユースケースが使う、refresh token の有効・無効の管理。
@@ -68,4 +71,10 @@ type PasswordHasher interface {
 
 	// Verify は、パスワードがハッシュと一致するか、ハッシュを作り直すべきか、を返す。
 	Verify(plainPassword string, encodedHash string) (bool, bool, error)
+}
+
+// IPBlockStore は、ブロックされた IP の確認(管理者が、管理コンテナで登録する)。
+type IPBlockStore interface {
+	// IsBlocked は、IP が、期限内のブロックの範囲に入っているかを返す。
+	IsBlocked(requestContext context.Context, clientIP string) (bool, error)
 }

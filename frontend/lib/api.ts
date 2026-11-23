@@ -179,6 +179,22 @@ export async function signUp(userName: string, password: string, invitationCode?
   return request<import("./types").User>("/auth/me", "GET")
 }
 
+/**
+ * ログイン中の本人が、パスワードを変える。成功すると、古いセッションは全て無効になり、新しい refresh token で、ログインのままになる。
+ *
+ * @param currentPassword 現在のパスワード(一時パスワードでもよい)。
+ * @param newPassword 新しいパスワード。
+ * @returns 最新のユーザー情報(一時パスワードの要求は、外れている)。
+ */
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const result = await request<{ token: string }>("/auth/password", "POST", { currentPassword, newPassword })
+  // 新しい refresh token に差し替えて、access token も取り直す。
+  refreshToken = result.token
+  storeRefreshToken(result.token)
+  await refreshAccessToken()
+  return request<import("./types").User>("/auth/me", "GET")
+}
+
 export async function signOut() {
   const token = refreshToken
   try {

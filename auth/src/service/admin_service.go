@@ -25,6 +25,9 @@ type AdminUserStore interface {
 	// FindByID は、ID で、ユーザーを探す。
 	FindByID(requestContext context.Context, userID string) (model.User, bool, error)
 
+	// FindByNameLower は、小文字のユーザー名で、ユーザーを探す。
+	FindByNameLower(requestContext context.Context, userNameLower string) (model.User, bool, error)
+
 	// List は、ユーザーを新しい順に取得する。
 	List(requestContext context.Context, limit int, after *pagination.Position) ([]model.User, *pagination.Position, error)
 
@@ -33,6 +36,9 @@ type AdminUserStore interface {
 
 	// Unban は、停止中のユーザーを戻す。
 	Unban(requestContext context.Context, userID string) error
+
+	// ResetPassword は、パスワードのハッシュを置き換え、有効な refresh token を全て無効にする。
+	ResetPassword(requestContext context.Context, userID string, passwordHash string) error
 
 	// PromoteToAdmin は、小文字のユーザー名で、管理者にする。
 	PromoteToAdmin(requestContext context.Context, userNameLower string) error
@@ -57,6 +63,21 @@ type AdminInvitationStore interface {
 type AdminFailureStore interface {
 	// Reset は、ユーザー名(小文字)の失敗の記録とロックを消す。
 	Reset(requestContext context.Context, userNameLower string) error
+
+	// LockedUntil は、ロック中のユーザー名(小文字)と、ロックが解ける日時を返す。
+	LockedUntil(requestContext context.Context, userNamesLower []string) (map[string]time.Time, error)
+}
+
+// AdminLoginEventStore は、管理のユースケースが使う、ログイン履歴の読み出し。
+type AdminLoginEventStore interface {
+	// ListAll は、全ユーザーの履歴を新しい順に取得する(結果とユーザー名で絞り込める)。
+	ListAll(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error)
+}
+
+// AdminAuditStore は、管理操作の監査ログの保存先。
+type AdminAuditStore interface {
+	// Create は、監査ログを 1 件追記する。
+	Create(requestContext context.Context, actorID string, action string, target string) error
 }
 
 // invitationCodeBytes は、招待コードの元になる乱数の長さ(バイト)。256ビットで、推測できない。
@@ -67,6 +88,8 @@ type AdminService struct {
 	userStore       AdminUserStore
 	invitationStore AdminInvitationStore
 	failureStore    AdminFailureStore
+	loginEventStore AdminLoginEventStore
+	auditStore      AdminAuditStore
 	appLogger       *slog.Logger
 	hasher          PasswordHasher
 	tokenService    *token.Service
@@ -127,6 +150,14 @@ func (adminService *AdminService) Authorize(requestContext context.Context, acce
 func (adminService *AdminService) record(actorID string, action string, target string) {
 	// 監査のために、info のログに残す。
 	adminService.appLogger.Info("管理操作", "actor", actorID, "action", action, "target", target)
+	// 監査ログにも追記する(保存先が設定されているとき。保存できなくても、操作は止めず、警告を残す)。
+	if adminService.auditStore != nil {
+		auditContext, cancel := context.WithTimeout(context.Background(), auditWriteTimeout)
+		defer cancel()
+		if auditError := adminService.auditStore.Create(auditContext, actorID, action, target); auditError != nil {
+			adminService.appLogger.Warn("監査ログを保存できなかった", "action", action, "error", auditError)
+		}
+	}
 }
 
 // ListUsers は、ユーザーを、新しい順に返す。
@@ -221,6 +252,106 @@ func (adminService *AdminService) UnlockUser(requestContext context.Context, act
 	return nil
 }
 
+// UserLocks は、ユーザーのうち、ログインの失敗でロックされているものの、ロックが解ける日時を返す(一覧の表示用)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - users: 調べるユーザー。
+//
+// 戻り値:
+//   - ユーザーの ID → ロックが解ける日時(ロック中のものだけ)。
+func (adminService *AdminService) UserLocks(requestContext context.Context, users []model.User) (map[string]time.Time, error) {
+	// 名前から ID を引けるようにして、ロック中の名前を調べる。
+	names := make([]string, 0, len(users))
+	idByName := make(map[string]string, len(users))
+	for _, user := range users {
+		names = append(names, user.UserNameLower)
+		idByName[user.UserNameLower] = user.ID
+	}
+	lockedByName, lockError := adminService.failureStore.LockedUntil(requestContext, names)
+	if lockError != nil {
+		return nil, lockError
+	}
+	locks := make(map[string]time.Time, len(lockedByName))
+	for name, until := range lockedByName {
+		locks[idByName[name]] = until
+	}
+	return locks, nil
+}
+
+// temporaryPasswordAlphabet は、一時パスワードに使う文字(紛らわしい文字を除く)。
+const temporaryPasswordAlphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// temporaryPasswordLength は、一時パスワードの長さ。
+const temporaryPasswordLength = 20
+
+// newTemporaryPassword は、推測できない一時パスワードを作る(暗号用の乱数から)。
+//
+// 戻り値:
+//   - パスワード。乱数を得られなければ internal_error。
+func newTemporaryPassword() (string, error) {
+	// 文字の数で割った余りの偏りが出ないよう、範囲外の値は捨てて、引き直す。
+	limit := byte(256 - 256%len(temporaryPasswordAlphabet))
+	password := make([]byte, 0, temporaryPasswordLength)
+	buffer := make([]byte, temporaryPasswordLength*2)
+	for len(password) < temporaryPasswordLength {
+		if _, readError := rand.Read(buffer); readError != nil {
+			return "", apperror.Wrap(apperror.KindInternal, "パスワードを作れませんでした", readError)
+		}
+		for _, value := range buffer {
+			if value < limit && len(password) < temporaryPasswordLength {
+				password = append(password, temporaryPasswordAlphabet[int(value)%len(temporaryPasswordAlphabet)])
+			}
+		}
+	}
+	return string(password), nil
+}
+
+// ResetPassword は、ユーザーのパスワードを、新しい一時パスワードに置き換える(管理者の操作)。
+//
+// 一時パスワードは、このレスポンスでだけ分かる(保存するのはハッシュだけ)。有効な refresh token は全て無効になり、ログインの失敗のロックも解ける。
+// 発行済みの access token は、期限(最大15分)まで使える。管理者は、一時パスワードを、本人に安全な方法で渡す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - actorID: 操作する管理者の ID。
+//   - userID: 対象のユーザーの ID。
+//
+// 戻り値:
+//   - 一時パスワード。ユーザーが無ければ not_found。
+func (adminService *AdminService) ResetPassword(requestContext context.Context, actorID string, userID string) (string, error) {
+	// 対象を確かめる。
+	user, getError := adminService.GetUser(requestContext, userID)
+	if getError != nil {
+		return "", getError
+	}
+	// 管理者のパスワードは、画面(API)からは、リセットさせない(1 人の管理者の乗っ取りが、全ての管理者の乗っ取りにならないように)。サーバーのコマンドで行う。
+	if user.Role == model.RoleAdmin {
+		return "", apperror.New(apperror.KindForbidden, "管理者のパスワードは、画面からはリセットできません(サーバーのコマンド auth admin reset-password で行います)")
+	}
+	// 一時パスワードを作り、強さの検査を通るか確かめて、ハッシュにする。
+	temporaryPassword, passwordError := newTemporaryPassword()
+	if passwordError != nil {
+		return "", passwordError
+	}
+	if checkError := password.Check(user.UserName, temporaryPassword); checkError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "作ったパスワードが、強さの検査を通りませんでした", checkError)
+	}
+	passwordHash, hashError := adminService.hasher.Hash(temporaryPassword)
+	if hashError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
+	}
+	// 置き換えて(refresh token も無効)、ロックも解いて、記録する。
+	if resetError := adminService.userStore.ResetPassword(requestContext, userID, passwordHash); resetError != nil {
+		return "", resetError
+	}
+	if unlockError := adminService.failureStore.Reset(requestContext, user.UserNameLower); unlockError != nil {
+		return "", unlockError
+	}
+	adminService.record(actorID, "password_reset", userID)
+	return temporaryPassword, nil
+}
+
 // NewInvitationCode は、推測できない招待コードを作る。
 //
 // 戻り値:
@@ -283,6 +414,51 @@ func (adminService *AdminService) CreateInvitation(requestContext context.Contex
 func (adminService *AdminService) ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error) {
 	// 保存先から取得する。
 	return adminService.invitationStore.List(requestContext, limit, after)
+}
+
+// auditWriteTimeout は、監査ログの保存を待つ時間の上限。
+const auditWriteTimeout = 3 * time.Second
+
+// SetAuditStore は、監査ログの保存先を設定する(起動のときに 1 回)。
+//
+// 引数:
+//   - auditStore: 監査ログの保存先。
+func (adminService *AdminService) SetAuditStore(auditStore AdminAuditStore) {
+	// 保存先を持たせる。
+	adminService.auditStore = auditStore
+}
+
+// SetLoginEventStore は、ログイン履歴の読み出し先を設定する(起動のときに 1 回。コンストラクターの引数を増やさないための後付け)。
+//
+// 引数:
+//   - loginEventStore: ログイン履歴の読み出し先。
+func (adminService *AdminService) SetLoginEventStore(loginEventStore AdminLoginEventStore) {
+	// 保存先を持たせる。
+	adminService.loginEventStore = loginEventStore
+}
+
+// ListLoginEvents は、全ユーザーのログイン履歴を、新しい順に返す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - limit: 取得する件数の上限。
+//   - after: 前のページの最後の位置。最初のページは nil。
+//   - result: 結果で絞り込む(success か failure。空なら絞り込まない)。
+//   - userNameKeyword: ユーザー名で絞り込む文字列(空なら絞り込まない)。
+//
+// 戻り値:
+//   - 履歴の一覧と、次のページの位置。読み出し先が無ければ internal_error。
+func (adminService *AdminService) ListLoginEvents(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error) {
+	// 読み出し先が設定されていなければ、サーバーの設定の誤り。
+	if adminService.loginEventStore == nil {
+		return nil, nil, apperror.New(apperror.KindInternal, "ログイン履歴の読み出し先が設定されていません")
+	}
+	// 結果の指定は、決まった値だけを受け付ける。
+	if result != "" && result != "success" && result != "failure" {
+		return nil, nil, apperror.New(apperror.KindInvalidRequest, "result は success か failure で指定してください")
+	}
+	// 保存先から取得する。
+	return adminService.loginEventStore.ListAll(requestContext, limit, after, result, userNameKeyword)
 }
 
 // RevokeInvitation は、有効な招待を取り消す。
@@ -375,6 +551,45 @@ func (adminService *AdminService) BootstrapAdmin(requestContext context.Context,
 		return false, createError
 	}
 	return true, nil
+}
+
+// SetPasswordByCommand は、ユーザーのパスワードを、指定した値に置き換える(コマンドから使う。管理者にも使える唯一の経路)。
+//
+// 通常のサインアップと同じ強さの検査を行う。有効な refresh token は全て無効になり、ログインの失敗のロックも解ける。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userName: ユーザー名(大文字小文字は区別しない)。
+//   - plainPassword: 新しいパスワード。
+//
+// 戻り値:
+//   - ユーザーが無ければ not_found。パスワードが弱ければ invalid_request。
+func (adminService *AdminService) SetPasswordByCommand(requestContext context.Context, userName string, plainPassword string) error {
+	// ユーザーを探して、パスワードの強さを確かめる。
+	userNameLower := model.NormalizeUserName(userName)
+	user, found, findError := adminService.userStore.FindByNameLower(requestContext, userNameLower)
+	if findError != nil {
+		return findError
+	}
+	if !found {
+		return apperror.New(apperror.KindNotFound, "ユーザーが見つかりません")
+	}
+	if checkError := password.Check(user.UserName, plainPassword); checkError != nil {
+		return checkError
+	}
+	// ハッシュにして置き換え、ロックも解いて、記録する。
+	passwordHash, hashError := adminService.hasher.Hash(plainPassword)
+	if hashError != nil {
+		return apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
+	}
+	if resetError := adminService.userStore.ResetPassword(requestContext, user.ID, passwordHash); resetError != nil {
+		return resetError
+	}
+	if unlockError := adminService.failureStore.Reset(requestContext, userNameLower); unlockError != nil {
+		return unlockError
+	}
+	adminService.record("command", "password_reset_command", user.ID)
+	return nil
 }
 
 // PromoteToAdmin は、すでにあるユーザーを、管理者にする(コマンドから使う)。

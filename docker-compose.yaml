@@ -235,6 +235,31 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
+  # 管理コンテナ。管理者だけが使う API(/admin-api)。access token の role が admin のものだけを通す。
+  admin:
+    build:
+      context: .
+      dockerfile: admin/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # IP のブロック、監査ログ、ログイン履歴の集計(auth のデータベース)。
+      AUTH_DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth?sslmode=disable
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
+      # 画面に見せる設定(読むだけ)。
+      INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-shconn.org}
+      VOLUME_MAX_SIZE_MB: ${VOLUME_MAX_SIZE_MB:-5120}
+      AUTH_SIGNUP_MODE: ${AUTH_SIGNUP_MODE:-open}
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
   # app データベースのマイグレーションを流す(task migrate)。1回だけ実行して終わる。
   migrate-app:
     image: migrate/migrate:v4.19.1
@@ -281,6 +306,8 @@ services:
       nginx-certificate:
         condition: service_completed_successfully
       backend:
+        condition: service_started
+      admin:
         condition: service_started
       auth:
         condition: service_started

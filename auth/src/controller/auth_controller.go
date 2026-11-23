@@ -25,7 +25,8 @@ type AuthUseCase interface {
 	Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, turnstileToken string) (string, error)
 	LoginHistory(requestContext context.Context, accessToken string, limit int) ([]model.LoginEvent, error)
 	Refresh(requestContext context.Context, refreshToken string) (string, error)
-	Me(requestContext context.Context, accessToken string) (string, string, string, error)
+	Me(requestContext context.Context, accessToken string) (string, string, string, bool, error)
+	ChangePassword(requestContext context.Context, accessToken string, currentPassword string, newPassword string) (string, error)
 	Logout(requestContext context.Context, refreshToken string) error
 }
 
@@ -72,6 +73,18 @@ type MeResponse struct {
 
 	// Role は、役割(user か admin)。画面が、管理者向けの項目を出すかの判断に使う(権限の判定は、各 API が、毎回 DB で行う)。
 	Role string `json:"role"`
+
+	// MustChangePassword は、一時パスワードを使っているか。true の間、画面は、パスワードの変更を先に求める。
+	MustChangePassword bool `json:"mustChangePassword"`
+}
+
+// ChangePasswordRequest は、パスワードの変更のリクエスト。
+type ChangePasswordRequest struct {
+	// CurrentPassword は、現在のパスワード(一時パスワードでもよい)。
+	CurrentPassword string `json:"currentPassword"`
+
+	// NewPassword は、新しいパスワード。
+	NewPassword string `json:"newPassword"`
 }
 
 // LoginEventResponse は、ログイン履歴1件のレスポンス。
@@ -265,11 +278,36 @@ func (authController *AuthController) Me(echoContext *echo.Context) error {
 		return tokenError
 	}
 	// 持ち主の情報を取り出す。
-	userID, userName, role, meError := authController.authUseCase.Me(echoContext.Request().Context(), accessToken)
+	userID, userName, role, mustChangePassword, meError := authController.authUseCase.Me(echoContext.Request().Context(), accessToken)
 	if meError != nil {
 		return meError
 	}
-	return echoContext.JSON(http.StatusOK, MeResponse{UserID: userID, UserName: userName, Role: role})
+	return echoContext.JSON(http.StatusOK, MeResponse{UserID: userID, UserName: userName, Role: role, MustChangePassword: mustChangePassword})
+}
+
+// ChangePassword は、POST /password のハンドラー。ログイン中の本人が、パスワードを変える。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - 新しい refresh token(200。古い refresh token は、全て無効になる)。使えない access token は 401、パスワードの違い・弱さは 400、ロック中は 429。
+func (authController *AuthController) ChangePassword(echoContext *echo.Context) error {
+	// Authorization ヘッダの access token を取り出して、ボディを読む。
+	accessToken, tokenError := bearerToken(echoContext)
+	if tokenError != nil {
+		return tokenError
+	}
+	var request ChangePasswordRequest
+	if bindError := echoContext.Bind(&request); bindError != nil {
+		return apperror.Wrap(apperror.KindInvalidRequest, "リクエストのボディを読み取れませんでした", bindError)
+	}
+	// 変更して、新しい refresh token を返す。
+	refreshToken, changeError := authController.authUseCase.ChangePassword(echoContext.Request().Context(), accessToken, request.CurrentPassword, request.NewPassword)
+	if changeError != nil {
+		return translateError(echoContext, changeError)
+	}
+	return echoContext.JSON(http.StatusOK, TokenResponse{Token: refreshToken})
 }
 
 // Logout は、POST /logout のハンドラー。refresh token を無効にする。

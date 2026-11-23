@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ConsoleShell } from "@/components/console-shell"
 import { LoginScreen, type LoginInput } from "@/components/login-screen"
+import { ForcedPasswordScreen } from "@/components/password-change"
 import { ApiError, clearSessionTokens, restoreSession, signIn, signOut, signUp } from "@/lib/api"
 import type { User } from "@/lib/types"
 
@@ -54,5 +55,7 @@ export function ConsoleApp() {
 
   if (!authReady) return <div className="app app-loading"><span className="loader" /></div>
   if (!user) return <LoginScreen onSubmit={handleSubmit} loading={authenticating} error={authError} />
+  // 一時パスワードのままなら、先にパスワードを変えてもらう。
+  if (user.mustChangePassword) return <ForcedPasswordScreen user={user} onChanged={setUser} onLogout={handleLogout} />
   return <ConsoleShell user={user} onLogout={handleLogout} />
 }

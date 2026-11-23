@@ -109,6 +109,10 @@ func run() error {
 	invitationRepository := repository.NewInvitationRepository(appDatabase)
 	adminService := service.NewAdminService(userRepository, invitationRepository, loginFailureRepository, appLogger,
 		password.NewHasher(password.DefaultParameters()), token.NewService(keyStore, time.Now))
+	// 管理画面のために、全ユーザーのログイン履歴を読めるようにする。
+	adminService.SetLoginEventStore(loginEventRepository)
+	adminService.SetAuditStore(repository.NewAuditRepository(appDatabase))
+	authService.SetIPBlockStore(repository.NewIPBlockRepository(appDatabase))
 	// 最初の管理者の指定があれば、管理者が1人もいないときだけ作る(失敗したら、設定の間違いに気づけるよう、起動しない)。
 	if authConfig.BootstrapAdminName != "" {
 		created, bootstrapError := adminService.BootstrapAdmin(context.Background(), authConfig.BootstrapAdminName, authConfig.BootstrapAdminPassword)

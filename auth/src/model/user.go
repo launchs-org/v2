@@ -48,6 +48,9 @@ type User struct {
 	// Role は、役割(user か admin)。
 	Role string `gorm:"column:role"`
 
+	// MustChangePassword は、一時パスワードを使っているか(管理者がリセットしたあと、本人がパスワードを変えるまで true)。
+	MustChangePassword bool `gorm:"column:must_change_password"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 
@@ -181,6 +184,8 @@ const (
 	LoginReasonLocked        = "locked"
 	LoginReasonBanned        = "banned"
 	LoginReasonInvalidInput  = "invalid_input"
+	// LoginReasonBlocked は、管理者がブロックした IP からの試行(持ち主なし)。
+	LoginReasonBlocked = "blocked"
 )
 
 // LoginEvent は、login_events テーブルの1行。サインアップとログインの、成功と失敗の履歴。

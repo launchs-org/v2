@@ -22,6 +22,8 @@ type LoginScreenProps = {
   onSubmit: (input: LoginInput) => Promise<void>
   loading: boolean
   error: string
+  /** true なら、サインアップを出さない(管理画面のログイン用)。 */
+  adminOnly?: boolean
 }
 
 /** 左の、飾りのコード(モックと同じ)。 */
@@ -45,7 +47,7 @@ app = Flask(__name__)`
  * @param props.loading 送信中か。
  * @param props.error 直前の失敗のメッセージ。
  */
-export function LoginScreen({ onSubmit, loading, error }: LoginScreenProps) {
+export function LoginScreen({ onSubmit, loading, error, adminOnly = false }: LoginScreenProps) {
   const { data: authConfig } = useSWR<AuthConfig>("/auth/config", publicFetcher, { refreshInterval: 60_000, revalidateOnFocus: false })
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [userName, setUserName] = useState("")
@@ -97,10 +99,11 @@ export function LoginScreen({ onSubmit, loading, error }: LoginScreenProps) {
         </div>
         <div className="lform">
           <form style={{ width: "min(400px,100%)", display: "flex", flexDirection: "column", gap: 18 }} onSubmit={handleSubmit}>
-            <div className="seg" role="tablist">
+            {adminOnly && <div><div className="disp" style={{ fontSize: 22 }}>管理画面</div><div className="faint" style={{ fontSize: 12.5 }}>管理者のアカウントでログインしてください。</div></div>}
+            {!adminOnly && <div className="seg" role="tablist">
               <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "on" : ""} onClick={() => setMode("login")}>ログイン</button>
               <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "on" : ""} onClick={() => setMode("signup")}>サインアップ</button>
-            </div>
+            </div>}
             <label className="lbl">ユーザー名<input className="inp" type="text" autoComplete="username" autoCapitalize="none" value={userName} onChange={(event) => setUserName(event.target.value)} placeholder="英数字とハイフン 1〜64文字" required /></label>
             <label className="lbl">パスワード<input className="inp" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="12文字以上" required /></label>
             {mode === "signup" && <label className="lbl">招待コード<input className="inp mono" type="text" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} placeholder="招待制のときに必須" /></label>}
@@ -110,6 +113,9 @@ export function LoginScreen({ onSubmit, loading, error }: LoginScreenProps) {
             <button className="btn primary" type="submit" style={{ minHeight: 46 }} disabled={loading || challengeUnavailable || (turnstileEnabled && !turnstileToken)}>
               {loading ? "処理しています…" : mode === "login" ? "ログイン" : "アカウントを作成"}
             </button>
+            {adminOnly
+              ? <a className="faint" style={{ fontSize: 13, textAlign: "center" }} href="/">← 通常のログインへ</a>
+              : <a className="faint" style={{ fontSize: 13, textAlign: "center" }} href="/admin">管理者の方は、こちらからログイン</a>}
           </form>
         </div>
       </div>
