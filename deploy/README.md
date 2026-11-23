@@ -44,6 +44,7 @@ launchs 自身を、Kubernetes に置くためのマニフェスト。**環境�
 
 ## クラスター側の前提と、本番 Talos(launchs.org)の手順
 運用で困ったときは [FAQ.md](FAQ.md)(Q&A)。
+**Argo CD があれば、土台(Traefik とプラグイン、metrics-server、cloudflared)も含めて、`argocd/applications.yaml` の 3 つの Application で、全部入る**(`cluster/README.md` の先頭)。
 `cluster/README.md` に、本体の外で必要なもの(metrics-server、Traefik のプラグイン `launchs-edge` と `launchs-stats`、Cloudflare の設定、環境ごとの設定の値)と、その手順がある。`settings/config.launchs.org.example.yaml` は、本番の `config.yaml` の例(適用の対象ではない)。
 
 ## 運用(更新、マイグレーション、バックアップ)
@@ -77,7 +78,7 @@ watcher、logcollector、accessstats は、複数起動しても、advisory lock
 ## 含まれないもの
 - **バックアップ**: PostgreSQL のバックアップ(PVC のスナップショットや `pg_dump`)は、運用側で行う。
 - **TLS と DNS**: Cloudflare などで行う(このマニフェストは、HTTP の `web` の entryPoint に出す)。
-- **Traefik 自体**と、プラグインの導入([docs/ingress-plugins.md](../docs/ingress-plugins.md))。
+- **Traefik 自体**と、プラグインの導入は、この `kubectl apply -k .` には含まれない(別の Application `traefik`、`launchs-cluster`。`argocd/applications.yaml`、`cluster/README.md`)。
 - **Temporal の認証**: Temporal は、クラスターの外に出さない前提で、認証を使わない(`TEMPORAL_ALLOW_NO_AUTH`)。Service(`temporal`)は ClusterIP のみ。
 
 ## 実行ユーザー

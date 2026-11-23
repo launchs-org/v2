@@ -1,0 +1,12 @@
+# クラスター全体に 1 回だけ入れるもの(launchs の namespace の外)。Argo CD の Application `launchs-cluster` が、この場所を同期する。
+# Traefik 自体(と、そのプラグイン)は、Helm のチャートなので、別の Application(deploy/argocd/applications.yaml の `traefik`)。
+# 手で入れるなら: kubectl apply -k deploy/cluster(Traefik の CRD が先に要る)。
+# 含まないもの(Git に入れない秘密): Secret `tunnel-token`(tunnel-token.example.yaml)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - metrics-server.yaml
+  - traefik-namespace.yaml
+  - traefik-edge-middleware.yaml
+  - cloudflared.yaml

@@ -3,6 +3,31 @@
 `deploy/`(本体と settings)だけでは足りない、**クラスター全体に 1 回だけ入れるもの**。launchs の namespace には、含めない。
 本番の Talos(`launchs.org`)に入れた手順の記録(2026-11-22)。次の順に行う。
 
+## 全部入れる(Argo CD。Application は `deploy/argocd/applications.yaml`)
+Argo CD が入っているクラスターでは、次の 3 つの Application で、**launchs と、その土台の全部**を、Git(`main`)から同期する(同期は手動)。
+
+| Application | 内容 | 場所 |
+|---|---|---|
+| `traefik` | Traefik(Helm のチャート 42.3.2)と、プラグイン `launchs-edge`、`launchs-stats`、基本の設定 | チャート + `deploy/cluster/traefik-values.yaml` |
+| `launchs-cluster` | metrics-server、launchs-edge の Middleware、cloudflared(DaemonSet)、`traefik` の namespace | `deploy/cluster/`(kustomize) |
+| `launchs-prod` | launchs 本体 | `deploy/` |
+
+```bash
+# 先に、秘密を作る(Git に入れない): launchs の Secret(deploy/settings/)と、cloudflared のトークン
+kubectl apply -f deploy/namespace.yaml && kubectl apply -k deploy/settings/
+kubectl create namespace cloudflared 2>/dev/null; kubectl -n cloudflared create secret generic tunnel-token --from-literal=token='<トンネルのトークン>'
+# Application を作る(1 回だけ)
+kubectl apply -f deploy/argocd/applications.yaml
+# 同期する(順序: traefik → launchs-cluster → launchs-prod。各 Application が Synced / Healthy になってから、次へ)。Argo CD の画面、または:
+kubectl -n argocd patch application traefik --type merge -p '{"operation":{"sync":{}}}'
+kubectl -n argocd get application traefik        # SYNC STATUS が Synced、HEALTH STATUS が Healthy になるまで見る
+# launchs-cluster、launchs-prod も、同じように(application の名前を変える)
+```
+- **プラグインのソース(`traefik-plugins/`)を変えたら**: `python3 traefik-plugins/render_helm_values.py --full > deploy/cluster/traefik-values.yaml` で作り直して、一緒にコミットする(CI が、ずれを検査する)。
+- **クラスターごとに違う値**: `launchs-edge` の `trustedCIDRs`(cloudflared の Pod の範囲)は、Git では本番 launchs.org の `10.244.0.0/16`。別の範囲のクラスターは、`applications.yaml` の `launchs-cluster` の `kustomize.patches`(コメントの例)で上書きする。**合っていないと、Cf-* のヘッダーを信じず、クライアント IP と https が、アプリに届かない**。
+- **既に Helm で入れた Traefik がある場合**: 同じ版・同じ values なら、描画は同じ(確認済み)。同期しても、中身は変わらず、Argo CD が管理を引き継ぐ(Helm の release の記録は、残る)。
+- 以下の §2〜§3 は、**手で(Argo CD なしで)入れる場合**の手順。
+
 ## 0. 調べること(推測しない)
 ```bash
 kubectl get nodes -o wide

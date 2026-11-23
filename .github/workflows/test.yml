@@ -53,6 +53,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Traefik の values(プラグインのソースを含む)が、ソースと合っているか。ソースを変えたら、作り直して、コミットする。
+      - name: Traefik の values がプラグインのソースと合っているか確認する
+        run: python3 traefik-plugins/render_helm_values.py --check deploy/cluster/traefik-values.yaml
+
       - name: 整形されているか確認する(gofmt)
         run: |
           unformatted="$(gofmt -l .)"
