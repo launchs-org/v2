@@ -6,6 +6,7 @@ import { authenticatedFetcher } from "@/lib/api"
 import { usePending } from "@/lib/pending"
 import type { DeployTab, Nav, Selection, View } from "@/lib/nav"
 import type { Project, ProjectEventListResponse, ProjectListResponse, ProjectTaskListResponse, User } from "@/lib/types"
+import { useNarrow } from "@/lib/use-narrow"
 import { PendingPopover } from "@/components/pending-popover"
 import { ErrorState, LoadingState } from "@/components/ui-kit"
 import { ProjectsView } from "@/components/views/projects-view"
@@ -45,6 +46,8 @@ function Logo() {
  */
 export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
   const [view, setView] = useState<View>("projects")
+  // スマホでは、構成図の代わりにリソースの表を出すので、タブの名前も合わせる。
+  const narrow = useNarrow()
   const [projectId, setProjectId] = useState("")
   const [selection, setSelection] = useState<Selection | null>(null)
   const [deployTab, setDeployTab] = useState<DeployTab>("overview")
@@ -109,7 +112,7 @@ export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
           )}
           <div className="tabs" role="tablist" style={{ marginLeft: 8 }}>
             {inProject
-              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}{key === "events" && project && <EventsTabBadge project={project} refreshInterval={refreshInterval} />}{key === "tasks" && project && <TasksTabBadge project={project} refreshInterval={refreshInterval} />}</button>)
+              ? PROJECT_TABS.map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{key === "canvas" && narrow ? "リソース" : LABEL[key]}{key === "events" && project && <EventsTabBadge project={project} refreshInterval={refreshInterval} />}{key === "tasks" && project && <TasksTabBadge project={project} refreshInterval={refreshInterval} />}</button>)
               : (["projects", "quota", "account"] as View[]).map((key) => <button key={key} type="button" role="tab" aria-selected={view === key} className={`tab ${view === key ? "on" : ""}`} onClick={() => nav.go(key)}>{LABEL[key]}</button>)}
           </div>
           <div className="grow" />
