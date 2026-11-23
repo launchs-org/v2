@@ -98,7 +98,7 @@
 ### パスワードのリセット
 - Post: /auth/admin/users/:userId/password-reset
 - Response (200): `{"password": "Zq9plumbWalnut42xvKd"}`(`Cache-Control: no-store`)
-- Note: 20 文字の**一時パスワード**を作って、置き換える。**このレスポンスでだけ分かる**(DB には、ハッシュだけ)。管理者が、本人に、安全な方法で渡す。
+- Note: 20 文字の**一時パスワード**を作って、置き換える。ユーザーには `mustChangePassword: true` が付き、**本人が変えるまで、画面が、パスワードの変更を先に求める**(一覧にも `mustChangePassword` が出る。[auth.md](auth.md) の「パスワードの変更」)。**このレスポンスでだけ分かる**(DB には、ハッシュだけ)。管理者が、本人に、安全な方法で渡す。
 - Note: そのユーザーの有効な refresh token は、全て無効になる(古いセッションは、使えない。発行済みの access token は、最大15分)。ログインの失敗のロックも、解ける。停止中のユーザーでも、リセットできる(停止は、そのまま)。
 - Note: **管理者のパスワードは、リセットできない(403。自分自身も)**。1 人の管理者の乗っ取りが、全ての管理者の乗っ取りにならないため。管理者は、サーバーのコマンド `task admin:reset-password -- <userName>`(パスワードは `AUTH_ADMIN_PASSWORD` か標準入力。監査ログは `password_reset_command`、操作者は `command`)で置き換える。
 - Note: ユーザーが無ければ 404。監査ログには `password_reset` が残る(パスワードは含めない)。

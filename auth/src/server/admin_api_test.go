@@ -636,3 +636,63 @@ func TestAdminLockedAndPasswordReset(testing *testing.T) {
 		testing.Errorf("監査ログに残り、パスワードは含まないはず: %q", detail)
 	}
 }
+
+// TestChangePassword は、一時パスワードのユーザーに変更の要求が付き、本人のパスワードの変更で外れること、
+// 現在のパスワードの間違い・弱いパスワード・同じパスワードの拒否、古いセッションの無効化、間違いの繰り返しによるロックを確かめる。
+func TestChangePassword(testing *testing.T) {
+	// 管理者と、一般のユーザーを用意し、管理者がリセットする。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "kim", true, "203.0.113.90")
+	reset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", admin.accessToken, "203.0.113.2")
+	temporaryPassword, _ := reset.body["password"].(string)
+	if temporaryPassword == "" {
+		testing.Fatalf("リセットできるはず: %v", reset.body)
+	}
+	// 一時パスワードでログインすると、/me に変更の要求が付く。管理画面の一覧にも出る。
+	session := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"kim","password":"`+temporaryPassword+`"}`, "", "203.0.113.91")
+	oldRefresh := session.body["token"].(string)
+	access := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldRefresh, "203.0.113.91").body["token"].(string)
+	if me := call(testing, environment, http.MethodGet, "/auth/me", "", access, "203.0.113.91"); me.body["mustChangePassword"] != true {
+		testing.Fatalf("変更の要求が付くはず: %v", me.body)
+	}
+	change := func(current string, next string) response {
+		return call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"`+current+`","newPassword":"`+next+`"}`, access, "203.0.113.91")
+	}
+	// 弱い・同じ・現在のパスワードの間違いは、400(401 ではない)。トークンが無ければ 401。
+	if weak := change(temporaryPassword, "short"); weak.status != 400 {
+		testing.Errorf("弱いパスワードは 400 のはず: %d", weak.status)
+	}
+	if same := change(temporaryPassword, temporaryPassword); same.status != 400 {
+		testing.Errorf("同じパスワードは 400 のはず: %d", same.status)
+	}
+	if wrong := change("not-the-password-1", "Zq9-plumb-Walnut-42xv"); wrong.status != 400 {
+		testing.Errorf("現在のパスワードの間違いは 400 のはず: %d", wrong.status)
+	}
+	if anonymous := call(testing, environment, http.MethodPost, "/auth/password", `{}`, "", "203.0.113.91"); anonymous.status != 401 {
+		testing.Errorf("トークン無しは 401 のはず: %d", anonymous.status)
+	}
+	// 変更に成功すると、新しい refresh token が返り、変更の要求は外れ、古い refresh token は使えなくなる。
+	changed := change(temporaryPassword, "Zq9-plumb-Walnut-42xv")
+	newRefresh, _ := changed.body["token"].(string)
+	if changed.status != 200 || newRefresh == "" {
+		testing.Fatalf("変更できるはず: %d %v", changed.status, changed.body)
+	}
+	if oldSession := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldRefresh, "203.0.113.91"); oldSession.status != 401 {
+		testing.Errorf("古いセッションは 401 のはず: %d", oldSession.status)
+	}
+	freshAccess := call(testing, environment, http.MethodPost, "/auth/refresh", "", newRefresh, "203.0.113.91").body["token"].(string)
+	if me := call(testing, environment, http.MethodGet, "/auth/me", "", freshAccess, "203.0.113.91"); me.body["mustChangePassword"] != false {
+		testing.Errorf("変更の要求は外れるはず: %v", me.body)
+	}
+	if login := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"kim","password":"Zq9-plumb-Walnut-42xv"}`, "", "203.0.113.92"); login.status != 200 {
+		testing.Errorf("新しいパスワードで入れるはず: %d", login.status)
+	}
+	// 現在のパスワードを間違え続けると、ロックされる(盗まれた access token での総当たりを防ぐ)。
+	for attempt := 0; attempt < environment.settings.LoginMaxFailures; attempt++ {
+		call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"wrong-guess-123","newPassword":"Another-Strong-Pass-77qq"}`, freshAccess, "203.0.113.93")
+	}
+	if locked := call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"Zq9-plumb-Walnut-42xv","newPassword":"Another-Strong-Pass-77qq"}`, freshAccess, "203.0.113.93"); locked.status != 429 {
+		testing.Errorf("ロック中は 429 のはず: %d %v", locked.status, locked.body)
+	}
+}

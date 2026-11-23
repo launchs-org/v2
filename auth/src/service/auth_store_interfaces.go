@@ -20,6 +20,9 @@ type UserStore interface {
 
 	// UpdatePasswordHash は、パスワードのハッシュを、新しいものにする。
 	UpdatePasswordHash(requestContext context.Context, userID string, passwordHash string) error
+
+	// ChangePassword は、本人によるパスワードの変更を保存する(変更の要求を外し、有効な refresh token を全て無効にする)。
+	ChangePassword(requestContext context.Context, userID string, passwordHash string) error
 }
 
 // RefreshTokenStore は、ユースケースが使う、refresh token の有効・無効の管理。

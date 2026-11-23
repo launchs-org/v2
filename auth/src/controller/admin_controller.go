@@ -85,6 +85,9 @@ type AdminUserResponse struct {
 	// CreatedAt は、作成の日時(JST)。
 	CreatedAt string `json:"createdAt"`
 
+	// MustChangePassword は、一時パスワードのまま(本人が、まだ変えていない)か。
+	MustChangePassword bool `json:"mustChangePassword"`
+
 	// Locked は、ログインの失敗で、いまロックされているか(停止とは別。時間が過ぎると解ける)。
 	Locked bool `json:"locked"`
 
@@ -241,7 +244,7 @@ func encodeNextCursor(next *pagination.Position) *string {
 //   - レスポンス。
 func newAdminUserResponse(user model.User) AdminUserResponse {
 	// パスワードのハッシュを除いて、日時を JST にする。
-	return AdminUserResponse{UserID: user.ID, UserName: user.UserName, Status: user.Status, Role: user.Role, CreatedAt: jst.Format(user.CreatedAt)}
+	return AdminUserResponse{UserID: user.ID, UserName: user.UserName, Status: user.Status, Role: user.Role, CreatedAt: jst.Format(user.CreatedAt), MustChangePassword: user.MustChangePassword}
 }
 
 // newInvitationResponse は、招待を、レスポンスにする。

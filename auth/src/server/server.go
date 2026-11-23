@@ -69,6 +69,7 @@ func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCas
 	authGroup.POST("/login", authController.Login)
 	authGroup.POST("/refresh", authController.Refresh)
 	authGroup.GET("/me", authController.Me)
+	authGroup.POST("/password", authController.ChangePassword)
 	authGroup.POST("/logout", authController.Logout)
 	authGroup.GET("/login-history", authController.LoginHistory)
 	authGroup.GET("/.well-known/jwks.json", authController.JSONWebKeys)

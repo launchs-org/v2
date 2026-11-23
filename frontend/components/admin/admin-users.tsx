@@ -7,7 +7,7 @@ import { shortDateTime } from "@/lib/format-date"
 import { CopyButton } from "@/components/api-token-section"
 import { Badge, ErrorState, LoadingState, Modal, ToastNotice } from "@/components/ui-kit"
 
-type AdminUser = { userId: string; userName: string; status: string; role: string; createdAt: string; locked: boolean; lockedUntil: string | null }
+type AdminUser = { userId: string; userName: string; status: string; role: string; createdAt: string; locked: boolean; lockedUntil: string | null; mustChangePassword: boolean }
 type UserList = { users: AdminUser[]; nextCursor: string | null }
 
 /** 行の列の幅(ユーザー名、役割、状態、作成日時、操作)。 */
@@ -96,6 +96,7 @@ export function AdminUsers({ refreshInterval, currentUserId }: { refreshInterval
           <span><Badge status={user.role} /></span>
           <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             <Badge status={user.status} />
+            {user.mustChangePassword && <span className="badge b-dim" title="一時パスワードのまま(本人が、まだ変えていない)"><i />一時パスワード</span>}
             {user.locked && <span className="badge b-warn" title={`ログインの失敗でロック中(${user.lockedUntil ? shortDateTime(user.lockedUntil) : ""} まで)`}><i />🔒 ロック中</span>}
           </span>
           <span className="mono faint">{shortDateTime(user.createdAt)}</span>

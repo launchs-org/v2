@@ -272,23 +272,23 @@ func (authService *AuthService) Refresh(requestContext context.Context, refreshT
 //   - accessToken: access token の文字列。
 //
 // 戻り値:
-//   - ユーザーの ID、ユーザー名、役割。使えない access token や、存在しないユーザーは unauthorized。
-func (authService *AuthService) Me(requestContext context.Context, accessToken string) (string, string, string, error) {
+//   - ユーザーの ID、ユーザー名、役割、パスワードの変更が必要か(一時パスワードの間 true)。使えない access token や、存在しないユーザーは unauthorized。
+func (authService *AuthService) Me(requestContext context.Context, accessToken string) (string, string, string, bool, error) {
 	// 署名・期限・種類を確かめる。
 	claims, parseError := authService.tokenService.Parse(accessToken, token.TypeAccess)
 	if parseError != nil {
-		return "", "", "", errInvalidRefreshToken
+		return "", "", "", false, errInvalidRefreshToken
 	}
 	// 役割は、最新の状態を、DB から読む。
 	user, found, findError := authService.userStore.FindByID(requestContext, claims.Subject)
 	if findError != nil {
-		return "", "", "", findError
+		return "", "", "", false, findError
 	}
 	// ユーザーが消えているときは、使えない access token として扱う。
 	if !found {
-		return "", "", "", errInvalidRefreshToken
+		return "", "", "", false, errInvalidRefreshToken
 	}
-	return claims.Subject, claims.Name, user.Role, nil
+	return claims.Subject, claims.Name, user.Role, user.MustChangePassword, nil
 }
 
 // Logout は、refresh token を無効にする。以後、その refresh token では、access token を取れない。
@@ -335,4 +335,75 @@ func (authService *AuthService) LoginHistory(requestContext context.Context, acc
 	}
 	// 持ち主の履歴を取る。
 	return authService.loginEventStore.ListByUser(requestContext, claims.Subject, limit)
+}
+
+// ChangePassword は、ログイン中の本人が、パスワードを変える。
+//
+// 現在のパスワードを確かめ(間違いは、ログインの失敗と同じに数えて、続くとロックする)、新しいパスワードの強さを検査して置き換える。
+// 一時パスワードの要求は外れ、**全ての refresh token が無効になる**ので、新しい refresh token を発行して返す(この端末は、ログインのまま)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - accessToken: access token の文字列。
+//   - currentPassword: 現在のパスワード(一時パスワードでもよい)。
+//   - newPassword: 新しいパスワード。
+//
+// 戻り値:
+//   - 新しい refresh token。使えない access token は unauthorized、現在のパスワードの間違い・新しいパスワードが弱い・同じは invalid_request、ロック中は rate_limited。
+func (authService *AuthService) ChangePassword(requestContext context.Context, accessToken string, currentPassword string, newPassword string) (string, error) {
+	// access token の持ち主を確かめて、最新のユーザーを読む(停止中は、変えさせない)。
+	claims, parseError := authService.tokenService.Parse(accessToken, token.TypeAccess)
+	if parseError != nil {
+		return "", errInvalidRefreshToken
+	}
+	user, found, findError := authService.userStore.FindByID(requestContext, claims.Subject)
+	if findError != nil {
+		return "", findError
+	}
+	if !found || !user.IsActive() {
+		return "", errInvalidRefreshToken
+	}
+	// 盗まれた access token で、現在のパスワードを総当たりされないよう、ロック中は、確かめずに断る。
+	locked, lockError := authService.loginFailureStore.IsLocked(requestContext, user.UserNameLower)
+	if lockError != nil {
+		return "", lockError
+	}
+	if locked {
+		return "", &RateLimitedError{RetryAfter: authService.settings.LoginLockDuration}
+	}
+	// 現在のパスワードを確かめる。
+	matched, _, verifyError := authService.hasher.Verify(currentPassword, user.PasswordHash)
+	if errors.Is(verifyError, password.ErrBusy) {
+		return "", &RateLimitedError{RetryAfter: busyRetryAfter}
+	}
+	if verifyError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "パスワードを確かめられませんでした", verifyError)
+	}
+	if !matched {
+		// 間違いは、ログインの失敗と同じに数える。401 にすると、画面がセッション切れと誤解するので、400 にする。
+		if recordError := authService.loginFailureStore.RecordFailure(requestContext, user.UserNameLower, authService.settings.LoginMaxFailures, authService.settings.LoginLockDuration); recordError != nil {
+			return "", recordError
+		}
+		return "", apperror.New(apperror.KindInvalidRequest, "現在のパスワードが違います")
+	}
+	// 新しいパスワードを検査する(通常のサインアップと同じ強さ。今のものとは、違うこと)。
+	if checkError := password.Check(user.UserName, newPassword); checkError != nil {
+		return "", checkError
+	}
+	if newPassword == currentPassword {
+		return "", apperror.New(apperror.KindInvalidRequest, "新しいパスワードは、現在のものと違うものにしてください")
+	}
+	// 置き換える(全てのセッションが無効になる)。失敗の記録も消して、新しい refresh token を発行する。
+	passwordHash, hashError := authService.hasher.Hash(newPassword)
+	if hashError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
+	}
+	if changeError := authService.userStore.ChangePassword(requestContext, user.ID, passwordHash); changeError != nil {
+		return "", changeError
+	}
+	if resetError := authService.loginFailureStore.Reset(requestContext, user.UserNameLower); resetError != nil {
+		return "", resetError
+	}
+	authService.appLogger.Info("パスワードを変更した", "user_id", user.ID)
+	return authService.issueRefreshToken(requestContext, user)
 }

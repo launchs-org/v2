@@ -48,6 +48,9 @@ type User struct {
 	// Role は、役割(user か admin)。
 	Role string `gorm:"column:role"`
 
+	// MustChangePassword は、一時パスワードを使っているか(管理者がリセットしたあと、本人がパスワードを変えるまで true)。
+	MustChangePassword bool `gorm:"column:must_change_password"`
+
 	// CreatedAt は、作成日時。
 	CreatedAt time.Time `gorm:"column:created_at"`
 

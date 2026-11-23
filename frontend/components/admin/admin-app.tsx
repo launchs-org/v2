@@ -11,6 +11,7 @@ import { AdminOverview } from "@/components/admin/admin-overview"
 import { AdminUsers } from "@/components/admin/admin-users"
 import { InvitationSection } from "@/components/invitation-section"
 import { LoginScreen, type LoginInput } from "@/components/login-screen"
+import { ForcedPasswordScreen } from "@/components/password-change"
 import { ApiError, clearSessionTokens, restoreSession, signIn, signOut } from "@/lib/api"
 import type { User } from "@/lib/types"
 
@@ -97,6 +98,8 @@ export function AdminApp() {
 
   if (!authReady) return <div className="app app-loading"><span className="loader" /></div>
   if (!user) return <LoginScreen onSubmit={handleSubmit} loading={authenticating} error={authError} adminOnly />
+  // 一時パスワードのままなら(コマンドで置き換えた直後など)、先にパスワードを変えてもらう。
+  if (user.mustChangePassword) return <ForcedPasswordScreen user={user} onChanged={setUser} onLogout={handleLogout} />
   // 管理者でなければ、中を見せない。
   if (user.role !== "admin") {
     return (
