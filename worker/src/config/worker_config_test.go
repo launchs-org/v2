@@ -37,17 +37,17 @@ func TestLoadWorkerConfig(testingT *testing.T) {
 		{
 			name:           "DATABASE_URL だけなら、他は既定値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", CPURequestPercent: 100, MemoryRequestPercent: 100, TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessNone}},
 		},
 		{
 			name:           "全て設定すると、その値になる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "TEMPORAL_ADDRESS": "host:1", "TEMPORAL_NAMESPACE": "ns", "LOG_LEVEL": "debug", "KUBERNETES_ACCESS": "kubeconfig", "KUBECONFIG": "/kube/config", "RUNTIME_CLASS": "gvisor"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", CPURequestPercent: 100, MemoryRequestPercent: 100, TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "host:1", TemporalNamespace: "ns", LogLevel: slog.LevelDebug, RuntimeClass: "gvisor", BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessKubeconfig, KubeconfigPath: "/kube/config"}},
 		},
 		{
 			name:           "in-cluster も指定できる",
 			environment:    map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "in-cluster"},
-			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", CPURequestPercent: 100, MemoryRequestPercent: 100, TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
+			expectedConfig: WorkerConfig{DatabaseURL: "postgres://db", TemporalAddress: "temporal:7233", TemporalNamespace: "default", LogLevel: slog.LevelInfo, BlockedNetworks: k8s.DefaultBlockedNetworks(), ServiceType: "ClusterIP", ClusterDomain: "cluster.local", VolumeAccessMode: "ReadWriteMany", TraefikAPIVersion: "traefik.io/v1alpha1", TraefikEntryPoints: []string{"web"}, Kubernetes: k8s.Settings{Access: k8s.AccessInCluster}},
 		},
 		{
 			name:                "DATABASE_URL が無いとエラー",
@@ -256,38 +256,5 @@ func TestLoadWorkerConfigVolume(testingT *testing.T) {
 	// 知らないアクセスモードは、エラーにする。
 	if _, invalidError := LoadWorkerConfig(newTestReader(map[string]string{"DATABASE_URL": "postgres://db", "KUBERNETES_ACCESS": "none", "VOLUME_ACCESS_MODE": "ReadOnlyMany"})); invalidError == nil || !strings.Contains(invalidError.Error(), "VOLUME_ACCESS_MODE") {
 		testingT.Errorf("エラーになるはず: %v", invalidError)
-	}
-}
-
-// TestLoadWorkerConfigRequestPercent は、deploy の requests の割合(CPU_REQUEST_PERCENT、MEMORY_REQUEST_PERCENT)が、
-// 省略すると 100 で、指定するとその値になり、範囲の外や整数でない値は、環境変数の名前を付けて拒否されることを確認する。
-func TestLoadWorkerConfigRequestPercent(testingT *testing.T) {
-	// 必須の環境変数に、確かめたいものを足して読む道具。
-	load := func(extra map[string]string) (WorkerConfig, error) {
-		environment := map[string]string{"DATABASE_URL": "postgres://x", "KUBERNETES_ACCESS": "none"}
-		for name, value := range extra {
-			environment[name] = value
-		}
-		return LoadWorkerConfig(newTestReader(environment))
-	}
-	testingT.Run("省略すると、どちらも 100", func(subTest *testing.T) {
-		loaded, loadError := load(nil)
-		if loadError != nil || loaded.CPURequestPercent != 100 || loaded.MemoryRequestPercent != 100 {
-			subTest.Errorf("100 のはず: %v %d %d", loadError, loaded.CPURequestPercent, loaded.MemoryRequestPercent)
-		}
-	})
-	testingT.Run("指定すると、その値", func(subTest *testing.T) {
-		loaded, loadError := load(map[string]string{"CPU_REQUEST_PERCENT": "10", "MEMORY_REQUEST_PERCENT": "50"})
-		if loadError != nil || loaded.CPURequestPercent != 10 || loaded.MemoryRequestPercent != 50 {
-			subTest.Errorf("10 と 50 のはず: %v %d %d", loadError, loaded.CPURequestPercent, loaded.MemoryRequestPercent)
-		}
-	})
-	for _, invalid := range []map[string]string{{"CPU_REQUEST_PERCENT": "0"}, {"CPU_REQUEST_PERCENT": "101"}, {"MEMORY_REQUEST_PERCENT": "-5"}, {"CPU_REQUEST_PERCENT": "abc"}} {
-		testingT.Run("不正な値は、環境変数の名前を付けて拒否する", func(subTest *testing.T) {
-			_, loadError := load(invalid)
-			if loadError == nil || !strings.Contains(loadError.Error(), "REQUEST_PERCENT") {
-				subTest.Errorf("名前を含むエラーのはず: %v %v", loadError, invalid)
-			}
-		})
 	}
 }
