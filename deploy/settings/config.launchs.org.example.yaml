@@ -23,6 +23,11 @@ data:
   # volume の PVC の StorageClass(空ならクラスターの既定)と、アクセスモード。
   VOLUME_STORAGE_CLASS: longhorn
   VOLUME_ACCESS_MODE: ReadWriteMany
+  # deploy の Pod の requests(スケジューラが予約する量)を、limits(deploy の大きさ)の何 % にするか(1 から 100)。
+  # 100 は、requests と limits が同じ(使っていなくても、予約する)。CPU は、小さくすると、同じノードにたくさん置ける(limits は変わらない)。
+  # メモリは、足りなくなると Pod が止められるので、100 のままを勧める。作成済みの deploy は、次に反映するまで、変わらない。
+  CPU_REQUEST_PERCENT: "10"
+  MEMORY_REQUEST_PERCENT: "100"
   # クラスターのドメイン(service の DNS 名の最後の部分)。
   CLUSTER_DOMAIN: cluster.local
   # Traefik の Pod の場所(アクセスログを読む)。

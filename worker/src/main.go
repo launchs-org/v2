@@ -76,6 +76,7 @@ func run() error {
 	// k8s を操作する役を、設定に合わせて選ぶ。
 	operators, operatorsError := chooseClusterOperators(workerConfig.Kubernetes, cluster.OperatorSettings{
 		RuntimeClass: workerConfig.RuntimeClass, IngressNamespace: workerConfig.IngressNamespace, BlockedNetworks: workerConfig.BlockedNetworks,
+		CPURequestPercent: workerConfig.CPURequestPercent, MemoryRequestPercent: workerConfig.MemoryRequestPercent,
 	}, cluster.IngressRouteSettings{APIVersion: workerConfig.TraefikAPIVersion, EntryPoints: workerConfig.TraefikEntryPoints, StatsPlugin: workerConfig.IngressStatsPlugin},
 		cluster.VolumeSettings{StorageClass: workerConfig.VolumeStorageClass, AccessMode: workerConfig.VolumeAccessMode}, appLogger)
 	if operatorsError != nil {
