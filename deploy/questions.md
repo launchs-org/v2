@@ -1,6 +1,6 @@
 # 導入と運用の Q&A
 
-導入は [README.md](README.md) と [cluster/README.md](cluster/README.md)、更新・バックアップは [OPERATIONS.md](OPERATIONS.md)。ここは、**つまずいた症状から、原因と直し方を引く**ための表です(本番の Talos に入れたときの実例を含む)。
+導入と更新は [deploy.md](deploy.md)、構成は [description.md](description.md)、運用(バックアップなど)は [operation.md](operation.md)。ここは、**つまずいた症状から、原因と直し方を引く**ための表です(本番の Talos に入れたときの実例を含む)。
 
 ## 導入
 
@@ -10,7 +10,7 @@
 kubectl config current-context
 kubectl get nodes -o wide      # ノードの IP が、狙った環境か
 ```
-CIDR、StorageClass、Traefik の namespace は、環境ごとに違う。調べる手順は `cluster/README.md` の「0. 調べること」。
+CIDR、StorageClass、Traefik の namespace は、環境ごとに違う。調べる手順は `description.md` の「調べること」。
 
 **Q. Pod が `ImagePullBackOff`、`TLS handshake timeout` になる**
 GHCR(`ghcr.io/launchs-org/v2/…`)からの取得が、遅い、または、一時的に失敗している。数分待つと、自動で再試行されて、起動することが多い(本番の導入では、全 Pod が、約 7 分で Running)。`401`、`denied` なら、パッケージが非公開。Public にするか、`imagePullSecrets` を足す。
@@ -48,15 +48,15 @@ kubectl -n launchs run curltest --image=curlimages/curl --restart=Never --rm -i 
 - 最初の管理者は、`launchs-secret` の `AUTH_BOOTSTRAP_ADMIN_NAME` と `AUTH_BOOTSTRAP_ADMIN_PASSWORD`。**管理者が 1 人もいないときだけ**、auth が起動時に作る(後でパスワードを変えても、作り直されない)。
 - Turnstile を有効にした(`AUTH_TURNSTILE_SITE_KEY` と `AUTH_TURNSTILE_SECRET_KEY`)なら、Cloudflare の Turnstile のウィジェットの**許可ホスト名**に、`www.launchs.org` が必要。無ければ、確認で弾かれる。
 - サインアップは、`AUTH_SIGNUP_MODE=invite`(招待制)が既定。
-- 管理者の作成や昇格は、`OPERATIONS.md` §7。
+- 管理者の作成や昇格は、`operation.md` §7。
 
 **Q. code-server などの WebSocket が `1006` で切れる**
-Cloudflare 経由で、元のスキーム(https)とクライアント IP を Traefik が受け取れていない。Traefik に `launchs-edge` を入れる(`cluster/README.md` §3)。
+Cloudflare 経由で、元のスキーム(https)とクライアント IP を Traefik が受け取れていない。Traefik に `launchs-edge` を入れる(`description.md` の「Argo CD」(`traefik` の Application))。
 
 ## 運用
 
 **Q. 画面のメトリクス(CPU、メモリ)が `null`**
-metrics-server が無い(`cluster/README.md` §2)。入れた直後は、一部のノードが `kubectl top nodes` で `<unknown>` になることがある。少し待つ。
+metrics-server が無い(`description.md`。`launchs-cluster` の Application に含まれる)。入れた直後は、一部のノードが `kubectl top nodes` で `<unknown>` になることがある。少し待つ。
 
 **Q. アクセスログと集計が出ない**
 次を、順に確かめる。
@@ -79,10 +79,10 @@ Longhorn の RWX は、NFS の共有(share-manager)を起動するので、初�
 `kubectl -n launchs scale deploy/<名前> --replicas=<数>` で、一時的に下げる(恒久的には、`kustomization.yaml` の `replicas`)。watcher、logcollector、accessstats は、リーダー選出なので、複数でよい。
 
 **Q. 更新するときの順序は?**
-`OPERATIONS.md` §3(バックアップ → 差分 → 適用 → 確認)。**列を足すマイグレーションの後は、watcher と worker を再起動する**(`cached plan must not change result type` を避ける)。
+`operation.md` §3(バックアップ → 差分 → 適用 → 確認)。**列を足すマイグレーションの後は、watcher と worker を再起動する**(`cached plan must not change result type` を避ける)。
 
 **Q. 更新を戻したい**
-launchs 本体は `OPERATIONS.md` §6。Traefik は `helm rollback traefik <前の revision> -n traefik`(`helm history traefik -n traefik`)。
+launchs 本体は `operation.md` §6。Traefik は `helm rollback traefik <前の revision> -n traefik`(`helm history traefik -n traefik`)。
 
 **Q. Traefik を更新(再起動)すると、どうなる?**
 1 レプリカなら、数秒、**このクラスターの公開が、全部**止まる。`--atomic` を付けて、失敗したら、自動で戻す。時間の少ない時間帯に行う。
@@ -94,4 +94,4 @@ launchs 本体は `OPERATIONS.md` §6。Traefik は `helm rollback traefik <前�
 ノードのローカルディスクに載る。そのノードが壊れると、失う。重要なデータは、Longhorn(複製あり)に載せる。launchs 本体の Postgres と、利用者の volume は、Longhorn。
 
 **Q. バックアップは?**
-`OPERATIONS.md` §5(`pg_dump` と、Longhorn のスナップショット)。更新の前に、必ず取る。復元の手順も、同じ場所。
+`operation.md` §5(`pg_dump` と、Longhorn のスナップショット)。更新の前に、必ず取る。復元の手順も、同じ場所。
