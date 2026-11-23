@@ -110,3 +110,33 @@ func (loginFailureRepository *LoginFailureRepository) DeleteStale(requestContext
 	}
 	return result.RowsAffected, nil
 }
+
+// LockedUntil は、ユーザー名(小文字)のうち、いまログインがロックされているものの、ロックが解ける日時を返す(管理画面の一覧用)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userNamesLower: 調べる、小文字のユーザー名。
+//
+// 戻り値:
+//   - ロック中のユーザー名 → ロックが解ける日時。ロック中でないものは含まない。データベースのエラーは internal_error。
+func (loginFailureRepository *LoginFailureRepository) LockedUntil(requestContext context.Context, userNamesLower []string) (map[string]time.Time, error) {
+	// 調べる名前が無ければ、問い合わせない。
+	locked := map[string]time.Time{}
+	if len(userNamesLower) == 0 {
+		return locked, nil
+	}
+	// ロック中の行だけを読む。
+	var rows []struct {
+		UserNameLower string    `gorm:"column:user_name_lower"`
+		LockedUntil   time.Time `gorm:"column:locked_until"`
+	}
+	findError := loginFailureRepository.database.WithContext(requestContext).Table("login_failures").
+		Select("user_name_lower, locked_until").Where("user_name_lower IN ? AND locked_until > now()", userNamesLower).Find(&rows).Error
+	if findError != nil {
+		return nil, apperror.Wrap(apperror.KindInternal, "ロックの状態を確認できませんでした", findError)
+	}
+	for _, row := range rows {
+		locked[row.UserNameLower] = row.LockedUntil
+	}
+	return locked, nil
+}

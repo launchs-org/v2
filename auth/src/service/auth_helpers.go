@@ -116,3 +116,39 @@ func HashInvitationCode(invitationCode string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(invitationCode)))
 	return hex.EncodeToString(digest[:])
 }
+
+// SetIPBlockStore は、ブロックされた IP の確認先を設定する(起動のときに 1 回。コンストラクターの引数を増やさないための後付け)。
+//
+// 引数:
+//   - ipBlockStore: ブロックの確認先。nil なら、確認しない。
+func (authService *AuthService) SetIPBlockStore(ipBlockStore IPBlockStore) {
+	// 確認先を持たせる。
+	authService.ipBlockStore = ipBlockStore
+}
+
+// checkBlocked は、管理者がブロックした IP からの試行を、拒否する(履歴には、理由 blocked で残す)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - kind: 種類(signup か login)。
+//   - clientIP: クライアントの IP。
+//   - userAgent: クライアントの User-Agent。
+//
+// 戻り値:
+//   - ブロックされていれば forbidden。確認できなければ、そのエラー(確認できないまま通さない)。
+func (authService *AuthService) checkBlocked(requestContext context.Context, kind string, clientIP string, userAgent string) error {
+	// 確認先が無ければ、確認しない。
+	if authService.ipBlockStore == nil {
+		return nil
+	}
+	blocked, blockError := authService.ipBlockStore.IsBlocked(requestContext, clientIP)
+	if blockError != nil {
+		return blockError
+	}
+	if blocked {
+		// 履歴に残して(持ち主なし)、理由は、利用者に詳しく見せない。
+		authService.record(requestContext, "", "", kind, model.LoginReasonBlocked, clientIP, userAgent)
+		return apperror.New(apperror.KindForbidden, "このアドレスからのアクセスは、制限されています")
+	}
+	return nil
+}

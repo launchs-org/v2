@@ -104,8 +104,20 @@
 ```
 - Response (200)
 ```json
-{"userId": "userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8", "userName": "user1", "role": "user"}
+{"userId": "userid-80b0b29c-7514-40dd-a0b4-8f22f09329d8", "userName": "user1", "role": "user", "mustChangePassword": false}
 ```
+- Note: `mustChangePassword` は、**管理者が発行した一時パスワードのまま**か(本人が変えるまで true)。画面は、true の間、パスワードの変更を先に求める(API 自体は、この間も使える。強制は画面だけ)。
+
+### パスワードの変更 (/password)
+- Post: /password
+- Header: `{"Authorization": "Bearer <accessToken>"}`
+- Body
+```json
+{"currentPassword": "<現在のパスワード(一時パスワードでもよい)>", "newPassword": "<新しいパスワード>"}
+```
+- Response (200): `{"token": "<新しい refresh token>"}`
+- Note: 新しいパスワードは、サインアップと同じ強さの検査(12文字以上など)を通し、現在のものとは違うこと。変更すると、一時パスワードの要求が外れ、**全ての refresh token が無効**になる(他の端末は、ログインし直し)。返る新しい refresh token で、この端末は続けられる(access token を取り直す)。発行済みの access token は、期限(最大15分)まで使える。
+- Note: 現在のパスワードの間違いは **400**(401 にすると、画面がセッション切れと誤解する)で、ログインの失敗と同じに数え、続くとロックする(ロック中は **429** `Retry-After` つき)。盗まれた access token での総当たりを防ぐ。トークンが使えなければ 401。
 
 ### ログイン履歴
 - Get: /login-history

@@ -33,8 +33,8 @@ const adminPasswordEnvironmentName = "AUTH_ADMIN_PASSWORD"
 //   - 使い方が違う、設定や入力が不正、すでに存在するなどのときのエラー。
 func runAdminCommand(arguments []string) error {
 	// 使い方を確かめる。
-	if len(arguments) != 2 || (arguments[0] != "create" && arguments[0] != "promote") {
-		return errors.New("使い方: auth admin create <userName>(パスワードは、環境変数 " + adminPasswordEnvironmentName + " か標準入力) / auth admin promote <userName>")
+	if len(arguments) != 2 || (arguments[0] != "create" && arguments[0] != "promote" && arguments[0] != "reset-password") {
+		return errors.New("使い方: auth admin create <userName>(パスワードは、環境変数 " + adminPasswordEnvironmentName + " か標準入力) / auth admin promote <userName> / auth admin reset-password <userName>(パスワードは同じ)")
 	}
 	subcommand, userName := arguments[0], arguments[1]
 	// 設定を読み、データベースに接続する。
@@ -50,12 +50,26 @@ func runAdminCommand(arguments []string) error {
 	// 管理のユースケースを組み立てる(トークンは使わないので nil)。
 	adminService := service.NewAdminService(repository.NewUserRepository(appDatabase), repository.NewInvitationRepository(appDatabase), repository.NewLoginFailureRepository(appDatabase),
 		logger.New(os.Stderr, "auth-admin", authConfig.LogLevel), password.NewHasher(password.DefaultParameters()), nil)
+	// コマンドからの操作も、監査ログに残す。
+	adminService.SetAuditStore(repository.NewAuditRepository(appDatabase))
 	// 昇格のときは、パスワードは要らない。
 	if subcommand == "promote" {
 		if promoteError := adminService.PromoteToAdmin(context.Background(), userName); promoteError != nil {
 			return promoteError
 		}
 		fmt.Println("管理者にした:", userName)
+		return nil
+	}
+	// パスワードのリセットのときは、新しいパスワードを読んで、置き換える(管理者のパスワードは、この経路だけ)。
+	if subcommand == "reset-password" {
+		newPassword, readError := readAdminPassword(os.Stdin)
+		if readError != nil {
+			return readError
+		}
+		if resetError := adminService.SetPasswordByCommand(context.Background(), userName, newPassword); resetError != nil {
+			return resetError
+		}
+		fmt.Println("パスワードを置き換えた(有効なセッションは、全て無効):", userName)
 		return nil
 	}
 	// 作成のときは、パスワードを読む。

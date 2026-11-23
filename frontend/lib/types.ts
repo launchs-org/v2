@@ -4,6 +4,8 @@ export type User = {
   status: "active" | "banned"
   role: "user" | "admin"
   createdAt: string
+  /** 一時パスワードのままか(true の間は、パスワードの変更を先に求める)。 */
+  mustChangePassword?: boolean
 }
 
 export type AuthConfig = {

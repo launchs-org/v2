@@ -21,9 +21,51 @@ type AdminUseCase interface {
 	BanUser(requestContext context.Context, actorID string, userID string) error
 	UnbanUser(requestContext context.Context, actorID string, userID string) error
 	UnlockUser(requestContext context.Context, actorID string, userID string) error
+	ResetPassword(requestContext context.Context, actorID string, userID string) (string, error)
+	UserLocks(requestContext context.Context, users []model.User) (map[string]time.Time, error)
 	CreateInvitation(requestContext context.Context, actorID string, lifetime time.Duration, note string) (model.Invitation, string, error)
 	ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error)
 	RevokeInvitation(requestContext context.Context, actorID string, invitationID string) error
+	ListLoginEvents(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error)
+}
+
+// AdminLoginEventResponse は、ログイン履歴の1件。
+type AdminLoginEventResponse struct {
+	// EventID は、行の ID。
+	EventID int64 `json:"eventId"`
+
+	// UserID は、持ち主のユーザーの ID。存在しない名前への試行は null。
+	UserID *string `json:"userId"`
+
+	// UserName は、試行で指定された名前(小文字)。
+	UserName string `json:"userName"`
+
+	// Kind は、種類(signup か login)。
+	Kind string `json:"kind"`
+
+	// Result は、結果(success か failure)。
+	Result string `json:"result"`
+
+	// Reason は、失敗の理由。成功なら null。
+	Reason *string `json:"reason"`
+
+	// IP は、クライアントの IP。
+	IP string `json:"ip"`
+
+	// UserAgent は、クライアントの User-Agent。
+	UserAgent string `json:"userAgent"`
+
+	// OccurredAt は、試行の日時(JST)。
+	OccurredAt string `json:"occurredAt"`
+}
+
+// LoginEventsResponse は、ログイン履歴の一覧のレスポンス。
+type LoginEventsResponse struct {
+	// Events は、履歴(新しい順)。
+	Events []AdminLoginEventResponse `json:"events"`
+
+	// NextCursor は、次のページのカーソル。最後のページなら null。
+	NextCursor *string `json:"nextCursor"`
 }
 
 // AdminUserResponse は、管理 API が返す、ユーザー1人。パスワードのハッシュは、含めない。
@@ -42,6 +84,15 @@ type AdminUserResponse struct {
 
 	// CreatedAt は、作成の日時(JST)。
 	CreatedAt string `json:"createdAt"`
+
+	// MustChangePassword は、一時パスワードのまま(本人が、まだ変えていない)か。
+	MustChangePassword bool `json:"mustChangePassword"`
+
+	// Locked は、ログインの失敗で、いまロックされているか(停止とは別。時間が過ぎると解ける)。
+	Locked bool `json:"locked"`
+
+	// LockedUntil は、ロックが解ける日時(JST)。ロック中でなければ null。
+	LockedUntil *string `json:"lockedUntil"`
 }
 
 // AdminUsersResponse は、ユーザーの一覧のレスポンス。
@@ -193,7 +244,7 @@ func encodeNextCursor(next *pagination.Position) *string {
 //   - レスポンス。
 func newAdminUserResponse(user model.User) AdminUserResponse {
 	// パスワードのハッシュを除いて、日時を JST にする。
-	return AdminUserResponse{UserID: user.ID, UserName: user.UserName, Status: user.Status, Role: user.Role, CreatedAt: jst.Format(user.CreatedAt)}
+	return AdminUserResponse{UserID: user.ID, UserName: user.UserName, Status: user.Status, Role: user.Role, CreatedAt: jst.Format(user.CreatedAt), MustChangePassword: user.MustChangePassword}
 }
 
 // newInvitationResponse は、招待を、レスポンスにする。
@@ -237,9 +288,14 @@ func (adminController *AdminController) ListUsers(echoContext *echo.Context) err
 	if listError != nil {
 		return listError
 	}
+	// ログインの失敗によるロックの状態を付ける。
+	locks, lockError := adminController.adminUseCase.UserLocks(echoContext.Request().Context(), users)
+	if lockError != nil {
+		return lockError
+	}
 	response := AdminUsersResponse{Users: make([]AdminUserResponse, 0, len(users)), NextCursor: encodeNextCursor(next)}
 	for _, user := range users {
-		response.Users = append(response.Users, newAdminUserResponse(user))
+		response.Users = append(response.Users, withLock(newAdminUserResponse(user), locks[user.ID]))
 	}
 	return echoContext.JSON(http.StatusOK, response)
 }
@@ -261,7 +317,52 @@ func (adminController *AdminController) GetUser(echoContext *echo.Context) error
 	if getError != nil {
 		return getError
 	}
-	return echoContext.JSON(http.StatusOK, newAdminUserResponse(user))
+	locks, lockError := adminController.adminUseCase.UserLocks(echoContext.Request().Context(), []model.User{user})
+	if lockError != nil {
+		return lockError
+	}
+	return echoContext.JSON(http.StatusOK, withLock(newAdminUserResponse(user), locks[user.ID]))
+}
+
+// withLock は、ユーザーのレスポンスに、ログインのロックの状態を付ける。
+//
+// 引数:
+//   - response: ユーザーのレスポンス。
+//   - lockedUntil: ロックが解ける日時(ロック中でなければ、ゼロ値)。
+//
+// 戻り値:
+//   - ロックの状態を付けたレスポンス。
+func withLock(response AdminUserResponse, lockedUntil time.Time) AdminUserResponse {
+	// ゼロ値は、ロック中でない。
+	if lockedUntil.IsZero() {
+		return response
+	}
+	formatted := jst.Format(lockedUntil)
+	response.Locked = true
+	response.LockedUntil = &formatted
+	return response
+}
+
+// ResetPassword は、POST /admin/users/:userId/password-reset のハンドラー。一時パスワードを発行する(このレスポンスでだけ分かる)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - {"password": "..."}(200)。トークンが使えなければ 401、管理者でなければ 403、ユーザーが無ければ 404。
+func (adminController *AdminController) ResetPassword(echoContext *echo.Context) error {
+	// 管理者であることを確かめて、リセットする。
+	actorID, authorizeError := adminController.authorize(echoContext)
+	if authorizeError != nil {
+		return authorizeError
+	}
+	temporaryPassword, resetError := adminController.adminUseCase.ResetPassword(echoContext.Request().Context(), actorID, echoContext.Param("userId"))
+	if resetError != nil {
+		return resetError
+	}
+	// 一時パスワードは、キャッシュされないようにして返す。
+	echoContext.Response().Header().Set("Cache-Control", "no-store")
+	return echoContext.JSON(http.StatusOK, map[string]string{"password": temporaryPassword})
 }
 
 // userAction は、ユーザーを対象にする操作(停止、解除、ロック解除)のハンドラーを作る。
@@ -386,4 +487,35 @@ func (adminController *AdminController) RevokeInvitation(echoContext *echo.Conte
 		return revokeError
 	}
 	return echoContext.JSON(http.StatusOK, struct{}{})
+}
+
+// ListLoginEvents は、GET /admin/login-events のハンドラー。全ユーザーのログイン履歴(失敗も含む)を返す。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。クエリの result(success か failure)と userName(部分一致)で絞り込める。
+//
+// 戻り値:
+//   - 履歴の一覧(200)。トークンが使えなければ 401、管理者でなければ 403、指定が不正なら 400。
+func (adminController *AdminController) ListLoginEvents(echoContext *echo.Context) error {
+	// 管理者であることと、ページの指定を確かめる。
+	if _, authorizeError := adminController.authorize(echoContext); authorizeError != nil {
+		return authorizeError
+	}
+	limit, after, pageError := readPage(echoContext)
+	if pageError != nil {
+		return pageError
+	}
+	// 取得して、レスポンスにする。
+	events, next, listError := adminController.adminUseCase.ListLoginEvents(echoContext.Request().Context(), limit, after, echoContext.QueryParam("result"), echoContext.QueryParam("userName"))
+	if listError != nil {
+		return listError
+	}
+	response := LoginEventsResponse{Events: make([]AdminLoginEventResponse, 0, len(events)), NextCursor: encodeNextCursor(next)}
+	for _, event := range events {
+		response.Events = append(response.Events, AdminLoginEventResponse{
+			EventID: event.ID, UserID: event.UserID, UserName: event.UserNameLower, Kind: event.Kind, Result: event.Result,
+			Reason: event.Reason, IP: event.IP, UserAgent: event.UserAgent, OccurredAt: jst.Format(event.OccurredAt),
+		})
+	}
+	return echoContext.JSON(http.StatusOK, response)
 }

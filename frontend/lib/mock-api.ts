@@ -389,6 +389,7 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
       result = { token: "mock-refresh-token" }
     } else if (segments[1] === "refresh") result = { token: "mock-access-token" }
     else if (segments[1] === "me") result = currentUser
+    else if (segments[1] === "password" && method === "POST") result = { token: "mock-refresh-token" }
     else if (segments[1] === "logout") result = undefined
     else if (segments[1] === "login-history") {
       result = {

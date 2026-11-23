@@ -1,5 +1,5 @@
-# main に push(= develop → main の PR をマージ)されたら、8 つのイメージを、ビルドして、GHCR に push する。
-# イメージ: backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate(ghcr.io/<リポジトリ>/<名前>)。
+# main に push(= develop → main の PR をマージ)されたら、9 つのイメージを、ビルドして、GHCR に push する。
+# イメージ: backend、worker、watcher、auth、logcollector、accessstats、admin、frontend、migrate(ghcr.io/<リポジトリ>/<名前>)。
 # タグ: sha-<コミットの短い SHA> と latest。そのあと、deploy/kustomization.yaml の newTag を、今回の sha-… に書き換えて、main にコミットする(update-tags)。
 name: release
 
@@ -47,6 +47,8 @@ jobs:
             dockerfile: logcollector/dockerfile
           - name: accessstats
             dockerfile: accessstats/dockerfile
+          - name: admin
+            dockerfile: admin/dockerfile
           - name: frontend
             dockerfile: frontend/dockerfile
           - name: migrate
@@ -98,7 +100,7 @@ jobs:
           # ビルドの証明(provenance)は、付ける(どのコミットから作ったか、確かめられる)。
           provenance: true
 
-  # 8 つのイメージが、全部出たあとで、deploy/kustomization.yaml の newTag を、今回の sha-… に書き換えて、main にコミットする。
+  # 9 つのイメージが、全部出たあとで、deploy/kustomization.yaml の newTag を、今回の sha-… に書き換えて、main にコミットする。
   # (GITHUB_TOKEN での push は、新しいワークフローを起こさないので、この push で、release が、もう一度動くことはない。)
   # クラスターへの適用は、しない(オンプレで、GitHub のランナーから届かない)。コミットされたタグで、運用者が `kubectl apply -k .` する(deploy/OPERATIONS.md)。
   update-tags:

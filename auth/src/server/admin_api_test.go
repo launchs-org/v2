@@ -455,3 +455,244 @@ func TestBootstrapAdmin(testing *testing.T) {
 		testing.Fatalf("作られるのは、ちょうど1人のはず: created=%d admins=%d", createdCount, racingAdmins)
 	}
 }
+
+// TestAdminLoginEvents は、管理者が、全ユーザーのログイン履歴(失敗と、存在しない名前への試行を含む)を、絞り込んで見られることを確かめる。
+func TestAdminLoginEvents(testing *testing.T) {
+	// 管理者と、一般のユーザーを用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	_, userToken := accessTokenFor(testing, environment, "mallory", true, "203.0.113.20")
+	// 存在しない名前と、パスワードの間違いで、失敗の履歴を作る。
+	call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"ghost","password":"`+goodPassword+`"}`, "", "203.0.113.30")
+	call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"mallory","password":"wrong-password-123"}`, "", "203.0.113.31")
+	list := func(query string, token string) response {
+		return call(testing, environment, http.MethodGet, "/auth/admin/login-events"+query, "", token, "203.0.113.2")
+	}
+	// 失敗だけに絞ると、2 件の失敗が、理由と IP つきで出る(存在しない名前は、持ち主なし)。
+	failures := list("?result=failure", admin.accessToken)
+	events, _ := failures.body["events"].([]any)
+	if failures.status != 200 || len(events) != 2 {
+		testing.Fatalf("失敗が 2 件のはず: %d %v", failures.status, failures.body)
+	}
+	foundGhost := false
+	for _, entry := range events {
+		event := entry.(map[string]any)
+		if event["userName"] == "ghost" && event["userId"] == nil && event["reason"] == "unknown_user" && event["ip"] == "203.0.113.30" {
+			foundGhost = true
+		}
+	}
+	if !foundGhost {
+		testing.Errorf("存在しない名前への試行が出るはず: %v", events)
+	}
+	// ユーザー名の一部で絞り込める。
+	if byName := list("?userName=MALLO", admin.accessToken); len(byName.body["events"].([]any)) < 2 {
+		testing.Errorf("名前で絞り込めるはず: %v", byName.body)
+	}
+	// ページングできる(1 件ずつ)。
+	first := list("?limit=1", admin.accessToken)
+	if first.body["nextCursor"] == nil {
+		testing.Fatalf("次のページがあるはず: %v", first.body)
+	}
+	second := list("?limit=1&cursor="+first.body["nextCursor"].(string), admin.accessToken)
+	if second.status != 200 || len(second.body["events"].([]any)) != 1 {
+		testing.Errorf("2 ページ目が取れるはず: %d %v", second.status, second.body)
+	}
+	// 結果の指定が不正なら 400。管理者でなければ 403。トークンが無ければ 401。
+	if bad := list("?result=maybe", admin.accessToken); bad.status != 400 {
+		testing.Errorf("不正な result は 400 のはず: %d", bad.status)
+	}
+	if forbidden := list("", userToken); forbidden.status != 403 {
+		testing.Errorf("管理者でなければ 403 のはず: %d", forbidden.status)
+	}
+	if anonymous := list("", ""); anonymous.status != 401 {
+		testing.Errorf("トークンが無ければ 401 のはず: %d", anonymous.status)
+	}
+}
+
+// TestBlockedIPAndAudit は、ブロックした IP(単独と範囲)からのログインとサインアップが拒否され、期限切れ・他の IP は通ることと、
+// 管理操作が監査ログに残ることを確かめる。
+func TestBlockedIPAndAudit(testing *testing.T) {
+	// 管理者と一般のユーザーを用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "victim", true, "203.0.113.50")
+	// 単独の IP と、範囲(期限つき)と、期限切れの範囲を、登録する(管理コンテナが書く表と、同じ形)。
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by) VALUES ('block-1', '198.51.100.7/32', 'x')")
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by, expires_at) VALUES ('block-2', '192.0.2.0/24', 'x', now() + interval '1 hour')")
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by, expires_at) VALUES ('block-3', '203.0.113.99/32', 'x', now() - interval '1 hour')")
+	loginFrom := func(ip string) response {
+		return call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"victim","password":"`+goodPassword+`"}`, "", ip)
+	}
+	// ブロックされた IP は、正しいパスワードでも、403。範囲の中の IP も、403。
+	for _, blockedIP := range []string{"198.51.100.7", "192.0.2.200"} {
+		if blocked := loginFrom(blockedIP); blocked.status != 403 {
+			testing.Errorf("%s は 403 のはず: %d %v", blockedIP, blocked.status, blocked.body)
+		}
+	}
+	if signup := call(testing, environment, http.MethodPost, "/auth/signup", `{"userName":"newbie","password":"`+goodPassword+`"}`, "", "198.51.100.7"); signup.status != 403 {
+		testing.Errorf("サインアップも 403 のはず: %d", signup.status)
+	}
+	// 期限切れのブロックと、範囲の外の IP は、通る。
+	for _, allowedIP := range []string{"203.0.113.99", "198.51.100.8"} {
+		if allowed := loginFrom(allowedIP); allowed.status != 200 {
+			testing.Errorf("%s は通るはず: %d %v", allowedIP, allowed.status, allowed.body)
+		}
+	}
+	// 拒否は、履歴に、理由 blocked で残る(持ち主なし)。
+	var blockedEvents int64
+	environment.database.Table("login_events").Where("reason = 'blocked' AND user_id IS NULL").Count(&blockedEvents)
+	if blockedEvents != 3 {
+		testing.Errorf("blocked の履歴が 3 件のはず: %d", blockedEvents)
+	}
+	// 管理操作(停止)が、監査ログに、誰が・何を・何にかが残る。
+	if banned := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/ban", "", admin.accessToken, "203.0.113.2"); banned.status != 200 {
+		testing.Fatalf("停止できるはず: %d", banned.status)
+	}
+	var audit struct {
+		ActorID string
+		Action  string
+		Target  string
+	}
+	environment.database.Raw("SELECT actor_id, action, target FROM admin_audit_logs WHERE action = 'ban'").Scan(&audit)
+	if audit.ActorID != admin.userID || audit.Target != userID {
+		testing.Errorf("監査ログに残るはず: %+v", audit)
+	}
+}
+
+// TestAdminLockedAndPasswordReset は、ログインの失敗でロックされたユーザーが一覧に出ることと、
+// パスワードのリセットで、一時パスワードで入れて、古いパスワードと古いセッションが使えなくなり、ロックも解けることを確かめる。
+func TestAdminLockedAndPasswordReset(testing *testing.T) {
+	// 管理者と、一般のユーザー(セッションつき)を用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "pat", true, "203.0.113.60")
+	oldSession := login(testing, environment, "pat", goodPassword, "203.0.113.61")
+	if oldSession.status != 200 {
+		testing.Fatalf("ログインできるはず: %d", oldSession.status)
+	}
+	// 失敗を重ねて、ロックさせる(別々の IP から。IP のレート制限に当たらないように)。
+	for attempt := 0; attempt < environment.settings.LoginMaxFailures; attempt++ {
+		call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"pat","password":"wrong-password-123"}`, "", "203.0.113."+string(rune('0'+attempt))+"0")
+	}
+	findUser := func() map[string]any {
+		listed := call(testing, environment, http.MethodGet, "/auth/admin/users", "", admin.accessToken, "203.0.113.2")
+		for _, entry := range listed.body["users"].([]any) {
+			if entry.(map[string]any)["userId"] == userID {
+				return entry.(map[string]any)
+			}
+		}
+		testing.Fatal("一覧にユーザーがいるはず")
+		return nil
+	}
+	// 一覧に、ロック中と、解ける日時が出る(取得でも同じ)。
+	if locked := findUser(); locked["locked"] != true || locked["lockedUntil"] == nil {
+		testing.Fatalf("ロック中と出るはず: %v", locked)
+	}
+	if single := call(testing, environment, http.MethodGet, "/auth/admin/users/"+userID, "", admin.accessToken, "203.0.113.2"); single.body["locked"] != true {
+		testing.Errorf("取得でもロック中のはず: %v", single.body)
+	}
+	// リセットすると、一時パスワードが返る(強さの検査を通る長さ)。管理者でなければ 403、ユーザーが無ければ 404。
+	if forbidden := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", "", "203.0.113.2"); forbidden.status != 401 {
+		testing.Errorf("トークン無しは 401 のはず: %d", forbidden.status)
+	}
+	if missing := call(testing, environment, http.MethodPost, "/auth/admin/users/userid-none/password-reset", "", admin.accessToken, "203.0.113.2"); missing.status != 404 {
+		testing.Errorf("無いユーザーは 404 のはず: %d", missing.status)
+	}
+	reset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", admin.accessToken, "203.0.113.2")
+	temporaryPassword, _ := reset.body["password"].(string)
+	if reset.status != 200 || len(temporaryPassword) != 20 {
+		testing.Fatalf("一時パスワードが返るはず: %d %v", reset.status, reset.body)
+	}
+	// ロックは解け、一時パスワードで入れて、古いパスワードは使えない。古いセッション(refresh token)も、使えない。
+	if after := findUser(); after["locked"] != false {
+		testing.Errorf("ロックは解けるはず: %v", after)
+	}
+	if oldPassword := login(testing, environment, "pat", goodPassword, "203.0.113.70"); oldPassword.status != 401 {
+		testing.Errorf("古いパスワードは 401 のはず: %d", oldPassword.status)
+	}
+	if newPassword := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"pat","password":"`+temporaryPassword+`"}`, "", "203.0.113.71"); newPassword.status != 200 {
+		testing.Errorf("一時パスワードで入れるはず: %d %v", newPassword.status, newPassword.body)
+	}
+	if oldRefresh := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldSession.body["token"].(string), "203.0.113.72"); oldRefresh.status != 401 {
+		testing.Errorf("古いセッションは 401 のはず: %d", oldRefresh.status)
+	}
+	// 管理者のパスワードは、画面(API)からはリセットできない(自分自身も)。コマンドの経路でだけ、置き換えられる。
+	if adminReset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+admin.userID+"/password-reset", "", admin.accessToken, "203.0.113.2"); adminReset.status != 403 {
+		testing.Errorf("管理者のリセットは 403 のはず: %d %v", adminReset.status, adminReset.body)
+	}
+	if commandError := environment.admin.SetPasswordByCommand(context.Background(), "root-admin", "Zq9-plumb-Walnut-42xv"); commandError != nil {
+		testing.Fatalf("コマンドの経路では、管理者のパスワードを置き換えられるはず: %v", commandError)
+	}
+	if weak := environment.admin.SetPasswordByCommand(context.Background(), "root-admin", "short"); weak == nil {
+		testing.Error("弱いパスワードは、拒否されるはず")
+	}
+	if replaced := login(testing, environment, "root-admin", "Zq9-plumb-Walnut-42xv", "203.0.113.80"); replaced.status != 200 {
+		testing.Errorf("置き換えたパスワードで入れるはず: %d", replaced.status)
+	}
+	// 監査ログに残り、パスワードは含まれない。
+	var detail string
+	environment.database.Raw("SELECT concat(action, target, detail) FROM admin_audit_logs WHERE action = 'password_reset'").Scan(&detail)
+	if detail == "" || strings.Contains(detail, temporaryPassword) {
+		testing.Errorf("監査ログに残り、パスワードは含まないはず: %q", detail)
+	}
+}
+
+// TestChangePassword は、一時パスワードのユーザーに変更の要求が付き、本人のパスワードの変更で外れること、
+// 現在のパスワードの間違い・弱いパスワード・同じパスワードの拒否、古いセッションの無効化、間違いの繰り返しによるロックを確かめる。
+func TestChangePassword(testing *testing.T) {
+	// 管理者と、一般のユーザーを用意し、管理者がリセットする。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "kim", true, "203.0.113.90")
+	reset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", admin.accessToken, "203.0.113.2")
+	temporaryPassword, _ := reset.body["password"].(string)
+	if temporaryPassword == "" {
+		testing.Fatalf("リセットできるはず: %v", reset.body)
+	}
+	// 一時パスワードでログインすると、/me に変更の要求が付く。管理画面の一覧にも出る。
+	session := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"kim","password":"`+temporaryPassword+`"}`, "", "203.0.113.91")
+	oldRefresh := session.body["token"].(string)
+	access := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldRefresh, "203.0.113.91").body["token"].(string)
+	if me := call(testing, environment, http.MethodGet, "/auth/me", "", access, "203.0.113.91"); me.body["mustChangePassword"] != true {
+		testing.Fatalf("変更の要求が付くはず: %v", me.body)
+	}
+	change := func(current string, next string) response {
+		return call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"`+current+`","newPassword":"`+next+`"}`, access, "203.0.113.91")
+	}
+	// 弱い・同じ・現在のパスワードの間違いは、400(401 ではない)。トークンが無ければ 401。
+	if weak := change(temporaryPassword, "short"); weak.status != 400 {
+		testing.Errorf("弱いパスワードは 400 のはず: %d", weak.status)
+	}
+	if same := change(temporaryPassword, temporaryPassword); same.status != 400 {
+		testing.Errorf("同じパスワードは 400 のはず: %d", same.status)
+	}
+	if wrong := change("not-the-password-1", "Zq9-plumb-Walnut-42xv"); wrong.status != 400 {
+		testing.Errorf("現在のパスワードの間違いは 400 のはず: %d", wrong.status)
+	}
+	if anonymous := call(testing, environment, http.MethodPost, "/auth/password", `{}`, "", "203.0.113.91"); anonymous.status != 401 {
+		testing.Errorf("トークン無しは 401 のはず: %d", anonymous.status)
+	}
+	// 変更に成功すると、新しい refresh token が返り、変更の要求は外れ、古い refresh token は使えなくなる。
+	changed := change(temporaryPassword, "Zq9-plumb-Walnut-42xv")
+	newRefresh, _ := changed.body["token"].(string)
+	if changed.status != 200 || newRefresh == "" {
+		testing.Fatalf("変更できるはず: %d %v", changed.status, changed.body)
+	}
+	if oldSession := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldRefresh, "203.0.113.91"); oldSession.status != 401 {
+		testing.Errorf("古いセッションは 401 のはず: %d", oldSession.status)
+	}
+	freshAccess := call(testing, environment, http.MethodPost, "/auth/refresh", "", newRefresh, "203.0.113.91").body["token"].(string)
+	if me := call(testing, environment, http.MethodGet, "/auth/me", "", freshAccess, "203.0.113.91"); me.body["mustChangePassword"] != false {
+		testing.Errorf("変更の要求は外れるはず: %v", me.body)
+	}
+	if login := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"kim","password":"Zq9-plumb-Walnut-42xv"}`, "", "203.0.113.92"); login.status != 200 {
+		testing.Errorf("新しいパスワードで入れるはず: %d", login.status)
+	}
+	// 現在のパスワードを間違え続けると、ロックされる(盗まれた access token での総当たりを防ぐ)。
+	for attempt := 0; attempt < environment.settings.LoginMaxFailures; attempt++ {
+		call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"wrong-guess-123","newPassword":"Another-Strong-Pass-77qq"}`, freshAccess, "203.0.113.93")
+	}
+	if locked := call(testing, environment, http.MethodPost, "/auth/password", `{"currentPassword":"Zq9-plumb-Walnut-42xv","newPassword":"Another-Strong-Pass-77qq"}`, freshAccess, "203.0.113.93"); locked.status != 429 {
+		testing.Errorf("ロック中は 429 のはず: %d %v", locked.status, locked.body)
+	}
+}

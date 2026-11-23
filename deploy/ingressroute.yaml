@@ -16,6 +16,11 @@ spec:
         - name: backend
           port: 8080
     - kind: Rule
+      match: Host(`www.shconn.org`) && PathPrefix(`/admin-api/`)
+      services:
+        - name: admin
+          port: 8080
+    - kind: Rule
       match: Host(`www.shconn.org`) && PathPrefix(`/auth/`)
       services:
         - name: auth
