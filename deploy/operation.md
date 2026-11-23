@@ -1,6 +1,6 @@
 # 本番の運用手順(リリース・マイグレーション・バックアップ)
 
-namespace `launchs` で動かしている launchs を、更新したり、戻したり、バックアップしたりする手順です。最初の導入は [README.md](README.md) を見てください。
+namespace `launchs` で動かしている launchs を、更新したり、戻したり、バックアップしたりする手順です。最初の導入は [deploy.md](deploy.md) を見てください。
 コマンドは、`deploy/` で、実行します。**環境ごとの設定(`settings/`。ConfigMap と Secret)は、本体と別に適用します**(`kubectl apply -k settings/`。`settings/secret.yaml` を置いた状態で)。本体の `kubectl apply -k .` は、設定を変えません。
 
 ## 1. 全体の流れ
@@ -175,7 +175,7 @@ kubectl -n launchs rollout restart deploy/backend
 | 症状 | 原因と対処 |
 |---|---|
 | backend、auth が `Init:CrashLoopBackOff` | `kubectl logs … -c migrate` を見る。`lookup postgres … no such host` なら、Service `postgres` が、ない。`database "app" does not exist` なら、DB が作られていない(§8.1)。`Dirty database version` なら、§4.1。 |
-| `too many clients already` | PostgreSQL の `max_connections`(`postgres.yaml`)が、足りない。レプリカを増やしたときは、見直す([README.md](README.md) の「高可用性」)。 |
+| `too many clients already` | PostgreSQL の `max_connections`(`postgres.yaml`)が、足りない。レプリカを増やしたときは、見直す([description.md](description.md) の「高可用性」)。 |
 | 新しいイメージにしたのに、変わらない | `latest` で、マニフェストが同じ(§3.1)。または、`newTag` が、8 つのうち、一部しか変わっていない。 |
 | `ImagePullBackOff` | タグが、存在しない(`release` が、失敗している)、または、GHCR のパッケージが、非公開で、`imagePullSecrets` がない。 |
 | worker、watcher が、`database … does not exist` | マイグレーションが、まだ流れていない(backend の更新を、待つ)。 |

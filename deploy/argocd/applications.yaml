@@ -1,7 +1,7 @@
 # Argo CD の Application(クラスターに、launchs と、その土台を、全部入れる)。
 # Argo CD が入っているクラスターで、1 回だけ、次のように適用する(中身の同期は、Argo CD の画面か CLI で行う):
 #   kubectl apply -f deploy/argocd/applications.yaml
-# 同期は、手動(自動にはしていない)。順序: ①traefik → ②launchs-cluster → ③launchs-prod(deploy/README.md、deploy/cluster/README.md)。
+# 同期は、手動(自動にはしていない)。順序: ①traefik → ②launchs-cluster → ③launchs-prod(deploy/deploy.md。全部は、deploy/setup.sh が行う)。
 # 先に必要なもの(Git に入れない秘密): launchs の Secret(deploy/settings/secret.example.yaml)、cloudflared の Secret(deploy/cluster/tunnel-token.example.yaml)。
 ---
 # ① Traefik(Helm のチャートと、launchs のプラグインを含む values。values は、deploy/cluster/traefik-values.yaml)。
