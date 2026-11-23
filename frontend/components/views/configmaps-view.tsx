@@ -44,7 +44,7 @@ export function ConfigMapsView({ project, refreshInterval, nav }: ProjectViewPro
       {!data && !error && <LoadingState />}
       {data && items.length === 0 && <EmptyState title="ConfigMap はまだありません" description="「+ ConfigMap を作る」から、設定ファイルをアップロードするか、書いて追加できます。" />}
       {data && items.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 320px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+        <div className="cm-split" style={{ display: "grid", gridTemplateColumns: "minmax(240px, 320px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
           <div className="col" style={{ gap: 8 }} role="listbox" aria-label="ConfigMap の一覧">
             {items.map((item) => (
               <button key={item.configMapId} type="button" role="option" aria-selected={item.configMapId === activeId} className={`opt ${item.configMapId === activeId ? "on" : ""}`} style={{ height: "auto", padding: "10px 14px", flexDirection: "column", alignItems: "flex-start", gap: 4 }} onClick={() => setSelectedId(item.configMapId)}>
@@ -346,7 +346,7 @@ function DraftFileRow({ file, busy, duplicate, onChange, onRemove, onReplace }: 
   const keyProblem = file.key === "" ? "" : validateKey(file.key)
   return (
     <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 8, background: "var(--panel2)" }}>
-      <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+      <div className="row cm-file-row" style={{ gap: 8, flexWrap: "nowrap" }}>
         <input className={`inp mono ${keyProblem || duplicate ? "chg" : ""}`} style={{ flex: 1, minWidth: 0 }} value={file.key} onChange={(event) => onChange({ key: event.target.value })} placeholder="app.conf" aria-label="ファイル名" maxLength={253} />
         <span className={`badge ${file.encoding === "text" ? "b-dim" : "b-info"}`}><i />{file.encoding === "text" ? "テキスト" : "バイナリ"}</span>
         <span className="mut mono" style={{ whiteSpace: "nowrap" }}>{formatBytes(file.size)}</span>
