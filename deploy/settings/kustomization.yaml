@@ -1,15 +1,12 @@
-# 環境ごとの設定(秘密ではない設定と、秘密)。本体(`deploy/kustomization.yaml`)とは、別に適用する。
+# 秘密(Secret)。Git に入れない(secret.yaml は gitignore。secret.example.yaml をコピーして作る)。
 #
-#   kubectl apply -k settings/        # この場所(deploy/settings/)で。または、deploy/ で `kubectl apply -k settings/`
+#   kubectl apply -k settings/        # deploy/ で
 #
-# 本体より先に適用する(各 Deployment が、ConfigMap `launchs-config` と、Secret `launchs-secret`、`launchs-auth-keys` を参照するため)。
-# 先に namespace `launchs` が要る(本体の namespace.yaml。手順は ../README.md)。
-#
-# secret.yaml は gitignore(リポジトリには置かない)。secret.example.yaml をコピーして作る。
+# 環境ごとの設定(ConfigMap launchs-config)は、本体(deploy/kustomization.yaml)に含まれる(settings/config.yaml)。Argo CD の kustomize.patches で、上書きできる(../argocd.md)。
+# 先に namespace `launchs` が要る(本体の namespace.yaml。手順は ../argocd.md)。
 # secret.example.yaml(雛形)は、placeholder の値が入っているので、ここには含めない(誤って適用しない)。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - config.yaml
   - secret.yaml

@@ -1,0 +1,12 @@
+# cloudflared のトンネルのトークンの Secret の雛形(適用の対象ではない。kustomization.yaml に入れていない)。
+# 使い方: Cloudflare Zero Trust の「Networks → Tunnels」で、トンネルのトークンを取り、次のように、直接作る(ファイルに書いてコミットしない)。
+#   kubectl -n cloudflared create secret generic tunnel-token --from-literal=token='<トンネルのトークン>'
+# namespace `cloudflared` は、cloudflared.yaml が作る(先に同期しておく)。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tunnel-token
+  namespace: cloudflared
+type: Opaque
+stringData:
+  token: "<トンネルのトークン>"

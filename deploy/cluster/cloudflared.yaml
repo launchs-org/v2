@@ -1,0 +1,67 @@
+# cloudflared(Cloudflare Tunnel)。外からの通信を、Traefik へ届ける入口。各ノードに 1 つずつ(DaemonSet)。
+# トンネルのトークンは、Git に入れない: Secret `tunnel-token`(キー token)を、別に作る(tunnel-token.example.yaml)。
+# トンネルの公開ホスト名(www.launchs.org と *.launchs.org → http://traefik.traefik:80)は、Cloudflare のダッシュボードで設定する。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflared
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cloudflared-daemonset
+  namespace: cloudflared
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      pod: cloudflared
+  # 入口が全て止まらないよう、1 ノードずつ更新する。
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        pod: cloudflared
+        # Datadog の admission webhook が、Pod に hostPath を差し込むのを避ける。
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # ノードが落ちたとき、早く手放す(他のノードの Pod が、引き受ける)。
+      tolerations:
+        - {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 10}
+        - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 10}
+      containers:
+        - name: cloudflared
+          # 入口なので、版を固定したいときは、ここを `cloudflare/cloudflared:<年.月.日>` に変える。
+          image: cloudflare/cloudflared:latest
+          imagePullPolicy: Always
+          command: [cloudflared, tunnel, --no-autoupdate, --loglevel, info, --metrics, "0.0.0.0:2000", --protocol, http2, run]
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tunnel-token
+                  key: token
+          livenessProbe:
+            httpGet: {path: /ready, port: 2000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 1
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

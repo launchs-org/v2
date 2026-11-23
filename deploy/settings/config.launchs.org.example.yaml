@@ -1,10 +1,13 @@
-# 秘密ではない設定。自分の環境に合わせて、変える(特に INGRESS_BASE_DOMAIN)。
+# 本番 launchs.org の値の例(適用の対象ではない)。config.yaml との違いは、LAUNCHS_HOST、INGRESS_BASE_DOMAIN、VOLUME_STORAGE_CLASS、AUTH_TRUSTED_PROXY_CIDRS。
+# Argo CD の Application(argocd/applications.yaml の launchs-prod)の kustomize.patches で、この値に上書きする(argocd.md)。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: launchs-config
   namespace: launchs
 data:
+  # launchs 本体のホスト名(IngressRoute の Host)。
+  LAUNCHS_HOST: www.launchs.org
   # ingress に払い出すホスト名の、ベースドメイン(<形容詞>-<色>-<動物>.<ベースドメイン>)と、払い出さないサブドメイン。
   INGRESS_BASE_DOMAIN: launchs.org
   INGRESS_RESERVED_SUBDOMAINS: www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard

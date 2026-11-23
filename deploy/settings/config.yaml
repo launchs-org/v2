@@ -1,10 +1,13 @@
-# 秘密ではない設定。自分の環境に合わせて、変える(特に INGRESS_BASE_DOMAIN)。
+# 秘密ではない設定(既定の値)。本体(deploy/kustomization.yaml)に含まれ、Argo CD が同期する。
+# 環境ごとの値は、このファイルを変えずに、Argo CD の Application の kustomize.patches で上書きできる(argocd.md)。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: launchs-config
   namespace: launchs
 data:
+  # launchs 本体のホスト名(IngressRoute の Host。kustomization.yaml の replacements が、ここから取る)。
+  LAUNCHS_HOST: www.shconn.org
   # ingress に払い出すホスト名の、ベースドメイン(<形容詞>-<色>-<動物>.<ベースドメイン>)と、払い出さないサブドメイン。
   INGRESS_BASE_DOMAIN: shconn.org
   INGRESS_RESERVED_SUBDOMAINS: www,api,app,auth,admin,registry,logs,mail,static,docs,status,traefik,dashboard
