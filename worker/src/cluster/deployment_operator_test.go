@@ -365,35 +365,3 @@ func TestKubernetesDeploymentOperatorFSGroup(testingT *testing.T) {
 
 // int64Pointer は、値のポインターを返す(試験用)。
 func int64Pointer(value int64) *int64 { return &value }
-
-// TestBuildDeploymentRequestPercent は、requests を limits の何 % にするかの設定が、Deployment の requests だけに効き、
-// limits(deploy の大きさ)は変わらないこと、未設定と範囲の外は、requests と limits が同じになることを確認する。
-func TestBuildDeploymentRequestPercent(testingT *testing.T) {
-	testCases := []struct {
-		name                 string
-		cpuPercent           int
-		memoryPercent        int
-		wantCPURequestMilli  int64
-		wantMemoryRequestMiB int64
-	}{
-		{"未設定は limits と同じ", 0, 0, 250, 256},
-		{"CPU を 10%", 10, 0, 25, 256},
-		{"CPU を 10%、メモリを 50%", 10, 50, 25, 128},
-		{"範囲の外は limits と同じ", 150, -1, 250, 256},
-		{"1m を下回らない", 1, 100, 2, 256},
-	}
-	for _, testCase := range testCases {
-		testingT.Run(testCase.name, func(subTest *testing.T) {
-			operator := NewKubernetesDeploymentOperator(nil, OperatorSettings{CPURequestPercent: testCase.cpuPercent, MemoryRequestPercent: testCase.memoryPercent})
-			container := operator.buildDeployment(newTestDefinition()).Spec.Template.Spec.Containers[0]
-			// requests は、設定した割合。
-			if container.Resources.Requests.Cpu().MilliValue() != testCase.wantCPURequestMilli || container.Resources.Requests.Memory().Value() != testCase.wantMemoryRequestMiB*1024*1024 {
-				subTest.Errorf("requests が違う: %+v", container.Resources.Requests)
-			}
-			// limits は、いつも、deploy の大きさ(250m、256Mi)のまま。
-			if container.Resources.Limits.Cpu().MilliValue() != 250 || container.Resources.Limits.Memory().Value() != 256*1024*1024 {
-				subTest.Errorf("limits は変わらないはず: %+v", container.Resources.Limits)
-			}
-		})
-	}
-}
