@@ -3,7 +3,7 @@
 #   kubectl apply -k settings/        # この場所(deploy/settings/)で。または、deploy/ で `kubectl apply -k settings/`
 #
 # 本体より先に適用する(各 Deployment が、ConfigMap `launchs-config` と、Secret `launchs-secret`、`launchs-auth-keys` を参照するため)。
-# 先に namespace `launchs` が要る(本体の namespace.yaml。手順は ../deploy.md。setup.sh が行う)。
+# 先に namespace `launchs` が要る(本体の namespace.yaml。手順は ../argocd.md)。
 #
 # secret.yaml は gitignore(リポジトリには置かない)。secret.example.yaml をコピーして作る。
 # secret.example.yaml(雛形)は、placeholder の値が入っているので、ここには含めない(誤って適用しない)。

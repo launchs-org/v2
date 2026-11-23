@@ -3,7 +3,7 @@
 ## 最初のデプロイ
 
 ### 前提
-- Kubernetes(3 ノード)と、**Argo CD**(namespace `argocd`)。
+- Kubernetes(3 ノード)と、**Argo CD**(入れ方は [argocd.md](argocd.md))。
 - 既定の StorageClass(PVC を作れる。PostgreSQL が 20Gi を使う)。
 - Cloudflare Tunnel のトークン(入口。HTTPS は、Cloudflare が終端する)。
 - `kubectl`(接続先が、入れたいクラスター)と `openssl`。
@@ -17,17 +17,12 @@
 
 本番(launchs.org)の値の例は `settings/config.launchs.org.example.yaml`。調べ方は [description.md](description.md)。
 
-### 2. 実行する
-```bash
-cd deploy
-TUNNEL_TOKEN='<トンネルのトークン>' ./setup.sh
-```
-`setup.sh` が、次を行う(何度実行しても、同じ結果になる)。
-1. namespace、秘密(`settings/secret.yaml`。無ければ、乱数で作る)、設定を適用する
-2. cloudflared のトークンの Secret を作る
-3. Argo CD の Application を作り、**traefik → launchs-cluster → launchs-prod** の順に同期する(Traefik とプラグイン、metrics-server、cloudflared、launchs 本体が入る)
-
-`./setup.sh --secrets-only`(秘密を作るだけ)と `--no-sync`(同期は、Argo CD の画面で行う)もある。`-h` で使い方。
+### 2. Argo CD で入れる
+手順は [argocd.md](argocd.md)。流れ:
+1. Argo CD を入れる(入っていなければ)
+2. 秘密と設定を作る(`settings/secret.yaml`、cloudflared のトークン)
+3. `kubectl apply -f argocd/applications.yaml`(Application を作る)
+4. **traefik → launchs-cluster → launchs-prod** の順に同期する(Traefik とプラグイン、metrics-server、cloudflared、launchs 本体が入る)
 
 ### 3. Cloudflare の手作業
 - Tunnel の公開ホスト名に、`www.launchs.org` と `*.launchs.org` を、`http://traefik.traefik:80` で向ける。
@@ -46,7 +41,7 @@ curl -i -X POST https://www.launchs.org/hooks/deploy -d "{}"     # 401(backend �
 
 ### launchs 本体
 1. 変更を `main` に入れる。CI が、イメージを GHCR に出し、`kustomization.yaml` の `newTag`(`sha-…`)を、`main` に自動でコミットする。
-2. 同期する(Argo CD の画面、または次)。マイグレーションは、新しい backend と auth の Pod が、起動時に流す。
+2. `launchs-prod` を同期する(Argo CD の画面、または次)。マイグレーションは、新しい backend と auth の Pod が、起動時に流す。
    ```bash
    kubectl -n argocd annotate application launchs-prod argocd.argoproj.io/refresh=hard --overwrite
    kubectl -n argocd patch application launchs-prod --type merge -p '{"operation":{"sync":{}}}'

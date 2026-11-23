@@ -47,10 +47,10 @@ auth、backend、worker などは、`runAsUser: 65532`(distroless の nonroot)�
 
 # クラスター側(土台)
 
-`deploy/cluster/` と `deploy/argocd/` の説明。**Argo CD で、launchs の土台(Traefik とプラグイン、metrics-server、cloudflared)も、全部入る**(`setup.sh` が行う)。
+`deploy/cluster/` と `deploy/argocd/` の説明。**Argo CD で、launchs の土台(Traefik とプラグイン、metrics-server、cloudflared)も、全部入る**(入れ方は [argocd.md](argocd.md))。
 
 ## 全部入れる(Argo CD)
-Application は `deploy/argocd/applications.yaml` の 3 つ。同期は手動で、順序は `traefik` → `launchs-cluster` → `launchs-prod`(`setup.sh` が、順に行う)。
+Application は `deploy/argocd/applications.yaml` の 3 つ。同期は手動で、順序は `traefik` → `launchs-cluster` → `launchs-prod`(手順は [argocd.md](argocd.md))。
 
 | Application | 内容 | 場所 |
 |---|---|---|

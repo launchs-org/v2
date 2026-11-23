@@ -23,7 +23,7 @@ traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Y
 accessstats/    Traefik のログから、ingress のアクセスの集計を読み取って DB に保存するコンテナ(docs/ingress-plugins.md)
 traefik-plugins/ Traefik のプラグイン(launchs-edge、launchs-stats)と、Yaegi での試験(harness)
 guide/          利用者向けの使い方ガイド(HTML + CSS の静的なサイト。画面の言葉に合わせて書く。画面や仕様を変えたら、ここも直す。`api.html` は API と自動デプロイの案内で、**エンドポイントを足したら、一覧も直す**)
-deploy/         本番向けの Kubernetes のマニフェスト(kustomize + Argo CD。`cd deploy && ./setup.sh` で全部入る。deploy/README.md)
+deploy/         本番向けの Kubernetes のマニフェスト(kustomize + Argo CD。Argo CD の Application で全部入る。設定は deploy/argocd.md。deploy/README.md)
 registry/       同じ形のコンテナ用フォルダ(これから作る)
 templates/      テンプレート(別リポジトリ launchs-v2-template の git submodule。manifest.yaml + README.md + 版のフォルダ)
 shared/         バックエンド・ワーカー・watcher で共有するコード
