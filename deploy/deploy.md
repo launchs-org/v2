@@ -8,12 +8,15 @@
 - Cloudflare Tunnel のトークン(入口。HTTPS は、Cloudflare が終端する)。
 - `kubectl`(接続先が、入れたいクラスター)と `openssl`。
 
-### 1. 設定を直す(環境ごとの値)
-| ファイル | 直すところ |
+### 1. 環境ごとの値を決める
+Git の値は既定。環境ごとに違う値は、**Argo CD の Application で上書きする**([argocd.md](argocd.md) の「環境ごとの値を、Argo CD で上書きする」)。
+
+| 値 | 内容 |
 |---|---|
-| `settings/config.yaml` | `INGRESS_BASE_DOMAIN`(払い出すドメイン)、`AUTH_TRUSTED_PROXY_CIDRS`(Traefik の Pod の範囲)、`VOLUME_STORAGE_CLASS` |
-| `ingressroute.yaml` | `Host`(launchs 本体のホスト名。例: `www.launchs.org`) |
-| `argocd/applications.yaml` | Pod の範囲が `10.244.0.0/16` でないクラスターは、`launchs-cluster` の `kustomize.patches` を有効にする(`launchs-edge` の `trustedCIDRs`) |
+| `LAUNCHS_HOST` | launchs 本体のホスト名(例: `www.launchs.org`)。IngressRoute の Host も、これで変わる |
+| `INGRESS_BASE_DOMAIN` | ingress に払い出すドメイン |
+| `VOLUME_STORAGE_CLASS`、`AUTH_TRUSTED_PROXY_CIDRS` | StorageClass と、Traefik の Pod の範囲 |
+| `launchs-edge` の `trustedCIDRs` | cloudflared の Pod の範囲(Git の値は `10.244.0.0/16`) |
 
 本番(launchs.org)の値の例は `settings/config.launchs.org.example.yaml`。調べ方は [description.md](description.md)。
 
@@ -49,11 +52,9 @@ curl -i -X POST https://www.launchs.org/hooks/deploy -d "{}"     # 401(backend �
    ```
    Argo CD を使わないときは、`git pull` して、`kubectl apply -k .`(この `deploy/` で)。
 
-### 設定(`settings/`)を変えたとき
-```bash
-kubectl apply -k settings/
-kubectl -n launchs rollout restart deploy      # 該当の Deployment だけでもよい
-```
+### 設定を変えたとき
+- ConfigMap(`settings/config.yaml`、または Argo CD の上書き)を変えて、`launchs-prod` を同期する。**Pod は再起動しない**ので、`kubectl -n launchs rollout restart deploy`(該当の Deployment だけでもよい)。
+- 秘密(`settings/secret.yaml`)を変えたときは、`kubectl apply -k settings/` のあと、同じく再起動する。
 
 ### Traefik とプラグイン
 `traefik-plugins/` を変えたら、values を作り直して、一緒にコミットする(CI が、ずれを検査する)。そのあと `traefik` の Application を同期する。

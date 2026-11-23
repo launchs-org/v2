@@ -1,4 +1,4 @@
-# launchs 自身の公開(Traefik の IngressRoute)。ホスト名を、自分のものに変える(下の match の 3 か所)。
+# launchs 自身の公開(Traefik の IngressRoute)。ホスト名は、ConfigMap launchs-config の LAUNCHS_HOST から、kustomization.yaml の replacements が入れる(下の match の 3 か所の値は、置き換わる)。ホスト名を変えるときは、LAUNCHS_HOST を変える(Argo CD の上書きでもよい)。
 # /api/ と /healthz は backend、/auth/ は auth、それ以外は frontend へ、パスを書き換えずに渡す。
 # 長いパスが、短いパスより先に評価される(Traefik は、式が長いルールを優先する)。
 apiVersion: traefik.io/v1alpha1

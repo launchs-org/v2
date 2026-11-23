@@ -71,6 +71,20 @@ spec:
     repoURL: https://github.com/launchs-org/v2
     targetRevision: main
     path: deploy
+    # 環境ごとの設定(ホスト名など)は、ここで上書きする(Git の値は、既定。argocd.md)。有効にするときは、コメントを外す。
+    # LAUNCHS_HOST を変えると、IngressRoute の Host(3 か所)も変わる。ConfigMap を変えても、Pod は再起動しない(同期のあと、rollout restart)。
+    # kustomize:
+    #   patches:
+    #     - target: {kind: ConfigMap, name: launchs-config}
+    #       patch: |-
+    #         apiVersion: v1
+    #         kind: ConfigMap
+    #         metadata: {name: launchs-config}
+    #         data:
+    #           LAUNCHS_HOST: www.launchs.org
+    #           INGRESS_BASE_DOMAIN: launchs.org
+    #           VOLUME_STORAGE_CLASS: longhorn
+    #           AUTH_TRUSTED_PROXY_CIDRS: 10.244.0.0/16
   destination:
     server: https://kubernetes.default.svc
     namespace: launchs
