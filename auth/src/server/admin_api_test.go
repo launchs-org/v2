@@ -455,3 +455,56 @@ func TestBootstrapAdmin(testing *testing.T) {
 		testing.Fatalf("作られるのは、ちょうど1人のはず: created=%d admins=%d", createdCount, racingAdmins)
 	}
 }
+
+// TestAdminLoginEvents は、管理者が、全ユーザーのログイン履歴(失敗と、存在しない名前への試行を含む)を、絞り込んで見られることを確かめる。
+func TestAdminLoginEvents(testing *testing.T) {
+	// 管理者と、一般のユーザーを用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	_, userToken := accessTokenFor(testing, environment, "mallory", true, "203.0.113.20")
+	// 存在しない名前と、パスワードの間違いで、失敗の履歴を作る。
+	call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"ghost","password":"`+goodPassword+`"}`, "", "203.0.113.30")
+	call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"mallory","password":"wrong-password-123"}`, "", "203.0.113.31")
+	list := func(query string, token string) response {
+		return call(testing, environment, http.MethodGet, "/auth/admin/login-events"+query, "", token, "203.0.113.2")
+	}
+	// 失敗だけに絞ると、2 件の失敗が、理由と IP つきで出る(存在しない名前は、持ち主なし)。
+	failures := list("?result=failure", admin.accessToken)
+	events, _ := failures.body["events"].([]any)
+	if failures.status != 200 || len(events) != 2 {
+		testing.Fatalf("失敗が 2 件のはず: %d %v", failures.status, failures.body)
+	}
+	foundGhost := false
+	for _, entry := range events {
+		event := entry.(map[string]any)
+		if event["userName"] == "ghost" && event["userId"] == nil && event["reason"] == "unknown_user" && event["ip"] == "203.0.113.30" {
+			foundGhost = true
+		}
+	}
+	if !foundGhost {
+		testing.Errorf("存在しない名前への試行が出るはず: %v", events)
+	}
+	// ユーザー名の一部で絞り込める。
+	if byName := list("?userName=MALLO", admin.accessToken); len(byName.body["events"].([]any)) < 2 {
+		testing.Errorf("名前で絞り込めるはず: %v", byName.body)
+	}
+	// ページングできる(1 件ずつ)。
+	first := list("?limit=1", admin.accessToken)
+	if first.body["nextCursor"] == nil {
+		testing.Fatalf("次のページがあるはず: %v", first.body)
+	}
+	second := list("?limit=1&cursor="+first.body["nextCursor"].(string), admin.accessToken)
+	if second.status != 200 || len(second.body["events"].([]any)) != 1 {
+		testing.Errorf("2 ページ目が取れるはず: %d %v", second.status, second.body)
+	}
+	// 結果の指定が不正なら 400。管理者でなければ 403。トークンが無ければ 401。
+	if bad := list("?result=maybe", admin.accessToken); bad.status != 400 {
+		testing.Errorf("不正な result は 400 のはず: %d", bad.status)
+	}
+	if forbidden := list("", userToken); forbidden.status != 403 {
+		testing.Errorf("管理者でなければ 403 のはず: %d", forbidden.status)
+	}
+	if anonymous := list("", ""); anonymous.status != 401 {
+		testing.Errorf("トークンが無ければ 401 のはず: %d", anonymous.status)
+	}
+}

@@ -1,0 +1,68 @@
+# 管理コンテナ。管理者だけが使う API(/admin-api/)。access token を auth の JWKS で検証し、role が admin のものだけを通す。
+# 秘密(API_TOKEN_SECRET など)は持たない。app データベースにつなぐ。
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin
+  namespace: launchs
+spec:
+  selector:
+    app.kubernetes.io/name: admin
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      # 3 つのノードに、ばらけさせる(同じノードに偏らない。ノードが足りないときは、偏ってもよい)。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: admin
+      containers:
+        - name: admin
+          image: ghcr.io/launchs-org/v2/admin:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            - name: AUTH_JWKS_URL
+              value: http://auth:8080/auth/.well-known/jwks.json
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8080}
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}

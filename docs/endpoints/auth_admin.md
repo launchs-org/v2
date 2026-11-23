@@ -77,3 +77,19 @@
 - Delete: /auth/admin/invitations/:invitationId
 - Response (200): `{}`
 - Note: 取り消した招待は使えない。招待が無ければ 404。有効でない(使用済み、期限切れ、取り消し済み)なら 409。
+
+### ログイン履歴の一覧(全ユーザー)
+- Get: /auth/admin/login-events?limit=20&cursor=...&result=failure&userName=ali
+- Response (200)
+```json
+{
+  "events": [
+    {"eventId": 130, "userId": null, "userName": "ghost", "kind": "login", "result": "failure", "reason": "unknown_user",
+     "ip": "203.0.113.30", "userAgent": "curl/8.14.1", "occurredAt": "2026-11-24T00:31:44+09:00"}
+  ],
+  "nextCursor": null
+}
+```
+- Note: 新しい順。成功も失敗も含み、**存在しないユーザー名への試行も出る**(`userId` は null)。不正なアクセスの確認に使う。
+- Note: `result`(`success` か `failure`。それ以外は 400)と、`userName`(部分一致。大文字小文字は区別しない)で絞り込める。`limit` は 1〜100(既定 20)、`cursor` は前のレスポンスの `nextCursor`。
+- Note: `reason` は、失敗のときだけ(`unknown_user`、`wrong_password`、`locked`、`banned`、`invalid_input`)。

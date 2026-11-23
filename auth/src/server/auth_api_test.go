@@ -102,6 +102,7 @@ func newTestEnvironmentWithHasher(testing *testing.T, mutate func(*service.Setti
 	environment := &testEnvironment{database: database, settings: settings, clock: &clock, keyStore: keyStore, tokens: tokens}
 	adminService := service.NewAdminService(repository.NewUserRepository(database), repository.NewInvitationRepository(database), repository.NewLoginFailureRepository(database),
 		logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), hasher, tokens)
+	adminService.SetLoginEventStore(repository.NewLoginEventRepository(database))
 	environment.admin = adminService
 	environment.server = New(logger.New(&bytes.Buffer{}, "auth", slog.LevelInfo), authService, adminService, keyStore, resolver, controller.PublicConfig{TurnstileSiteKey: testSiteKey(settings)})
 	return environment

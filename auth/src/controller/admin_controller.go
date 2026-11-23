@@ -24,6 +24,46 @@ type AdminUseCase interface {
 	CreateInvitation(requestContext context.Context, actorID string, lifetime time.Duration, note string) (model.Invitation, string, error)
 	ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error)
 	RevokeInvitation(requestContext context.Context, actorID string, invitationID string) error
+	ListLoginEvents(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error)
+}
+
+// AdminLoginEventResponse は、ログイン履歴の1件。
+type AdminLoginEventResponse struct {
+	// EventID は、行の ID。
+	EventID int64 `json:"eventId"`
+
+	// UserID は、持ち主のユーザーの ID。存在しない名前への試行は null。
+	UserID *string `json:"userId"`
+
+	// UserName は、試行で指定された名前(小文字)。
+	UserName string `json:"userName"`
+
+	// Kind は、種類(signup か login)。
+	Kind string `json:"kind"`
+
+	// Result は、結果(success か failure)。
+	Result string `json:"result"`
+
+	// Reason は、失敗の理由。成功なら null。
+	Reason *string `json:"reason"`
+
+	// IP は、クライアントの IP。
+	IP string `json:"ip"`
+
+	// UserAgent は、クライアントの User-Agent。
+	UserAgent string `json:"userAgent"`
+
+	// OccurredAt は、試行の日時(JST)。
+	OccurredAt string `json:"occurredAt"`
+}
+
+// LoginEventsResponse は、ログイン履歴の一覧のレスポンス。
+type LoginEventsResponse struct {
+	// Events は、履歴(新しい順)。
+	Events []AdminLoginEventResponse `json:"events"`
+
+	// NextCursor は、次のページのカーソル。最後のページなら null。
+	NextCursor *string `json:"nextCursor"`
 }
 
 // AdminUserResponse は、管理 API が返す、ユーザー1人。パスワードのハッシュは、含めない。
@@ -386,4 +426,35 @@ func (adminController *AdminController) RevokeInvitation(echoContext *echo.Conte
 		return revokeError
 	}
 	return echoContext.JSON(http.StatusOK, struct{}{})
+}
+
+// ListLoginEvents は、GET /admin/login-events のハンドラー。全ユーザーのログイン履歴(失敗も含む)を返す。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。クエリの result(success か failure)と userName(部分一致)で絞り込める。
+//
+// 戻り値:
+//   - 履歴の一覧(200)。トークンが使えなければ 401、管理者でなければ 403、指定が不正なら 400。
+func (adminController *AdminController) ListLoginEvents(echoContext *echo.Context) error {
+	// 管理者であることと、ページの指定を確かめる。
+	if _, authorizeError := adminController.authorize(echoContext); authorizeError != nil {
+		return authorizeError
+	}
+	limit, after, pageError := readPage(echoContext)
+	if pageError != nil {
+		return pageError
+	}
+	// 取得して、レスポンスにする。
+	events, next, listError := adminController.adminUseCase.ListLoginEvents(echoContext.Request().Context(), limit, after, echoContext.QueryParam("result"), echoContext.QueryParam("userName"))
+	if listError != nil {
+		return listError
+	}
+	response := LoginEventsResponse{Events: make([]AdminLoginEventResponse, 0, len(events)), NextCursor: encodeNextCursor(next)}
+	for _, event := range events {
+		response.Events = append(response.Events, AdminLoginEventResponse{
+			EventID: event.ID, UserID: event.UserID, UserName: event.UserNameLower, Kind: event.Kind, Result: event.Result,
+			Reason: event.Reason, IP: event.IP, UserAgent: event.UserAgent, OccurredAt: jst.Format(event.OccurredAt),
+		})
+	}
+	return echoContext.JSON(http.StatusOK, response)
 }

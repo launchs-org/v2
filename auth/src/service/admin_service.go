@@ -59,6 +59,12 @@ type AdminFailureStore interface {
 	Reset(requestContext context.Context, userNameLower string) error
 }
 
+// AdminLoginEventStore は、管理のユースケースが使う、ログイン履歴の読み出し。
+type AdminLoginEventStore interface {
+	// ListAll は、全ユーザーの履歴を新しい順に取得する(結果とユーザー名で絞り込める)。
+	ListAll(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error)
+}
+
 // invitationCodeBytes は、招待コードの元になる乱数の長さ(バイト)。256ビットで、推測できない。
 const invitationCodeBytes = 32
 
@@ -67,6 +73,7 @@ type AdminService struct {
 	userStore       AdminUserStore
 	invitationStore AdminInvitationStore
 	failureStore    AdminFailureStore
+	loginEventStore AdminLoginEventStore
 	appLogger       *slog.Logger
 	hasher          PasswordHasher
 	tokenService    *token.Service
@@ -283,6 +290,39 @@ func (adminService *AdminService) CreateInvitation(requestContext context.Contex
 func (adminService *AdminService) ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error) {
 	// 保存先から取得する。
 	return adminService.invitationStore.List(requestContext, limit, after)
+}
+
+// SetLoginEventStore は、ログイン履歴の読み出し先を設定する(起動のときに 1 回。コンストラクターの引数を増やさないための後付け)。
+//
+// 引数:
+//   - loginEventStore: ログイン履歴の読み出し先。
+func (adminService *AdminService) SetLoginEventStore(loginEventStore AdminLoginEventStore) {
+	// 保存先を持たせる。
+	adminService.loginEventStore = loginEventStore
+}
+
+// ListLoginEvents は、全ユーザーのログイン履歴を、新しい順に返す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - limit: 取得する件数の上限。
+//   - after: 前のページの最後の位置。最初のページは nil。
+//   - result: 結果で絞り込む(success か failure。空なら絞り込まない)。
+//   - userNameKeyword: ユーザー名で絞り込む文字列(空なら絞り込まない)。
+//
+// 戻り値:
+//   - 履歴の一覧と、次のページの位置。読み出し先が無ければ internal_error。
+func (adminService *AdminService) ListLoginEvents(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error) {
+	// 読み出し先が設定されていなければ、サーバーの設定の誤り。
+	if adminService.loginEventStore == nil {
+		return nil, nil, apperror.New(apperror.KindInternal, "ログイン履歴の読み出し先が設定されていません")
+	}
+	// 結果の指定は、決まった値だけを受け付ける。
+	if result != "" && result != "success" && result != "failure" {
+		return nil, nil, apperror.New(apperror.KindInvalidRequest, "result は success か failure で指定してください")
+	}
+	// 保存先から取得する。
+	return adminService.loginEventStore.ListAll(requestContext, limit, after, result, userNameKeyword)
 }
 
 // RevokeInvitation は、有効な招待を取り消す。
