@@ -250,6 +250,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
       AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
+      # 画面に見せる設定(読むだけ)。
+      INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-shconn.org}
+      VOLUME_MAX_SIZE_MB: ${VOLUME_MAX_SIZE_MB:-5120}
+      AUTH_SIGNUP_MODE: ${AUTH_SIGNUP_MODE:-open}
     volumes:
       - .:/app
       - go-module-cache:/go/pkg/mod

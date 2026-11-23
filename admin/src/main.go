@@ -62,7 +62,7 @@ func run() error {
 	}
 
 	// サーバーを組み立てる。
-	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, Verifier: verifier})
+	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, Verifier: verifier, Settings: adminConfig.Settings, SettingNames: config.SettingNames})
 
 	// 停止の合図で終わる context を作る。
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -20,6 +20,12 @@ type Dependencies struct {
 	// Database は、app データベースの接続。
 	Database *gorm.DB
 
+	// Settings は、画面に見せる設定(名前 → 値)。
+	Settings map[string]string
+
+	// SettingNames は、見せる設定の名前。
+	SettingNames []string
+
 	// Verifier は、管理者の access token を検証するもの。
 	Verifier adminmiddleware.AccessTokenVerifier
 }
@@ -46,5 +52,12 @@ func New(appLogger *slog.Logger, dependencies Dependencies) *echo.Echo {
 	adminGroup := echoServer.Group("/admin-api", adminmiddleware.NewAdminAuthMiddleware(dependencies.Verifier))
 	overviewController := controller.NewOverviewController(service.NewOverviewService(repository.NewOverviewRepository(dependencies.Database)))
 	adminGroup.GET("/overview", overviewController.Get)
+	queryController := controller.NewAdminQueryController(service.NewAdminQueryService(repository.NewAdminQueryRepository(dependencies.Database),
+		repository.NewQuotaDefaultRepository(dependencies.Database), dependencies.Settings, dependencies.SettingNames))
+	adminGroup.GET("/deploys", queryController.ListDeploys)
+	adminGroup.GET("/access-logs", queryController.ListAccessLogs)
+	adminGroup.GET("/quota-defaults", queryController.GetQuotaDefaults)
+	adminGroup.PUT("/quota-defaults", queryController.PutQuotaDefaults)
+	adminGroup.GET("/settings", queryController.GetSettings)
 	return echoServer
 }

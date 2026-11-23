@@ -1,6 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { AdminAccessLogs } from "@/components/admin/admin-access-logs"
+import { AdminDeploys } from "@/components/admin/admin-deploys"
+import { AdminQuota } from "@/components/admin/admin-quota"
+import { AdminSettings } from "@/components/admin/admin-settings"
 import { AdminLoginEvents } from "@/components/admin/admin-login-events"
 import { AdminOverview } from "@/components/admin/admin-overview"
 import { AdminUsers } from "@/components/admin/admin-users"
@@ -15,6 +19,10 @@ const TABS = [
   { key: "users", label: "ユーザー" },
   { key: "invitations", label: "招待" },
   { key: "logins", label: "ログイン履歴" },
+  { key: "deploys", label: "デプロイ" },
+  { key: "access", label: "アクセスログ" },
+  { key: "quota", label: "クォータ" },
+  { key: "settings", label: "設定" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -104,6 +112,10 @@ export function AdminApp() {
             {tab === "overview" && <AdminOverview refreshInterval={REFRESH_INTERVAL} />}
             {tab === "users" && <AdminUsers refreshInterval={REFRESH_INTERVAL} currentUserId={user.userId} />}
             {tab === "invitations" && <InvitationSection refreshInterval={REFRESH_INTERVAL} />}
+            {tab === "deploys" && <AdminDeploys refreshInterval={REFRESH_INTERVAL} />}
+            {tab === "access" && <AdminAccessLogs refreshInterval={REFRESH_INTERVAL} />}
+            {tab === "quota" && <AdminQuota />}
+            {tab === "settings" && <AdminSettings refreshInterval={REFRESH_INTERVAL} />}
             {tab === "logins" && <AdminLoginEvents refreshInterval={REFRESH_INTERVAL} />}
           </div>
         </div>

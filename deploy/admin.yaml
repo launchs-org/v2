@@ -49,6 +49,10 @@ spec:
               value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
             - name: AUTH_JWKS_URL
               value: http://auth:8080/auth/.well-known/jwks.json
+          # 画面に見せる設定(秘密でないもの)を、ConfigMap から受け取る。
+          envFrom:
+            - configMapRef:
+                name: launchs-config
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
             periodSeconds: 5
