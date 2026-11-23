@@ -412,3 +412,125 @@ button.alog-toggle { font-family: inherit; }
 .md th { background: var(--panel2); font-weight: 500; }
 .md a { color: var(--info); }
 .md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--line2); color: var(--mut); }
+
+/* ===== スマホ・タブレット向けのレスポンシブ対応 ===== */
+/* 画面の高さは、スマホのアドレスバーの出入りに合わせて(dvh)。最小の高さは、狭い画面では要らない。 */
+@supports (height: 100dvh) {
+  .app, .shell, .app-loading { height: 100dvh; }
+}
+/* 幅が狭くても、横にはみ出さない固定幅の列(auto-fit の最小幅が、画面より大きくならないようにする)。 */
+.split { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
+.pgrid { grid-template-columns: repeat(auto-fill, minmax(min(264px, 100%), 1fr)); }
+.kv { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); }
+
+/* タブレット(960px 以下): 余白を少し詰める */
+@media (max-width: 960px) {
+  .topnav { padding: 0 12px; gap: 10px; }
+  .page { padding: 18px 16px; }
+  .top { padding: 10px 16px; }
+  .lhero { padding: 40px 28px; }
+}
+
+/* スマホ(720px 以下) */
+@media (max-width: 720px) {
+  .app, .shell { min-height: 0; }
+  /* 上のバー: 1 段目(ロゴ、右の操作)と、2 段目(タブ。横にスクロール)に分ける。 */
+  .topnav { flex-wrap: wrap; height: auto; padding: 6px 10px 0; gap: 4px 8px; }
+  .topnav .disp, .topnav .topnav-link, .topnav > .faint { display: none; }
+  .topnav > select.inp { flex: 1 1 0; min-width: 0 !important; max-width: none !important; }
+  .topnav .tabs { order: 10; flex: 1 0 100%; margin-left: 0 !important; align-self: auto; margin-inline: -10px; padding-inline: 6px; width: calc(100% + 20px); border-top: 1px solid var(--line); }
+  .topnav .tab { min-height: 44px; padding: 0 14px; }
+  .topnav .grow { flex: 1 1 0; }
+  .topnav .srch { order: 9; flex: 1 1 100%; width: 100% !important; }
+  .topnav .btn.primary { flex: none; }
+  /* 本体の余白と、見出し */
+  .page { padding: 14px 12px; gap: 14px; }
+  .app .page.fill { padding: 10px 12px 12px; }
+  .h1 { font-size: 21px; }
+  .pad { padding: 14px; }
+  .ws { max-width: 100%; }
+  /* 触りやすい大きさ(押す場所は 44px、入力欄は iOS で拡大されないよう 16px) */
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 40px; }
+  .btn.ico { width: 44px; }
+  .inp, .app select.inp, .srch input, .alog-field .inp { font-size: 16px; min-height: 44px; }
+  .srch, .app .logs-bar .srch { width: 100% !important; height: 44px !important; }
+  .app .logs-bar .inp { height: 44px; min-height: 44px; }
+  .chip { min-height: 40px; }
+  .lnk { min-height: 40px; }
+  /* 右の詳細パネルは、画面いっぱいに出す(幅の変更のつまみは、使わない) */
+  .panel { width: 100% !important; border-left: 0; }
+  .panel-resize { display: none; }
+  .panel-head { padding: 10px 12px; gap: 8px; }
+  .panel-body { padding: 12px; }
+  /* キャンバスの補助 */
+  .canvas-hint { display: none; }
+  .canvas-add { right: 10px; top: 10px; }
+  .tagbar { left: 8px; right: 8px; top: 8px; }
+  /* メニューとポップオーバーは、画面の幅に収める */
+  .popover { position: fixed; left: 10px; right: 10px; top: 60px; width: auto; max-height: calc(100dvh - 80px); }
+  .topnav .addmenu { max-width: calc(100vw - 20px); }
+  /* ダイアログ、ドロワー、トースト */
+  .modalbg { padding: 10px; align-items: end; }
+  .modal, .modal.wide { width: 100%; padding: 18px; max-height: 94dvh; border-radius: 12px; }
+  .drawer { padding: 18px; }
+  .toast { left: 10px; right: 10px; bottom: 10px; }
+  /* ログイン */
+  .lhero { flex-basis: auto; padding: 28px 20px; gap: 18px; }
+  .lhero > .codebg { display: none; }
+  .lform { flex-basis: auto; padding: 24px 16px; border-left: 0; border-top: 1px solid var(--line); }
+  .login { height: auto; min-height: 100%; overflow-y: auto; }
+  /* 表: 行は横にスクロールさせる(.tscroll の中の .tinner は、幅を保つ) */
+  .tr { padding: 8px 12px; gap: 10px; }
+  .alog-wrap { max-height: 420px; }
+  .alog-filters { grid-template-columns: 1fr 1fr; padding: 4px 12px 12px; }
+  .alog-filters .wide { grid-column: span 2; }
+  .alog-head { padding: 12px; }
+  .alog-foot { padding: 10px 12px 12px; flex-wrap: wrap; }
+  .alog-url { max-width: 240px; }
+  .tasks-detail td { padding-left: 16px; }
+  .tprog { width: 100px; }
+  /* ConfigMap の画面: 一覧と詳細を縦に並べる */
+  .cm-split { grid-template-columns: minmax(0, 1fr) !important; }
+  /* ウィザードの手順 */
+  .stepbar button { flex-basis: 100%; }
+  .step { flex-basis: 100%; }
+  /* パネルの中の、横に並べる入力は、折り返す */
+  .panel .row { gap: 8px; }
+  .panel-body select.inp[style*="width: 210"] { width: 100% !important; flex: 1 1 100% !important; }
+}
+
+/* 小さいスマホ(420px 以下) */
+@media (max-width: 420px) {
+  .alog-filters { grid-template-columns: 1fr; }
+  .alog-filters .wide { grid-column: auto; }
+  .rf-node { width: 232px; }
+  .pstats { gap: 18px; }
+}
+
+/* スマホの上のバー: 「自動更新」の表示は、点だけにして、1 段目に収める。 */
+@media (max-width: 720px) {
+  .topnav .btn.sm.ghost { padding: 0 6px; min-height: 44px; }
+  .topnav .btn.sm.ghost .badge { font-size: 0; gap: 0; padding: 6px; }
+  .topnav .btn.sm.ghost .badge i { width: 10px; height: 10px; }
+  .topnav > .btn.primary { padding: 0 12px; font-size: 13px; }
+}
+
+/* 画面幅を押し広げないよう、本体の子と、カードは、縮められるようにする(表は、.tscroll の中で横にスクロール)。 */
+.page > *, .col > *, .card, .tscroll { min-width: 0; max-width: 100%; }
+
+/* スマホ: ファイルの行と、ログのフッターは、収まらないとき折り返す。 */
+@media (max-width: 720px) {
+  .cm-file-row { flex-wrap: wrap !important; }
+  .cm-file-row > input { flex: 1 1 100% !important; }
+  .app .logs-foot { flex-wrap: wrap; row-gap: 8px; }
+  .app .logs-foot .sw, .app .logs-foot .faint, .app .logs-foot label { white-space: nowrap; }
+}
+
+/* 横向きで高さが低いとき: 上のバーを詰める */
+@media (max-height: 480px) and (orientation: landscape) {
+  .modal { max-height: 98dvh; }
+}

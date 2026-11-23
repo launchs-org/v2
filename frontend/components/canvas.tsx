@@ -122,6 +122,8 @@ export function Canvas({ model, selection, onSelect, onBackgroundClick, highligh
   // モデルから、React Flow のノードと線を作る(選択の変化でも、作り直す)。
   const nodes = useMemo<Node<NodeData>[]>(() => model.nodes.map((node) => ({ id: node.key, type: node.kind === "internet" ? "internet" : "resource", position: { x: node.x, y: node.y }, draggable: false, data: { ...node, selected: node.key === selectedKey, highlighted: Boolean(highlightTag) && (node.tags ?? []).includes(highlightTag as string), dimmed: Boolean(highlightTag) && !(node.tags ?? []).includes(highlightTag as string), highlightTag, onTagClick } })), [model.nodes, selectedKey, highlightTag, onTagClick])
   const edges = useMemo<Edge[]>(() => model.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "flow", className: edge.pending ? "pending" : edge.live ? "live" : "", data: { label: edge.label, live: edge.live } })), [model.edges])
+  // スマホなど狭い画面では、全体を収めようとして小さくなりすぎないよう、最小の倍率を上げる(はみ出す分は、指で動かす)。
+  const narrow = typeof window !== "undefined" && window.innerWidth < 720
   return (
     <ReactFlow
       nodes={nodes}
@@ -129,7 +131,7 @@ export function Canvas({ model, selection, onSelect, onBackgroundClick, highligh
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       fitView
-      fitViewOptions={{ padding: 0.35, maxZoom: 1 }}
+      fitViewOptions={{ padding: narrow ? 0.15 : 0.35, maxZoom: 1, minZoom: narrow ? 0.6 : 0.3 }}
       minZoom={0.3}
       maxZoom={1.6}
       nodesDraggable={false}

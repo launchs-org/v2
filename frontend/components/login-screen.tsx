@@ -91,7 +91,7 @@ export function LoginScreen({ onSubmit, loading, error }: LoginScreenProps) {
             <span className="disp" style={{ fontSize: 22, fontWeight: 500 }}>Launchs</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <h1 className="disp" style={{ margin: 0, fontSize: 56, lineHeight: 1.2, fontWeight: 500, letterSpacing: "-.02em" }}><span style={{ display: "block" }}>デプロイを、</span><span style={{ display: "block", color: "var(--accent)" }}>もっと簡単に。</span></h1>
+            <h1 className="disp" style={{ margin: 0, fontSize: "clamp(32px, 9vw, 56px)", lineHeight: 1.2, fontWeight: 500, letterSpacing: "-.02em" }}><span style={{ display: "block" }}>デプロイを、</span><span style={{ display: "block", color: "var(--accent)" }}>もっと簡単に。</span></h1>
             <p style={{ margin: 0, fontSize: 20 }}>インフラの心配を、減らす。</p>
           </div>
         </div>
