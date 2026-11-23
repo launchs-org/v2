@@ -530,6 +530,16 @@ button.alog-toggle { font-family: inherit; }
   .app .logs-foot .sw, .app .logs-foot .faint, .app .logs-foot label { white-space: nowrap; }
 }
 
+/* スマホ: 構成図の代わりの、リソースの表。「+ 追加」は、表の上の右に置く。 */
+.canvas-wrap.as-table { overflow-y: auto; padding: 64px 12px 16px; }
+.rtable { display: flex; flex-direction: column; overflow: hidden; }
+.rtable-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px; background: none; border: 0; border-top: 1px solid var(--line); text-align: left; cursor: pointer; color: inherit; }
+.rtable-row:first-child { border-top: 0; }
+.rtable-row:hover, .rtable-row.on { background: var(--panel2); }
+.rtable-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rtable-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtable-sub { font-size: 12px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 横向きで高さが低いとき: 上のバーを詰める */
 @media (max-height: 480px) and (orientation: landscape) {
   .modal { max-height: 98dvh; }

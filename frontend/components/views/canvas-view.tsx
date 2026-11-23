@@ -9,6 +9,8 @@ import { revalidateProject } from "@/lib/revalidate"
 import type { TagDeleteResponse } from "@/lib/types"
 import { validateProjectName } from "@/lib/project-name"
 import { Canvas } from "@/components/canvas"
+import { ResourceTable } from "@/components/resource-table"
+import { useNarrow } from "@/lib/use-narrow"
 import { KindIcon, type Kind } from "@/components/kind-icon"
 import { DeployPanel } from "@/components/panels/deploy-panel"
 import { IngressPanel } from "@/components/panels/ingress-panel"
@@ -46,6 +48,8 @@ export function CanvasView(props: CanvasViewProps) {
   const { project, refreshInterval, nav, selection } = props
   const pending = usePending(project, refreshInterval)
   const [menuOpen, setMenuOpen] = useState(false)
+  // スマホの幅では、構成図の代わりに、リソースの表を出す。
+  const narrow = useNarrow()
   // 右のパネルの幅(ドラッグで変えられ、覚えておく)。
   const [panelWidth, setPanelWidth] = usePanelWidth()
   const [volumeModal, setVolumeModal] = useState(false)
@@ -111,10 +115,11 @@ export function CanvasView(props: CanvasViewProps) {
 
   return (
     <div className="stage">
-      <div className="canvas-wrap">
+      <div className={`canvas-wrap ${narrow ? "as-table" : ""}`}>
         {firstLoad && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><LoadingState label="構成を読み込んでいます" /></div>}
-        {!firstLoad && !empty && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} highlightTag={highlightTag} onTagClick={toggleHighlightTag} />}
-        {!firstLoad && !empty && projectTags.length > 0 && (
+        {!firstLoad && !empty && narrow && <ResourceTable model={model} selection={selection} onSelect={nav.select} />}
+        {!firstLoad && !empty && !narrow && <Canvas model={model} selection={selection} onSelect={nav.select} onBackgroundClick={nav.closePanel} highlightTag={highlightTag} onTagClick={toggleHighlightTag} />}
+        {!firstLoad && !empty && !narrow && projectTags.length > 0 && (
           <div className="tagbar" role="group" aria-label="タグで強調">
             <span className="faint" style={{ fontSize: 12 }}>タグ</span>
             {projectTags.map(([tag, count]) => <button key={tag} type="button" className={`tagchip ${tag === highlightTag ? "on" : ""}`} aria-pressed={tag === highlightTag} onClick={() => toggleHighlightTag(tag)}>{tag}<span className="faint"> {count}</span></button>)}
