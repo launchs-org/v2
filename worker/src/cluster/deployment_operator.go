@@ -53,6 +53,10 @@ type KubernetesDeploymentOperator struct {
 	ingressNamespace string
 	// blockedNetworks は、隔離の NetworkPolicy で、インターネットへの出口の許可から除く、内部のネットワーク(CIDR)。
 	blockedNetworks []string
+	// cpuRequestPercent は、Pod の CPU の requests を、limits の何 % にするか(1 から 100)。
+	cpuRequestPercent int
+	// memoryRequestPercent は、Pod のメモリの requests を、limits の何 % にするか(1 から 100)。
+	memoryRequestPercent int
 }
 
 // OperatorSettings は、KubernetesDeploymentOperator の設定。
@@ -66,6 +70,14 @@ type OperatorSettings struct {
 	// BlockedNetworks は、インターネットへの出口の許可から除く、内部のネットワーク(環境変数 EGRESS_BLOCKED_NETWORKS)。
 	// 空なら、既定(k8s.DefaultBlockedNetworks)。
 	BlockedNetworks []string
+
+	// CPURequestPercent は、Pod の CPU の requests を、limits(deploy の大きさ)の何 % にするか(環境変数 CPU_REQUEST_PERCENT)。
+	// 1 から 100。0 なら 100(requests と limits を同じにする)。小さくすると、使っていない CPU を予約せず、同じノードにたくさん置ける。
+	CPURequestPercent int
+
+	// MemoryRequestPercent は、Pod のメモリの requests を、limits の何 % にするか(環境変数 MEMORY_REQUEST_PERCENT)。
+	// 1 から 100。0 なら 100。メモリは、足りなくなると Pod が止められるので、100 のままを勧める。
+	MemoryRequestPercent int
 }
 
 // NewKubernetesDeploymentOperator は、KubernetesDeploymentOperator を作る。
@@ -81,7 +93,24 @@ func NewKubernetesDeploymentOperator(clientset kubernetes.Interface, settings Op
 	return &KubernetesDeploymentOperator{
 		clientset: clientset, runtimeClassName: settings.RuntimeClass,
 		ingressNamespace: settings.IngressNamespace, blockedNetworks: settings.BlockedNetworks,
+		cpuRequestPercent: percentOrFull(settings.CPURequestPercent), memoryRequestPercent: percentOrFull(settings.MemoryRequestPercent),
 	}
+}
+
+// percentOrFull は、requests の割合(%)を、使える値にする。0 以下、または 100 を超える値は、100(limits と同じ)にする。
+//
+// 引数:
+//   - percent: 設定された割合(%)。
+//
+// 戻り値:
+//   - 1 から 100 の割合。
+func percentOrFull(percent int) int {
+	// 範囲の外(未設定の 0 を含む)は、limits と同じにする。
+	if percent < 1 || percent > 100 {
+		return 100
+	}
+	// 範囲の中なら、そのまま使う。
+	return percent
 }
 
 // EnsureNamespace は、namespace が無ければ作り、隔離の NetworkPolicy を適用する。すでにあれば、足りないものだけを揃える(冪等)。
@@ -279,10 +308,16 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		environment = append(environment, corev1.EnvVar{Name: environmentName, Value: definition.Env[environmentName]})
 	}
 
-	// CPU とメモリの大きさ。requests と limits を同じにする。
-	resources := corev1.ResourceList{
+	// CPU とメモリの大きさ(limits)。deploy の大きさそのもの。
+	limits := corev1.ResourceList{
 		corev1.ResourceCPU:    *resource.NewMilliQuantity(int64(definition.CPUMillicores), resource.DecimalSI),
 		corev1.ResourceMemory: *resource.NewQuantity(int64(definition.MemoryMiB)*1024*1024, resource.BinarySI),
+	}
+	// requests(スケジューラが予約する量)は、limits の設定した割合。100 なら、limits と同じ。
+	// CPU は、使っていなければ他の Pod に回るので、小さくできる。ただし、1m を下回らない。
+	requests := corev1.ResourceList{
+		corev1.ResourceCPU:    *resource.NewMilliQuantity(max(int64(definition.CPUMillicores)*int64(operator.cpuRequestPercent)/100, 1), resource.DecimalSI),
+		corev1.ResourceMemory: *resource.NewQuantity(int64(definition.MemoryMiB)*1024*1024*int64(operator.memoryRequestPercent)/100, resource.BinarySI),
 	}
 
 	// ユーザーのコンテナ。起動コマンドと引数は、指定があるときだけ上書きする。
@@ -291,7 +326,7 @@ func (operator *KubernetesDeploymentOperator) buildDeployment(definition activit
 		Image:     definition.Image,
 		Env:       environment,
 		Args:      definition.Args,
-		Resources: corev1.ResourceRequirements{Requests: resources, Limits: resources},
+		Resources: corev1.ResourceRequirements{Requests: requests, Limits: limits},
 	}
 	if definition.Command != nil {
 		container.Command = []string{*definition.Command}
