@@ -75,6 +75,9 @@ kubectl -n launchs rollout restart deploy/auth      # 例
 **Q. 利用者が、volume(RWX)を使うプロジェクトを作ると、起動が遅い**
 Longhorn の RWX は、NFS の共有(share-manager)を起動するので、初回は、3 分前後かかることがある。
 
+**Q. 収容できる利用者が少ない(CPU が、予約で埋まる)**
+スケジューラは、使っている量でなく、**予約(requests)**で置き場所を決める。deploy の Pod は、既定で requests と limits が同じなので、使っていなくても、deploy の大きさの CPU を予約する。`CPU_REQUEST_PERCENT`(`settings/config.yaml`。1 から 100)を小さくすると、requests が limits のその割合になり、同じノードにたくさん置ける(例: 10 なら、small(250m)が、25m の予約)。**limits は変わらない**(上限は、そのまま)。リスクは、全員が同時に CPU を使うと、ノードが詰まること。`MEMORY_REQUEST_PERCENT` は、足りなくなると Pod が止められるので、100 のままにする。**作成済みの deploy は、次に反映する(config/apply など)まで変わらない**。設定は、worker の再起動で効く(`kubectl -n launchs rollout restart deploy/worker`)。
+
 **Q. メモリやノードに余裕が無い**
 `kubectl -n launchs scale deploy/<名前> --replicas=<数>` で、一時的に下げる(恒久的には、`kustomization.yaml` の `replicas`)。watcher、logcollector、accessstats は、リーダー選出なので、複数でよい。
 

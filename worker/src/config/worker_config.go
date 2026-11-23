@@ -36,6 +36,9 @@ const (
 	// defaultTraefikAPIVersion は、Traefik の IngressRoute の apiVersion の既定値。
 	defaultTraefikAPIVersion = "traefik.io/v1alpha1"
 
+	// defaultRequestPercent は、deploy の Pod の requests を、limits の何 % にするかの既定値(同じ)。
+	defaultRequestPercent = 100
+
 	// defaultVolumeAccessMode は、PVC のアクセスモードの既定値。
 	defaultVolumeAccessMode = "ReadWriteMany"
 
@@ -99,6 +102,14 @@ type WorkerConfig struct {
 	// VolumeAccessMode は、PVC のアクセスモード(環境変数 VOLUME_ACCESS_MODE。ReadWriteOnce または ReadWriteMany)。
 	VolumeAccessMode string
 
+	// CPURequestPercent は、deploy の Pod の CPU の requests を、limits(deploy の大きさ)の何 % にするか(環境変数 CPU_REQUEST_PERCENT。1 から 100。既定 100)。
+	// 100 は、requests と limits が同じ(使っていなくても、その分を予約する)。小さくすると、同じノードに、たくさん置ける(limits は変わらない)。
+	CPURequestPercent int
+
+	// MemoryRequestPercent は、deploy の Pod のメモリの requests を、limits の何 % にするか(環境変数 MEMORY_REQUEST_PERCENT。1 から 100。既定 100)。
+	// メモリは、足りなくなると Pod が止められるので、100 のままを勧める。
+	MemoryRequestPercent int
+
 	// Kubernetes は、k8s への接続の設定(環境変数 KUBERNETES_ACCESS、KUBECONFIG)。読み方は shared/k8s にある。
 	Kubernetes k8s.Settings
 }
@@ -116,6 +127,7 @@ type WorkerConfig struct {
 //   - EGRESS_BLOCKED_NETWORKS: プロジェクトの namespace から、出ていく通信を許可しない内部のネットワーク(CIDR のカンマ区切り。IPv4)。
 //     省略すると、既定(10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10)。何も除かない設定は、できない。
 //   - INGRESS_STATS_PLUGIN: アクセスの集計の Traefik プラグインの名前(例: launchs-stats)。省略すると、集計は使わない。
+//   - CPU_REQUEST_PERCENT、MEMORY_REQUEST_PERCENT: deploy の Pod の requests を、limits の何 % にするか(1 から 100)。省略すると 100(同じ)。
 //   - INGRESS_NAMESPACE: 外からの通信を中継する namespace(Traefik など)。省略すると、その namespace からの通信は許可しない。
 //   - KUBERNETES_ACCESS、KUBECONFIG: k8s への接続の設定(読み方と意味は shared/k8s の ReadSettings)。
 //   - LOG_LEVEL: ログレベル(debug、info、warn、error)。省略すると info。
@@ -144,6 +156,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 	ingressStatsPlugin := reader.OptionalString("INGRESS_STATS_PLUGIN", "")
 	volumeStorageClass := reader.OptionalString("VOLUME_STORAGE_CLASS", "")
 	volumeAccessMode := reader.OptionalString("VOLUME_ACCESS_MODE", defaultVolumeAccessMode)
+	cpuRequestPercent := reader.OptionalInt("CPU_REQUEST_PERCENT", defaultRequestPercent)
+	memoryRequestPercent := reader.OptionalInt("MEMORY_REQUEST_PERCENT", defaultRequestPercent)
 	kubernetesSettings := k8s.ReadSettings(reader)
 
 	// 読み込み中に見つかった問題を集める。
@@ -185,6 +199,14 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		loadError = errors.Join(loadError, fmt.Errorf("環境変数 VOLUME_ACCESS_MODE は ReadWriteOnce か ReadWriteMany でなければなりません: %q", volumeAccessMode))
 	}
 
+	// requests の割合は、1 から 100 でなければならない。
+	if cpuRequestPercent < 1 || cpuRequestPercent > 100 {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 CPU_REQUEST_PERCENT は 1 から 100 でなければなりません: %d", cpuRequestPercent))
+	}
+	if memoryRequestPercent < 1 || memoryRequestPercent > 100 {
+		loadError = errors.Join(loadError, fmt.Errorf("環境変数 MEMORY_REQUEST_PERCENT は 1 から 100 でなければなりません: %d", memoryRequestPercent))
+	}
+
 	// k8s への接続の設定の値を検査し、問題があれば加える。
 	if validateError := kubernetesSettings.Validate(); validateError != nil {
 		loadError = errors.Join(loadError, validateError)
@@ -210,7 +232,8 @@ func LoadWorkerConfig(reader *sharedconfig.EnvironmentReader) (WorkerConfig, err
 		TraefikAPIVersion:  traefikAPIVersion,
 		TraefikEntryPoints: traefikEntryPoints,
 		IngressStatsPlugin: ingressStatsPlugin,
-		Kubernetes:         kubernetesSettings,
+		CPURequestPercent:  cpuRequestPercent, MemoryRequestPercent: memoryRequestPercent,
+		Kubernetes: kubernetesSettings,
 	}, nil
 }
 
