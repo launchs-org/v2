@@ -45,6 +45,17 @@ export function AdminApp() {
   // 開いているタブ。
   const [tab, setTab] = useState<TabKey>("overview")
 
+  // タブは、URL のハッシュ(#users など)に持つ(再読み込みや、戻るボタン、リンクでも、同じタブが開く)。
+  useEffect(() => {
+    const readHash = () => {
+      const key = window.location.hash.replace(/^#/, "")
+      setTab(TABS.some((item) => item.key === key) ? (key as TabKey) : "overview")
+    }
+    readHash()
+    window.addEventListener("hashchange", readHash)
+    return () => window.removeEventListener("hashchange", readHash)
+  }, [])
+
   // 保存してある refresh token で、ログインの状態を戻す。期限切れの通知も受ける。
   useEffect(() => {
     const onExpired = () => {
@@ -102,7 +113,7 @@ export function AdminApp() {
         <header className="topnav">
           <span className="disp" style={{ fontSize: 18, fontWeight: 500 }}>Launchs 管理</span>
           <div className="tabs" role="tablist" style={{ marginLeft: 8 }}>
-            {TABS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={`tab ${tab === item.key ? "on" : ""}`} onClick={() => setTab(item.key)}>{item.label}</button>)}
+            {TABS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={`tab ${tab === item.key ? "on" : ""}`} onClick={() => { window.location.hash = item.key }}>{item.label}</button>)}
           </div>
           <div className="grow" />
           <span className="faint" style={{ fontSize: 12.5 }}>{user.userName}</span>

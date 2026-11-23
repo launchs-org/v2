@@ -18,7 +18,7 @@ const FIELDS = [
   { key: "projects", label: "プロジェクトの数" },
   { key: "deploys", label: "deploy の数(合計)" },
   { key: "volumes", label: "volume の数" },
-  { key: "volumeTotalMB", label: "volume の大きさの合計(MB)" },
+  { key: "volumeTotalMB", label: "volume の合計(MB)" },
 ] as const
 
 /** 入力の文字を、数にする(空は null。整数でなければ NaN)。 */
@@ -78,7 +78,7 @@ function DefaultsEditor() {
       {error && !data && <ErrorState message="取得できませんでした" onRetry={() => void mutate()} />}
       {data && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
             {FIELDS.map((field) => <label key={field.key} className="lbl">{field.label}<input className="inp" inputMode="numeric" value={form[field.key] ?? ""} onChange={(event) => setForm({ ...form, [field.key]: event.target.value })} /></label>)}
             {Object.keys(data.deploysBySpec).sort().map((spec) => <label key={spec} className="lbl">{spec} の deploy の数<input className="inp" inputMode="numeric" value={form[`spec:${spec}`] ?? ""} onChange={(event) => setForm({ ...form, [`spec:${spec}`]: event.target.value })} /></label>)}
           </div>
@@ -151,15 +151,17 @@ function UserQuotaEditor() {
       {userId && error && !data && <ErrorState message="取得できませんでした" onRetry={() => void mutate()} />}
       {data && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(240px, 100%), 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(240px, 100%), 1fr))", gap: 12, alignItems: "start" }}>
             {FIELDS.map((field) => (
-              <label key={field.key} className="lbl">{field.label}(上限 {data[field.key].limit}、使用中 {data[field.key].used})
+              <label key={field.key} className="lbl">{field.label}
                 <input className="inp" inputMode="numeric" placeholder="既定" value={form[field.key] ?? ""} onChange={(event) => setForm({ ...form, [field.key]: event.target.value })} />
+                <span className="faint" style={{ fontSize: 11.5, fontWeight: 400 }}>上限 {data[field.key].limit} ・ 使用中 {data[field.key].used}</span>
               </label>
             ))}
             {Object.keys(data.deploysBySpec).sort().map((spec) => (
-              <label key={spec} className="lbl">{spec} の deploy の数(上限 {data.deploysBySpec[spec].limit}、使用中 {data.deploysBySpec[spec].used})
+              <label key={spec} className="lbl">{spec} の deploy の数
                 <input className="inp" inputMode="numeric" placeholder="既定" value={form[`spec:${spec}`] ?? ""} onChange={(event) => setForm({ ...form, [`spec:${spec}`]: event.target.value })} />
+                <span className="faint" style={{ fontSize: 11.5, fontWeight: 400 }}>上限 {data.deploysBySpec[spec].limit} ・ 使用中 {data.deploysBySpec[spec].used}</span>
               </label>
             ))}
           </div>

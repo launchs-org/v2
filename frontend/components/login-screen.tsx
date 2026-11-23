@@ -113,6 +113,9 @@ export function LoginScreen({ onSubmit, loading, error, adminOnly = false }: Log
             <button className="btn primary" type="submit" style={{ minHeight: 46 }} disabled={loading || challengeUnavailable || (turnstileEnabled && !turnstileToken)}>
               {loading ? "処理しています…" : mode === "login" ? "ログイン" : "アカウントを作成"}
             </button>
+            {adminOnly
+              ? <a className="faint" style={{ fontSize: 13, textAlign: "center" }} href="/">← 通常のログインへ</a>
+              : <a className="faint" style={{ fontSize: 13, textAlign: "center" }} href="/admin">管理者の方は、こちらからログイン</a>}
           </form>
         </div>
       </div>
