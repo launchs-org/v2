@@ -13,7 +13,7 @@ type AuditList = { logs: AuditLog[]; nextCursor: string | null }
 
 /** 操作の名前を、画面の言葉にする。 */
 const ACTION_LABEL: Record<string, string> = {
-  ban: "ユーザーの停止", unban: "停止の解除", unlock: "ロックの解除", invitation_create: "招待の発行", invitation_revoke: "招待の取り消し",
+  ban: "ユーザーの停止", unban: "停止の解除", unlock: "ロックの解除", password_reset: "パスワードのリセット", invitation_create: "招待の発行", invitation_revoke: "招待の取り消し",
   admin_create: "管理者の作成", admin_promote: "管理者への昇格", ip_block: "IP のブロック", ip_unblock: "ブロックの解除", quota_defaults_update: "全体のクォータの変更",
 }
 

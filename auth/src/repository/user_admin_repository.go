@@ -151,3 +151,28 @@ func (userRepository *UserRepository) PromoteToAdmin(requestContext context.Cont
 	// モデルに任せる。
 	return userRepository.updateUser(requestContext, "user_name_lower = ?", userNameLower, func(user *model.User) error { return user.PromoteToAdmin() }, nil)
 }
+
+// ResetPassword は、ユーザーのパスワードのハッシュを置き換え、同じトランザクションで、有効な refresh token を全て無効にする(管理者によるパスワードのリセット)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - userID: ユーザーの ID。
+//   - passwordHash: 新しいパスワードのハッシュ。
+//
+// 戻り値:
+//   - ユーザーが無ければ not_found。データベースのエラーは internal_error。
+func (userRepository *UserRepository) ResetPassword(requestContext context.Context, userID string, passwordHash string) error {
+	// ハッシュを置き換え、保存の後に、refresh token を全て無効にする(古いパスワードで開いたセッションを、残さない)。
+	return userRepository.updateUser(requestContext, "id = ?", userID,
+		func(user *model.User) error {
+			user.PasswordHash = passwordHash
+			return nil
+		},
+		func(transaction *gorm.DB, user model.User) error {
+			revokeError := transaction.Exec("UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ? AND revoked_at IS NULL", user.ID).Error
+			if revokeError != nil {
+				return apperror.Wrap(apperror.KindInternal, "refresh token を無効にできませんでした", revokeError)
+			}
+			return nil
+		})
+}

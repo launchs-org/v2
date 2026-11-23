@@ -77,4 +77,4 @@
 ### 監査ログ
 - Get: /admin-api/security/audit-logs?limit=50&cursor=...&action=ip_block
 - Response (200): `{"logs": [{"time": "...", "actorId": "...", "actorName": "root", "action": "ip_block", "target": "198.51.100.7/32", "detail": "総当たり", "ip": "203.0.113.2"}], "nextCursor": null}`
-- Note: 新しい順。`action` は `ban`、`unban`、`unlock`、`invitation_create`、`invitation_revoke`、`admin_create`、`admin_promote`、`ip_block`、`ip_unblock`、`quota_defaults_update`。追記だけ(変更・削除の API は無い)。
+- Note: 新しい順。`action` は `ban`、`unban`、`unlock`、`password_reset`、`invitation_create`、`invitation_revoke`、`admin_create`、`admin_promote`、`ip_block`、`ip_unblock`、`quota_defaults_update`。追記だけ(変更・削除の API は無い)。

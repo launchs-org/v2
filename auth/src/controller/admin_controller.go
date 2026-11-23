@@ -21,6 +21,8 @@ type AdminUseCase interface {
 	BanUser(requestContext context.Context, actorID string, userID string) error
 	UnbanUser(requestContext context.Context, actorID string, userID string) error
 	UnlockUser(requestContext context.Context, actorID string, userID string) error
+	ResetPassword(requestContext context.Context, actorID string, userID string) (string, error)
+	UserLocks(requestContext context.Context, users []model.User) (map[string]time.Time, error)
 	CreateInvitation(requestContext context.Context, actorID string, lifetime time.Duration, note string) (model.Invitation, string, error)
 	ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error)
 	RevokeInvitation(requestContext context.Context, actorID string, invitationID string) error
@@ -82,6 +84,12 @@ type AdminUserResponse struct {
 
 	// CreatedAt は、作成の日時(JST)。
 	CreatedAt string `json:"createdAt"`
+
+	// Locked は、ログインの失敗で、いまロックされているか(停止とは別。時間が過ぎると解ける)。
+	Locked bool `json:"locked"`
+
+	// LockedUntil は、ロックが解ける日時(JST)。ロック中でなければ null。
+	LockedUntil *string `json:"lockedUntil"`
 }
 
 // AdminUsersResponse は、ユーザーの一覧のレスポンス。
@@ -277,9 +285,14 @@ func (adminController *AdminController) ListUsers(echoContext *echo.Context) err
 	if listError != nil {
 		return listError
 	}
+	// ログインの失敗によるロックの状態を付ける。
+	locks, lockError := adminController.adminUseCase.UserLocks(echoContext.Request().Context(), users)
+	if lockError != nil {
+		return lockError
+	}
 	response := AdminUsersResponse{Users: make([]AdminUserResponse, 0, len(users)), NextCursor: encodeNextCursor(next)}
 	for _, user := range users {
-		response.Users = append(response.Users, newAdminUserResponse(user))
+		response.Users = append(response.Users, withLock(newAdminUserResponse(user), locks[user.ID]))
 	}
 	return echoContext.JSON(http.StatusOK, response)
 }
@@ -301,7 +314,52 @@ func (adminController *AdminController) GetUser(echoContext *echo.Context) error
 	if getError != nil {
 		return getError
 	}
-	return echoContext.JSON(http.StatusOK, newAdminUserResponse(user))
+	locks, lockError := adminController.adminUseCase.UserLocks(echoContext.Request().Context(), []model.User{user})
+	if lockError != nil {
+		return lockError
+	}
+	return echoContext.JSON(http.StatusOK, withLock(newAdminUserResponse(user), locks[user.ID]))
+}
+
+// withLock は、ユーザーのレスポンスに、ログインのロックの状態を付ける。
+//
+// 引数:
+//   - response: ユーザーのレスポンス。
+//   - lockedUntil: ロックが解ける日時(ロック中でなければ、ゼロ値)。
+//
+// 戻り値:
+//   - ロックの状態を付けたレスポンス。
+func withLock(response AdminUserResponse, lockedUntil time.Time) AdminUserResponse {
+	// ゼロ値は、ロック中でない。
+	if lockedUntil.IsZero() {
+		return response
+	}
+	formatted := jst.Format(lockedUntil)
+	response.Locked = true
+	response.LockedUntil = &formatted
+	return response
+}
+
+// ResetPassword は、POST /admin/users/:userId/password-reset のハンドラー。一時パスワードを発行する(このレスポンスでだけ分かる)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - {"password": "..."}(200)。トークンが使えなければ 401、管理者でなければ 403、ユーザーが無ければ 404。
+func (adminController *AdminController) ResetPassword(echoContext *echo.Context) error {
+	// 管理者であることを確かめて、リセットする。
+	actorID, authorizeError := adminController.authorize(echoContext)
+	if authorizeError != nil {
+		return authorizeError
+	}
+	temporaryPassword, resetError := adminController.adminUseCase.ResetPassword(echoContext.Request().Context(), actorID, echoContext.Param("userId"))
+	if resetError != nil {
+		return resetError
+	}
+	// 一時パスワードは、キャッシュされないようにして返す。
+	echoContext.Response().Header().Set("Cache-Control", "no-store")
+	return echoContext.JSON(http.StatusOK, map[string]string{"password": temporaryPassword})
 }
 
 // userAction は、ユーザーを対象にする操作(停止、解除、ロック解除)のハンドラーを作る。

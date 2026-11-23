@@ -82,6 +82,7 @@ func New(appLogger *slog.Logger, authUseCase controller.AuthUseCase, adminUseCas
 	adminGroup.POST("/users/:userId/ban", adminController.BanUser())
 	adminGroup.POST("/users/:userId/unban", adminController.UnbanUser())
 	adminGroup.POST("/users/:userId/unlock", adminController.UnlockUser())
+	adminGroup.POST("/users/:userId/password-reset", adminController.ResetPassword)
 	adminGroup.GET("/login-events", adminController.ListLoginEvents)
 	adminGroup.POST("/invitations", adminController.CreateInvitation)
 	adminGroup.GET("/invitations", adminController.ListInvitations)

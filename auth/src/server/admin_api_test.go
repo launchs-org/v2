@@ -558,3 +558,68 @@ func TestBlockedIPAndAudit(testing *testing.T) {
 		testing.Errorf("監査ログに残るはず: %+v", audit)
 	}
 }
+
+// TestAdminLockedAndPasswordReset は、ログインの失敗でロックされたユーザーが一覧に出ることと、
+// パスワードのリセットで、一時パスワードで入れて、古いパスワードと古いセッションが使えなくなり、ロックも解けることを確かめる。
+func TestAdminLockedAndPasswordReset(testing *testing.T) {
+	// 管理者と、一般のユーザー(セッションつき)を用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "pat", true, "203.0.113.60")
+	oldSession := login(testing, environment, "pat", goodPassword, "203.0.113.61")
+	if oldSession.status != 200 {
+		testing.Fatalf("ログインできるはず: %d", oldSession.status)
+	}
+	// 失敗を重ねて、ロックさせる(別々の IP から。IP のレート制限に当たらないように)。
+	for attempt := 0; attempt < environment.settings.LoginMaxFailures; attempt++ {
+		call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"pat","password":"wrong-password-123"}`, "", "203.0.113."+string(rune('0'+attempt))+"0")
+	}
+	findUser := func() map[string]any {
+		listed := call(testing, environment, http.MethodGet, "/auth/admin/users", "", admin.accessToken, "203.0.113.2")
+		for _, entry := range listed.body["users"].([]any) {
+			if entry.(map[string]any)["userId"] == userID {
+				return entry.(map[string]any)
+			}
+		}
+		testing.Fatal("一覧にユーザーがいるはず")
+		return nil
+	}
+	// 一覧に、ロック中と、解ける日時が出る(取得でも同じ)。
+	if locked := findUser(); locked["locked"] != true || locked["lockedUntil"] == nil {
+		testing.Fatalf("ロック中と出るはず: %v", locked)
+	}
+	if single := call(testing, environment, http.MethodGet, "/auth/admin/users/"+userID, "", admin.accessToken, "203.0.113.2"); single.body["locked"] != true {
+		testing.Errorf("取得でもロック中のはず: %v", single.body)
+	}
+	// リセットすると、一時パスワードが返る(強さの検査を通る長さ)。管理者でなければ 403、ユーザーが無ければ 404。
+	if forbidden := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", "", "203.0.113.2"); forbidden.status != 401 {
+		testing.Errorf("トークン無しは 401 のはず: %d", forbidden.status)
+	}
+	if missing := call(testing, environment, http.MethodPost, "/auth/admin/users/userid-none/password-reset", "", admin.accessToken, "203.0.113.2"); missing.status != 404 {
+		testing.Errorf("無いユーザーは 404 のはず: %d", missing.status)
+	}
+	reset := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/password-reset", "", admin.accessToken, "203.0.113.2")
+	temporaryPassword, _ := reset.body["password"].(string)
+	if reset.status != 200 || len(temporaryPassword) != 20 {
+		testing.Fatalf("一時パスワードが返るはず: %d %v", reset.status, reset.body)
+	}
+	// ロックは解け、一時パスワードで入れて、古いパスワードは使えない。古いセッション(refresh token)も、使えない。
+	if after := findUser(); after["locked"] != false {
+		testing.Errorf("ロックは解けるはず: %v", after)
+	}
+	if oldPassword := login(testing, environment, "pat", goodPassword, "203.0.113.70"); oldPassword.status != 401 {
+		testing.Errorf("古いパスワードは 401 のはず: %d", oldPassword.status)
+	}
+	if newPassword := call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"pat","password":"`+temporaryPassword+`"}`, "", "203.0.113.71"); newPassword.status != 200 {
+		testing.Errorf("一時パスワードで入れるはず: %d %v", newPassword.status, newPassword.body)
+	}
+	if oldRefresh := call(testing, environment, http.MethodPost, "/auth/refresh", "", oldSession.body["token"].(string), "203.0.113.72"); oldRefresh.status != 401 {
+		testing.Errorf("古いセッションは 401 のはず: %d", oldRefresh.status)
+	}
+	// 監査ログに残り、パスワードは含まれない。
+	var detail string
+	environment.database.Raw("SELECT concat(action, target, detail) FROM admin_audit_logs WHERE action = 'password_reset'").Scan(&detail)
+	if detail == "" || strings.Contains(detail, temporaryPassword) {
+		testing.Errorf("監査ログに残り、パスワードは含まないはず: %q", detail)
+	}
+}

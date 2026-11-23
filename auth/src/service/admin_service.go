@@ -34,6 +34,9 @@ type AdminUserStore interface {
 	// Unban は、停止中のユーザーを戻す。
 	Unban(requestContext context.Context, userID string) error
 
+	// ResetPassword は、パスワードのハッシュを置き換え、有効な refresh token を全て無効にする。
+	ResetPassword(requestContext context.Context, userID string, passwordHash string) error
+
 	// PromoteToAdmin は、小文字のユーザー名で、管理者にする。
 	PromoteToAdmin(requestContext context.Context, userNameLower string) error
 
@@ -57,6 +60,9 @@ type AdminInvitationStore interface {
 type AdminFailureStore interface {
 	// Reset は、ユーザー名(小文字)の失敗の記録とロックを消す。
 	Reset(requestContext context.Context, userNameLower string) error
+
+	// LockedUntil は、ロック中のユーザー名(小文字)と、ロックが解ける日時を返す。
+	LockedUntil(requestContext context.Context, userNamesLower []string) (map[string]time.Time, error)
 }
 
 // AdminLoginEventStore は、管理のユースケースが使う、ログイン履歴の読み出し。
@@ -241,6 +247,102 @@ func (adminService *AdminService) UnlockUser(requestContext context.Context, act
 	}
 	adminService.record(actorID, "unlock", userID)
 	return nil
+}
+
+// UserLocks は、ユーザーのうち、ログインの失敗でロックされているものの、ロックが解ける日時を返す(一覧の表示用)。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - users: 調べるユーザー。
+//
+// 戻り値:
+//   - ユーザーの ID → ロックが解ける日時(ロック中のものだけ)。
+func (adminService *AdminService) UserLocks(requestContext context.Context, users []model.User) (map[string]time.Time, error) {
+	// 名前から ID を引けるようにして、ロック中の名前を調べる。
+	names := make([]string, 0, len(users))
+	idByName := make(map[string]string, len(users))
+	for _, user := range users {
+		names = append(names, user.UserNameLower)
+		idByName[user.UserNameLower] = user.ID
+	}
+	lockedByName, lockError := adminService.failureStore.LockedUntil(requestContext, names)
+	if lockError != nil {
+		return nil, lockError
+	}
+	locks := make(map[string]time.Time, len(lockedByName))
+	for name, until := range lockedByName {
+		locks[idByName[name]] = until
+	}
+	return locks, nil
+}
+
+// temporaryPasswordAlphabet は、一時パスワードに使う文字(紛らわしい文字を除く)。
+const temporaryPasswordAlphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// temporaryPasswordLength は、一時パスワードの長さ。
+const temporaryPasswordLength = 20
+
+// newTemporaryPassword は、推測できない一時パスワードを作る(暗号用の乱数から)。
+//
+// 戻り値:
+//   - パスワード。乱数を得られなければ internal_error。
+func newTemporaryPassword() (string, error) {
+	// 文字の数で割った余りの偏りが出ないよう、範囲外の値は捨てて、引き直す。
+	limit := byte(256 - 256%len(temporaryPasswordAlphabet))
+	password := make([]byte, 0, temporaryPasswordLength)
+	buffer := make([]byte, temporaryPasswordLength*2)
+	for len(password) < temporaryPasswordLength {
+		if _, readError := rand.Read(buffer); readError != nil {
+			return "", apperror.Wrap(apperror.KindInternal, "パスワードを作れませんでした", readError)
+		}
+		for _, value := range buffer {
+			if value < limit && len(password) < temporaryPasswordLength {
+				password = append(password, temporaryPasswordAlphabet[int(value)%len(temporaryPasswordAlphabet)])
+			}
+		}
+	}
+	return string(password), nil
+}
+
+// ResetPassword は、ユーザーのパスワードを、新しい一時パスワードに置き換える(管理者の操作)。
+//
+// 一時パスワードは、このレスポンスでだけ分かる(保存するのはハッシュだけ)。有効な refresh token は全て無効になり、ログインの失敗のロックも解ける。
+// 発行済みの access token は、期限(最大15分)まで使える。管理者は、一時パスワードを、本人に安全な方法で渡す。
+//
+// 引数:
+//   - requestContext: キャンセルや期限を伝える context。
+//   - actorID: 操作する管理者の ID。
+//   - userID: 対象のユーザーの ID。
+//
+// 戻り値:
+//   - 一時パスワード。ユーザーが無ければ not_found。
+func (adminService *AdminService) ResetPassword(requestContext context.Context, actorID string, userID string) (string, error) {
+	// 対象を確かめる。
+	user, getError := adminService.GetUser(requestContext, userID)
+	if getError != nil {
+		return "", getError
+	}
+	// 一時パスワードを作り、強さの検査を通るか確かめて、ハッシュにする。
+	temporaryPassword, passwordError := newTemporaryPassword()
+	if passwordError != nil {
+		return "", passwordError
+	}
+	if checkError := password.Check(user.UserName, temporaryPassword); checkError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "作ったパスワードが、強さの検査を通りませんでした", checkError)
+	}
+	passwordHash, hashError := adminService.hasher.Hash(temporaryPassword)
+	if hashError != nil {
+		return "", apperror.Wrap(apperror.KindInternal, "パスワードをハッシュできませんでした", hashError)
+	}
+	// 置き換えて(refresh token も無効)、ロックも解いて、記録する。
+	if resetError := adminService.userStore.ResetPassword(requestContext, userID, passwordHash); resetError != nil {
+		return "", resetError
+	}
+	if unlockError := adminService.failureStore.Reset(requestContext, user.UserNameLower); unlockError != nil {
+		return "", unlockError
+	}
+	adminService.record(actorID, "password_reset", userID)
+	return temporaryPassword, nil
 }
 
 // NewInvitationCode は、推測できない招待コードを作る。

@@ -18,11 +18,12 @@
 ```json
 {
   "users": [
-    {"userId": "userid-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "userName": "alice", "status": "active", "role": "user", "createdAt": "2026-11-15T20:38:25+09:00"}
+    {"userId": "userid-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "userName": "alice", "status": "active", "role": "user", "createdAt": "2026-11-15T20:38:25+09:00", "locked": false, "lockedUntil": null}
   ],
   "nextCursor": null
 }
 ```
+- Note: `locked` は、**ログインの失敗(5回)でロック中か**(停止 `status: banned` とは別。`lockedUntil` までで自動で解ける。「ロックの解除」で、すぐ解ける)。
 - Note: 新しい順。`limit` は 1〜100(既定 20)、`cursor` は前のレスポンスの `nextCursor`。不正は 400。パスワードのハッシュは返さない。
 
 ### ユーザーの取得
@@ -93,3 +94,10 @@
 - Note: 新しい順。成功も失敗も含み、**存在しないユーザー名への試行も出る**(`userId` は null)。不正なアクセスの確認に使う。
 - Note: `result`(`success` か `failure`。それ以外は 400)と、`userName`(部分一致。大文字小文字は区別しない)で絞り込める。`limit` は 1〜100(既定 20)、`cursor` は前のレスポンスの `nextCursor`。
 - Note: `reason` は、失敗のときだけ(`unknown_user`、`wrong_password`、`locked`、`banned`、`invalid_input`)。
+
+### パスワードのリセット
+- Post: /auth/admin/users/:userId/password-reset
+- Response (200): `{"password": "Zq9plumbWalnut42xvKd"}`(`Cache-Control: no-store`)
+- Note: 20 文字の**一時パスワード**を作って、置き換える。**このレスポンスでだけ分かる**(DB には、ハッシュだけ)。管理者が、本人に、安全な方法で渡す。
+- Note: そのユーザーの有効な refresh token は、全て無効になる(古いセッションは、使えない。発行済みの access token は、最大15分)。ログインの失敗のロックも、解ける。停止中のユーザーでも、リセットできる(停止は、そのまま)。
+- Note: ユーザーが無ければ 404。監査ログには `password_reset` が残る(パスワードは含めない)。
