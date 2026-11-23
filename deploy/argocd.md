@@ -38,7 +38,7 @@ kubectl -n argocd label secret launchs-repo argocd.argoproj.io/secret-type=repos
 cd deploy
 kubectl apply -f namespace.yaml                                   # namespace launchs
 cp settings/secret.example.yaml settings/secret.yaml              # 値を入れる(下)
-kubectl apply -k settings/                                        # 設定(ConfigMap)と秘密
+kubectl apply -k settings/                                        # 秘密(Secret)だけ。設定(ConfigMap)は、本体に含まれる
 kubectl create namespace cloudflared
 kubectl -n cloudflared create secret generic tunnel-token --from-literal=token='<トンネルのトークン>'
 ```
@@ -53,13 +53,25 @@ kubectl -n cloudflared create secret generic tunnel-token --from-literal=token='
 
 環境ごとの設定の値(ドメイン、Pod の範囲、StorageClass)は、[deploy.md](deploy.md) の「設定を直す」。
 
-## 4. Application を作る(1 回だけ)
+## 4. 環境ごとの値を、Argo CD で上書きする
+Git の値(`settings/config.yaml`、`argocd/applications.yaml`)は**既定**。環境ごとに違う値は、Git を変えずに、Application の `kustomize.patches` で上書きする。`argocd/applications.yaml` の、コメントの例を、有効にして、値を直す(`kubectl apply -f` で、反映する)。
+
+| 上書きするもの | どこで | 例 |
+|---|---|---|
+| launchs 本体のホスト名(IngressRoute の Host の 3 か所) | `launchs-prod` の `ConfigMap launchs-config` の `LAUNCHS_HOST` | `www.launchs.org` |
+| ingress に払い出すドメイン、StorageClass、信頼するプロキシの範囲など | 同じ ConfigMap の `INGRESS_BASE_DOMAIN`、`VOLUME_STORAGE_CLASS`、`AUTH_TRUSTED_PROXY_CIDRS` | `launchs.org`、`longhorn`、`10.244.0.0/16` |
+| `launchs-edge` が信じる接続元(cloudflared の Pod の範囲) | `launchs-cluster` の `Middleware launchs-edge` | `10.240.0.0/16` |
+
+本番 launchs.org の値の例は `settings/config.launchs.org.example.yaml`。ホスト名は、`LAUNCHS_HOST` だけ変えればよい(`kustomization.yaml` の `replacements` が、IngressRoute に入れる)。
+**ConfigMap を変えても、Pod は再起動しない**ので、同期のあとに `kubectl -n launchs rollout restart deploy` する。
+
+## 5. Application を作る(1 回だけ)
 ```bash
 kubectl apply -f deploy/argocd/applications.yaml
 kubectl -n argocd get applications          # traefik、launchs-cluster、launchs-prod(OutOfSync で正しい)
 ```
 
-## 5. 同期する(順序: traefik → launchs-cluster → launchs-prod)
+## 6. 同期する(順序: traefik → launchs-cluster → launchs-prod)
 Argo CD の画面で、各 Application の「SYNC」を押す。または:
 ```bash
 for app in traefik launchs-cluster launchs-prod; do
@@ -71,14 +83,14 @@ done
 - **順序が大事**: `launchs-cluster` の Middleware と、`launchs-prod` の IngressRoute は、Traefik の CRD が先に要る(`SkipDryRunOnMissingResource` で、検査では止まらないが、先に `traefik` を同期する)。
 - 全部が Synced / Healthy になったら、[deploy.md](deploy.md) の「確認する」。
 
-## 6. 日々の使い方
+## 7. 日々の使い方
 - **更新**: `main` に入れる → CI が `newTag` をコミットする → `launchs-prod` を同期する([deploy.md](deploy.md) の「更新」)。
 - **差分を見る**: 画面の「APP DIFF」、または `kubectl -n argocd get application <名前>`(OutOfSync なら、Git と違う)。
 - **戻す**: Git で `newTag` を戻して、同期する(画面の「History and Rollback」は、Git と食い違うので、使わない)。
 - **自動で同期したいとき**: `applications.yaml` の `syncPolicy` に `automated: {selfHeal: true}` を足す。**`prune` は付けない**(Git から消したものを、クラスターからも消してしまう。PostgreSQL の PVC などが対象になる)。
 
-## 7. 注意と、つまずき
+## 8. 注意と、つまずき
 - **既に Helm で入れた Traefik がある**: 同じ版・同じ values なら、描画は同じ。同期しても、中身は変わらず、Argo CD が管理を引き継ぐ(Helm の release の記録は残る)。
 - **`trustedCIDRs`**: `launchs-edge` が信じる接続元(cloudflared の Pod の範囲)。Git の値は `10.244.0.0/16`。違う範囲のクラスターは、`applications.yaml` の `launchs-cluster` の `kustomize.patches`(コメントの例)で上書きする。合っていないと、クライアント IP と https が、アプリに届かない。
 - **プラグインのソースを変えたとき**: `python3 traefik-plugins/render_helm_values.py --full > deploy/cluster/traefik-values.yaml` で作り直して、コミットする(CI が、ずれを検査する)。
-- **秘密は、Git に入れない**: `settings/secret.yaml` と `tunnel-token` は、Argo CD の管理の外(手で作る)。`launchs-prod` の Application は、`settings/` を含めない。
+- **秘密は、Git に入れない**: `settings/secret.yaml` と `tunnel-token` は、Argo CD の管理の外(手で作る)。ConfigMap(秘密ではない設定)は、`launchs-prod` が管理する。

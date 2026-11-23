@@ -2,13 +2,15 @@
 
 launchs の本番向けのマニフェスト(`deploy/`)の、中身と決まり。入れ方と更新は [deploy.md](deploy.md)、運用は [operation.md](operation.md)、つまずいたときは [questions.md](questions.md)。
 
-## 構成(本体と設定は、別に適用する)
+## 構成(本体と秘密は、別に適用する)
 | 場所 | 内容 | 適用 |
 |---|---|---|
-| `deploy/`(この場所) | 本体(PostgreSQL、Temporal、auth、backend、worker、…、IngressRoute) | `kubectl apply -k .` |
-| `deploy/settings/` | **環境ごとの設定**: ConfigMap `launchs-config`(`config.yaml`)と、Secret(`secret.yaml`。gitignore) | `kubectl apply -k settings/` |
+| `deploy/`(この場所) | 本体(PostgreSQL、Temporal、auth、backend、worker、…、IngressRoute)と、**設定(ConfigMap `launchs-config` = `settings/config.yaml`)** | Argo CD の `launchs-prod`、または `kubectl apply -k .` |
+| `deploy/settings/` | **秘密**: Secret(`secret.yaml`。gitignore) | `kubectl apply -k settings/`(手で。本体より先に) |
 
-設定は、本体より**先に**適用する(各 Deployment が参照するため)。本体の `kubectl apply -k .` は、設定を**変えも、消しもしない**。設定を変えたいときは、`settings/` だけを、適用し直す(本体の更新と、切り離せる)。`secret.example.yaml`(雛形)は、`settings/kustomization.yaml` に含めていないので、誤って適用されない。
+- 設定(ConfigMap)は、本体に含まれ、Git の値が**既定**。環境ごとの値は、Argo CD の `kustomize.patches` で上書きする([argocd.md](argocd.md))。
+- **IngressRoute の Host は、ConfigMap の `LAUNCHS_HOST` から入る**(`kustomization.yaml` の `replacements`)。ホスト名は、`LAUNCHS_HOST` だけ変えればよい。
+- 秘密は、本体より**先に**作る(各 Deployment が参照するため)。Git に入れない。`secret.example.yaml`(雛形)は、`settings/kustomization.yaml` に含めていないので、誤って適用されない。
 
 ## 構成と権限
 | 名前 | 内容 | k8s への権限(rbac.yaml) |
@@ -75,12 +77,13 @@ helm list -n traefik
 ```
 本番の Talos の値: Pod `10.244.0.0/16`、Service `10.96.0.0/12`、ノード `192.168.10.161-165`、StorageClass `longhorn`(既定)と `local-path`、Traefik は chart 41.6.1(namespace `traefik`、entryPoint `web`=8000)、入口は Cloudflare Tunnel(cloudflared)。Datadog は無い。
 
-## 環境ごとの設定(`deploy/settings/`)
-`settings/config.launchs.org.example.yaml` が、本番の値の例(適用の対象ではない)。`config.yaml` に写して使う。
+## 環境ごとの設定
+`settings/config.launchs.org.example.yaml` が、本番の値の例(適用の対象ではない)。Argo CD の `kustomize.patches` で、この値に上書きする([argocd.md](argocd.md))。
 
 | キー | 本番の値 | 理由 |
 |---|---|---|
-| `INGRESS_BASE_DOMAIN` | `launchs.org` | 公開ドメイン。IngressRoute の Host(`ingressroute.yaml`)も `www.launchs.org` にする |
+| `LAUNCHS_HOST` | `www.launchs.org` | launchs 本体のホスト名。IngressRoute の Host も、これで変わる |
+| `INGRESS_BASE_DOMAIN` | `launchs.org` | ingress に払い出す、公開ドメイン |
 | `AUTH_TRUSTED_PROXY_CIDRS` | `10.244.0.0/16` | Traefik の Pod の範囲(広すぎると、クライアント IP を偽装される) |
 | `VOLUME_STORAGE_CLASS` | `longhorn` | 利用者の volume(RWX)。Postgres の PVC も、既定の `longhorn` |
 | `INGRESS_STATS_PLUGIN` | `launchs-stats` | §3 のプラグインを入れたあとだけ。**入れていない Traefik では、空にする** |
