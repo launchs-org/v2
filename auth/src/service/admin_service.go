@@ -65,6 +65,12 @@ type AdminLoginEventStore interface {
 	ListAll(requestContext context.Context, limit int, after *pagination.Position, result string, userNameKeyword string) ([]model.LoginEvent, *pagination.Position, error)
 }
 
+// AdminAuditStore は、管理操作の監査ログの保存先。
+type AdminAuditStore interface {
+	// Create は、監査ログを 1 件追記する。
+	Create(requestContext context.Context, actorID string, action string, target string) error
+}
+
 // invitationCodeBytes は、招待コードの元になる乱数の長さ(バイト)。256ビットで、推測できない。
 const invitationCodeBytes = 32
 
@@ -74,6 +80,7 @@ type AdminService struct {
 	invitationStore AdminInvitationStore
 	failureStore    AdminFailureStore
 	loginEventStore AdminLoginEventStore
+	auditStore      AdminAuditStore
 	appLogger       *slog.Logger
 	hasher          PasswordHasher
 	tokenService    *token.Service
@@ -134,6 +141,14 @@ func (adminService *AdminService) Authorize(requestContext context.Context, acce
 func (adminService *AdminService) record(actorID string, action string, target string) {
 	// 監査のために、info のログに残す。
 	adminService.appLogger.Info("管理操作", "actor", actorID, "action", action, "target", target)
+	// 監査ログにも追記する(保存先が設定されているとき。保存できなくても、操作は止めず、警告を残す)。
+	if adminService.auditStore != nil {
+		auditContext, cancel := context.WithTimeout(context.Background(), auditWriteTimeout)
+		defer cancel()
+		if auditError := adminService.auditStore.Create(auditContext, actorID, action, target); auditError != nil {
+			adminService.appLogger.Warn("監査ログを保存できなかった", "action", action, "error", auditError)
+		}
+	}
 }
 
 // ListUsers は、ユーザーを、新しい順に返す。
@@ -290,6 +305,18 @@ func (adminService *AdminService) CreateInvitation(requestContext context.Contex
 func (adminService *AdminService) ListInvitations(requestContext context.Context, limit int, after *pagination.Position) ([]model.Invitation, *pagination.Position, error) {
 	// 保存先から取得する。
 	return adminService.invitationStore.List(requestContext, limit, after)
+}
+
+// auditWriteTimeout は、監査ログの保存を待つ時間の上限。
+const auditWriteTimeout = 3 * time.Second
+
+// SetAuditStore は、監査ログの保存先を設定する(起動のときに 1 回)。
+//
+// 引数:
+//   - auditStore: 監査ログの保存先。
+func (adminService *AdminService) SetAuditStore(auditStore AdminAuditStore) {
+	// 保存先を持たせる。
+	adminService.auditStore = auditStore
 }
 
 // SetLoginEventStore は、ログイン履歴の読み出し先を設定する(起動のときに 1 回。コンストラクターの引数を増やさないための後付け)。

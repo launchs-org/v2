@@ -20,6 +20,9 @@ type Dependencies struct {
 	// Database は、app データベースの接続。
 	Database *gorm.DB
 
+	// AuthDatabase は、auth データベースの接続。
+	AuthDatabase *gorm.DB
+
 	// Settings は、画面に見せる設定(名前 → 値)。
 	Settings map[string]string
 
@@ -52,8 +55,15 @@ func New(appLogger *slog.Logger, dependencies Dependencies) *echo.Echo {
 	adminGroup := echoServer.Group("/admin-api", adminmiddleware.NewAdminAuthMiddleware(dependencies.Verifier))
 	overviewController := controller.NewOverviewController(service.NewOverviewService(repository.NewOverviewRepository(dependencies.Database)))
 	adminGroup.GET("/overview", overviewController.Get)
+	securityService := service.NewSecurityService(repository.NewSecurityRepository(dependencies.AuthDatabase))
 	queryController := controller.NewAdminQueryController(service.NewAdminQueryService(repository.NewAdminQueryRepository(dependencies.Database),
-		repository.NewQuotaDefaultRepository(dependencies.Database), dependencies.Settings, dependencies.SettingNames))
+		repository.NewQuotaDefaultRepository(dependencies.Database), dependencies.Settings, dependencies.SettingNames), securityService)
+	securityController := controller.NewSecurityController(securityService)
+	adminGroup.GET("/security/suspicious-ips", securityController.ListSuspiciousIPs)
+	adminGroup.GET("/security/blocked-ips", securityController.ListBlocked)
+	adminGroup.POST("/security/blocked-ips", securityController.CreateBlock)
+	adminGroup.DELETE("/security/blocked-ips/:blockId", securityController.DeleteBlock)
+	adminGroup.GET("/security/audit-logs", securityController.ListAudit)
 	adminGroup.GET("/deploys", queryController.ListDeploys)
 	adminGroup.GET("/access-logs", queryController.ListAccessLogs)
 	adminGroup.GET("/quota-defaults", queryController.GetQuotaDefaults)

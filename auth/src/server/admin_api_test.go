@@ -508,3 +508,53 @@ func TestAdminLoginEvents(testing *testing.T) {
 		testing.Errorf("トークンが無ければ 401 のはず: %d", anonymous.status)
 	}
 }
+
+// TestBlockedIPAndAudit は、ブロックした IP(単独と範囲)からのログインとサインアップが拒否され、期限切れ・他の IP は通ることと、
+// 管理操作が監査ログに残ることを確かめる。
+func TestBlockedIPAndAudit(testing *testing.T) {
+	// 管理者と一般のユーザーを用意する。
+	environment := newTestEnvironment(testing, nil)
+	admin := newAdminSession(testing, environment, "root-admin")
+	userID, _ := accessTokenFor(testing, environment, "victim", true, "203.0.113.50")
+	// 単独の IP と、範囲(期限つき)と、期限切れの範囲を、登録する(管理コンテナが書く表と、同じ形)。
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by) VALUES ('block-1', '198.51.100.7/32', 'x')")
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by, expires_at) VALUES ('block-2', '192.0.2.0/24', 'x', now() + interval '1 hour')")
+	environment.database.Exec("INSERT INTO blocked_ips (id, network, created_by, expires_at) VALUES ('block-3', '203.0.113.99/32', 'x', now() - interval '1 hour')")
+	loginFrom := func(ip string) response {
+		return call(testing, environment, http.MethodPost, "/auth/login", `{"userName":"victim","password":"`+goodPassword+`"}`, "", ip)
+	}
+	// ブロックされた IP は、正しいパスワードでも、403。範囲の中の IP も、403。
+	for _, blockedIP := range []string{"198.51.100.7", "192.0.2.200"} {
+		if blocked := loginFrom(blockedIP); blocked.status != 403 {
+			testing.Errorf("%s は 403 のはず: %d %v", blockedIP, blocked.status, blocked.body)
+		}
+	}
+	if signup := call(testing, environment, http.MethodPost, "/auth/signup", `{"userName":"newbie","password":"`+goodPassword+`"}`, "", "198.51.100.7"); signup.status != 403 {
+		testing.Errorf("サインアップも 403 のはず: %d", signup.status)
+	}
+	// 期限切れのブロックと、範囲の外の IP は、通る。
+	for _, allowedIP := range []string{"203.0.113.99", "198.51.100.8"} {
+		if allowed := loginFrom(allowedIP); allowed.status != 200 {
+			testing.Errorf("%s は通るはず: %d %v", allowedIP, allowed.status, allowed.body)
+		}
+	}
+	// 拒否は、履歴に、理由 blocked で残る(持ち主なし)。
+	var blockedEvents int64
+	environment.database.Table("login_events").Where("reason = 'blocked' AND user_id IS NULL").Count(&blockedEvents)
+	if blockedEvents != 3 {
+		testing.Errorf("blocked の履歴が 3 件のはず: %d", blockedEvents)
+	}
+	// 管理操作(停止)が、監査ログに、誰が・何を・何にかが残る。
+	if banned := call(testing, environment, http.MethodPost, "/auth/admin/users/"+userID+"/ban", "", admin.accessToken, "203.0.113.2"); banned.status != 200 {
+		testing.Fatalf("停止できるはず: %d", banned.status)
+	}
+	var audit struct {
+		ActorID string
+		Action  string
+		Target  string
+	}
+	environment.database.Raw("SELECT actor_id, action, target FROM admin_audit_logs WHERE action = 'ban'").Scan(&audit)
+	if audit.ActorID != admin.userID || audit.Target != userID {
+		testing.Errorf("監査ログに残るはず: %+v", audit)
+	}
+}

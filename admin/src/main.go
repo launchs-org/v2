@@ -52,6 +52,12 @@ func run() error {
 		return databaseError
 	}
 	defer func() { _ = database.Close(appDatabase) }()
+	// auth データベースに接続する(IP のブロック、監査ログ、ログイン履歴の集計)。
+	authDatabase, authDatabaseError := database.Open(adminConfig.AuthDatabaseURL)
+	if authDatabaseError != nil {
+		return authDatabaseError
+	}
+	defer func() { _ = database.Close(authDatabase) }()
 
 	// 公開鍵(JWKS)を、起動時に 1 度取得してみる(失敗しても、リクエストのときに取得し直す)。
 	verifier := jwtverify.New(jwtverify.Options{URL: adminConfig.AuthJWKSURL, Logger: appLogger})
@@ -62,7 +68,7 @@ func run() error {
 	}
 
 	// サーバーを組み立てる。
-	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, Verifier: verifier, Settings: adminConfig.Settings, SettingNames: config.SettingNames})
+	echoServer := server.New(appLogger, server.Dependencies{Database: appDatabase, AuthDatabase: authDatabase, Verifier: verifier, Settings: adminConfig.Settings, SettingNames: config.SettingNames})
 
 	// 停止の合図で終わる context を作る。
 	shutdownContext, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

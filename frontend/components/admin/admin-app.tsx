@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { AdminAccessLogs } from "@/components/admin/admin-access-logs"
 import { AdminDeploys } from "@/components/admin/admin-deploys"
 import { AdminQuota } from "@/components/admin/admin-quota"
+import { AdminSecurity } from "@/components/admin/admin-security"
 import { AdminSettings } from "@/components/admin/admin-settings"
 import { AdminLoginEvents } from "@/components/admin/admin-login-events"
 import { AdminOverview } from "@/components/admin/admin-overview"
@@ -22,6 +23,7 @@ const TABS = [
   { key: "deploys", label: "デプロイ" },
   { key: "access", label: "アクセスログ" },
   { key: "quota", label: "クォータ" },
+  { key: "security", label: "セキュリティ" },
   { key: "settings", label: "設定" },
 ] as const
 
@@ -115,6 +117,7 @@ export function AdminApp() {
             {tab === "deploys" && <AdminDeploys refreshInterval={REFRESH_INTERVAL} />}
             {tab === "access" && <AdminAccessLogs refreshInterval={REFRESH_INTERVAL} />}
             {tab === "quota" && <AdminQuota />}
+            {tab === "security" && <AdminSecurity />}
             {tab === "settings" && <AdminSettings refreshInterval={REFRESH_INTERVAL} />}
             {tab === "logins" && <AdminLoginEvents refreshInterval={REFRESH_INTERVAL} />}
           </div>

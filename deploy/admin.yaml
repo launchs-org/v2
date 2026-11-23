@@ -47,6 +47,9 @@ spec:
                 secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
             - name: DATABASE_URL
               value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            # auth のデータベース(IP のブロック、監査ログ、ログイン履歴の集計)。
+            - name: AUTH_DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/auth?sslmode=disable
             - name: AUTH_JWKS_URL
               value: http://auth:8080/auth/.well-known/jwks.json
           # 画面に見せる設定(秘密でないもの)を、ConfigMap から受け取る。

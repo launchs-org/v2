@@ -19,6 +19,9 @@ type AdminConfig struct {
 	// DatabaseURL は、app データベースの接続先(環境変数 DATABASE_URL。必須)。
 	DatabaseURL string
 
+	// AuthDatabaseURL は、auth データベースの接続先(環境変数 AUTH_DATABASE_URL。必須)。IP のブロックと、監査ログ、ログイン履歴の集計に使う。
+	AuthDatabaseURL string
+
 	// AuthJWKSURL は、auth の公開鍵(JWKS)の URL(環境変数 AUTH_JWKS_URL。必須。管理者の access token を検証する)。
 	AuthJWKSURL string
 
@@ -45,6 +48,7 @@ func LoadAdminConfig(reader *sharedconfig.EnvironmentReader) (AdminConfig, error
 	// 必須と省略できる項目を読む。
 	databaseURL := reader.RequiredString("DATABASE_URL")
 	authJWKSURL := reader.RequiredString("AUTH_JWKS_URL")
+	authDatabaseURL := reader.RequiredString("AUTH_DATABASE_URL")
 	httpPort := reader.OptionalInt("HTTP_PORT", 8080)
 	logLevelText := reader.OptionalString("LOG_LEVEL", "info")
 	// 見せる設定を読む(未設定は空のまま)。
@@ -65,5 +69,5 @@ func LoadAdminConfig(reader *sharedconfig.EnvironmentReader) (AdminConfig, error
 	if httpPort < 1 || httpPort > 65535 {
 		return AdminConfig{}, fmt.Errorf("HTTP_PORT は 1〜65535 で指定してください: %d", httpPort)
 	}
-	return AdminConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, AuthJWKSURL: authJWKSURL, Settings: settings}, nil
+	return AdminConfig{HTTPPort: httpPort, LogLevel: logLevel, DatabaseURL: databaseURL, AuthDatabaseURL: authDatabaseURL, AuthJWKSURL: authJWKSURL, Settings: settings}, nil
 }

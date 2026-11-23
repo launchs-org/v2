@@ -249,6 +249,8 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # IP のブロック、監査ログ、ログイン履歴の集計(auth のデータベース)。
+      AUTH_DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth?sslmode=disable
       AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
       # 画面に見せる設定(読むだけ)。
       INGRESS_BASE_DOMAIN: ${INGRESS_BASE_DOMAIN:-shconn.org}

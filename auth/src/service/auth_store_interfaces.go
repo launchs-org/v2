@@ -69,3 +69,9 @@ type PasswordHasher interface {
 	// Verify は、パスワードがハッシュと一致するか、ハッシュを作り直すべきか、を返す。
 	Verify(plainPassword string, encodedHash string) (bool, bool, error)
 }
+
+// IPBlockStore は、ブロックされた IP の確認(管理者が、管理コンテナで登録する)。
+type IPBlockStore interface {
+	// IsBlocked は、IP が、期限内のブロックの範囲に入っているかを返す。
+	IsBlocked(requestContext context.Context, clientIP string) (bool, error)
+}

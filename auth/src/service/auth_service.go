@@ -27,6 +27,7 @@ type AuthService struct {
 	tokenService      *token.Service
 	settings          Settings
 	dummyHash         string
+	ipBlockStore      IPBlockStore
 }
 
 // NewAuthService は、AuthService を作る。
@@ -75,6 +76,10 @@ func NewAuthService(userStore UserStore, refreshTokenStore RefreshTokenStore, lo
 //   - refresh token。
 //   - レート制限は RateLimitedError。確認に失敗したら invalid_request(確認のサービスに届かなければ service_unavailable)。入力が不正なら invalid_request、名前の重複は conflict。
 func (authService *AuthService) Signup(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, invitationCode string, turnstileToken string) (string, error) {
+	// 0. ブロックされた IP は、何も確かめずに拒否する。
+	if blockError := authService.checkBlocked(requestContext, model.LoginEventKindSignup, clientIP, userAgent); blockError != nil {
+		return "", blockError
+	}
 	// 1. IP のレート制限(失敗した試行も数える)。
 	if limitError := authService.checkRateLimit(requestContext, rateLimitKindSignup, clientIP, authService.settings.SignupIPLimit, authService.settings.SignupIPWindow); limitError != nil {
 		return "", limitError
@@ -139,6 +144,10 @@ var errLoginFailed = apperror.New(apperror.KindUnauthorized, "userName または
 //   - refresh token。
 //   - レート制限は RateLimitedError。確認に失敗したら invalid_request(確認のサービスに届かなければ service_unavailable)。認証できなければ unauthorized(理由は区別しない)。
 func (authService *AuthService) Login(requestContext context.Context, clientIP string, userAgent string, userName string, plainPassword string, turnstileToken string) (string, error) {
+	// 0. ブロックされた IP は、何も確かめずに拒否する。
+	if blockError := authService.checkBlocked(requestContext, model.LoginEventKindLogin, clientIP, userAgent); blockError != nil {
+		return "", blockError
+	}
 	// 1. IP のレート制限。
 	if limitError := authService.checkRateLimit(requestContext, rateLimitKindLogin, clientIP, authService.settings.LoginIPLimit, authService.settings.LoginIPWindow); limitError != nil {
 		return "", limitError

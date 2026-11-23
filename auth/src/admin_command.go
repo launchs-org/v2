@@ -50,6 +50,8 @@ func runAdminCommand(arguments []string) error {
 	// 管理のユースケースを組み立てる(トークンは使わないので nil)。
 	adminService := service.NewAdminService(repository.NewUserRepository(appDatabase), repository.NewInvitationRepository(appDatabase), repository.NewLoginFailureRepository(appDatabase),
 		logger.New(os.Stderr, "auth-admin", authConfig.LogLevel), password.NewHasher(password.DefaultParameters()), nil)
+	// コマンドからの操作も、監査ログに残す。
+	adminService.SetAuditStore(repository.NewAuditRepository(appDatabase))
 	// 昇格のときは、パスワードは要らない。
 	if subcommand == "promote" {
 		if promoteError := adminService.PromoteToAdmin(context.Background(), userName); promoteError != nil {

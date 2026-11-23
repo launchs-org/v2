@@ -9,7 +9,7 @@
 - **管理者だけ**が使える。access token の `role` は見ず、**毎回、DB の最新の状態**で「管理者で、停止中でない」ことを確かめる(降格・停止された人が、残りの有効期間(最大15分)で操作できないようにするため)。
   - トークンが無い・使えない(refresh token を含む): 401。
   - 管理者でない、または停止中: **403** `forbidden`。
-- 操作は、auth のログに、誰が(`actor`)、何を(`action`)、何に対して(`target`)行ったかを残す。
+- 操作は、auth のログと、監査ログ(`admin_audit_logs`。[docs/security.md](../security.md))に、誰が(`actor`)、何を(`action`)、何に対して(`target`)行ったかを残す。
 - 最初の管理者は、API では作れない。**起動時に作る**(環境変数 `AUTH_BOOTSTRAP_ADMIN_NAME` と、パスワード `AUTH_BOOTSTRAP_ADMIN_PASSWORD` または `AUTH_BOOTSTRAP_ADMIN_PASSWORD_FILE`。管理者が1人もいないときだけ。Kubernetes ではこちら)か、コマンドで作る: `task admin:create -- <userName>`(パスワードは、環境変数 `AUTH_ADMIN_PASSWORD` か、標準入力の1行で渡す。通常のサインアップと同じ強さの検査を行う)。すでにあるユーザーを管理者にする: `task admin:promote -- <userName>`。
 
 ### ユーザーの一覧

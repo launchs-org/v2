@@ -16,6 +16,7 @@ const REASON_LABEL: Record<string, string> = {
   locked: "ロック中",
   banned: "停止中のユーザー",
   invalid_input: "入力の不正",
+  blocked: "ブロックされた IP",
 }
 
 /** 行の列の幅(日時、ユーザー名、種類、結果、理由、IP、ブラウザ)。 */

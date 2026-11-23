@@ -26,18 +26,26 @@ type AdminQueryUseCase interface {
 // AdminQueryController は、/admin-api の、一覧・既定のクォータ・設定を担当する。
 type AdminQueryController struct {
 	useCase AdminQueryUseCase
+	auditor Auditor
+}
+
+// Auditor は、管理操作を監査ログに残すもの(service.SecurityService が満たす)。
+type Auditor interface {
+	// Audit は、管理操作を、監査ログに追記する。
+	Audit(requestContext context.Context, actor service.Actor, action string, target string, detail string) error
 }
 
 // NewAdminQueryController は、AdminQueryController を作る。
 //
 // 引数:
 //   - useCase: ユースケース。
+//   - auditor: 管理操作を監査ログに残すもの。
 //
 // 戻り値:
 //   - 作成した AdminQueryController。
-func NewAdminQueryController(useCase AdminQueryUseCase) *AdminQueryController {
+func NewAdminQueryController(useCase AdminQueryUseCase, auditor Auditor) *AdminQueryController {
 	// 依存するものを持たせて返す。
-	return &AdminQueryController{useCase: useCase}
+	return &AdminQueryController{useCase: useCase, auditor: auditor}
 }
 
 // readPage は、クエリの limit と cursor を読む。
@@ -176,6 +184,11 @@ func (adminQueryController *AdminQueryController) PutQuotaDefaults(echoContext *
 	updated, setError := adminQueryController.useCase.SetQuotaDefaults(echoContext.Request().Context(), defaults)
 	if setError != nil {
 		return setError
+	}
+	// 変更を、監査ログに残す(変更後の値を、補足にする)。
+	detail, _ := json.Marshal(updated)
+	if auditError := adminQueryController.auditor.Audit(echoContext.Request().Context(), actorOf(echoContext), "quota_defaults_update", "quota_defaults", string(detail)); auditError != nil {
+		return auditError
 	}
 	return echoContext.JSON(http.StatusOK, updated)
 }

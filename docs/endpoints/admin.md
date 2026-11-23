@@ -54,3 +54,27 @@
 - Get: /admin-api/settings
 - Response (200): `{"settings": [{"name": "INGRESS_BASE_DOMAIN", "value": "shconn.org"}]}`
 - Note: 秘密でない、決まった名前の環境変数だけ(`LAUNCHS_HOST`、`INGRESS_BASE_DOMAIN`、`VOLUME_*`、`AUTH_SIGNUP_MODE` など)。空は、未設定(既定)。**変更は、デプロイの設定(`deploy/settings/config.yaml`、Argo CD の上書き)で行う**。
+
+## セキュリティ (/admin-api/security)
+設計と限界は [docs/security.md](../security.md)。
+
+### 不審な IP
+- Get: /admin-api/security/suspicious-ips?hours=24&minFailures=5
+- Response (200): `{"ips": [{"ip": "198.51.100.7", "failures": 6, "successes": 0, "userNames": 3, "lastSeen": "2026-11-24T01:33:44+09:00", "blocked": false}]}`
+- Note: ログイン履歴から、期間内に失敗が `minFailures` 回以上の IP を、失敗の多い順に(最大 100)。`hours` は 1〜720、`minFailures` は 1〜10000(範囲外は 400)。`blocked` は、いま、ブロックされているか。
+
+### ブロックの一覧・追加・解除
+- Get: /admin-api/security/blocked-ips → `{"blocks": [{"blockId": "block-...", "network": "198.51.100.7/32", "reason": "...", "createdBy": "...", "createdByName": "root", "createdAt": "...", "expiresAt": null}]}`(期限内のものだけ)
+- Post: /admin-api/security/blocked-ips
+```json
+{"network": "203.0.113.0/24", "reason": "総当たり", "expiresInHours": 24}
+```
+- Response (200): 追加したブロック(一覧の要素と同じ形)。
+- Note: `network` は IP か CIDR(ホスト部は落とす)。`expiresInHours` は 0〜8760(0 か省略は、解除するまで)。理由は 200 バイトまで。形が不正、範囲外、**操作している自分の接続元(ヘッダー `X-Real-Ip`、無ければ接続の相手)を含む**ときは 400。知らない項目名も 400。
+- Delete: /admin-api/security/blocked-ips/:blockId → `{}`。無ければ 404。
+- Note: ブロックは、auth のログインとサインアップを 403 にする(履歴の理由は `blocked`)。
+
+### 監査ログ
+- Get: /admin-api/security/audit-logs?limit=50&cursor=...&action=ip_block
+- Response (200): `{"logs": [{"time": "...", "actorId": "...", "actorName": "root", "action": "ip_block", "target": "198.51.100.7/32", "detail": "総当たり", "ip": "203.0.113.2"}], "nextCursor": null}`
+- Note: 新しい順。`action` は `ban`、`unban`、`unlock`、`invitation_create`、`invitation_revoke`、`admin_create`、`admin_promote`、`ip_block`、`ip_unblock`、`quota_defaults_update`。追記だけ(変更・削除の API は無い)。

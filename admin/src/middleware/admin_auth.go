@@ -26,6 +26,20 @@ const (
 	userNameContextKey = "admin.userName"
 )
 
+// ActorFrom は、認証できた管理者の ID と名前を、コンテキストから取り出す(監査ログのため)。
+//
+// 引数:
+//   - echoContext: Echo のリクエストの context。
+//
+// 戻り値:
+//   - 管理者の ID と名前。認証のミドルウェアを通っていなければ、空。
+func ActorFrom(echoContext *echo.Context) (string, string) {
+	// 文字列として入れてあるものを、取り出す。
+	userID, _ := echoContext.Get(userIDContextKey).(string)
+	userName, _ := echoContext.Get(userNameContextKey).(string)
+	return userID, userName
+}
+
 // NewAdminAuthMiddleware は、管理者の access token だけを通すミドルウェアを作る。
 //
 // `Authorization: Bearer <access token>` を検証し、role が admin でなければ 403 にする。トークンが使えなければ 401(理由は区別しない)。

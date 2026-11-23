@@ -181,6 +181,8 @@ const (
 	LoginReasonLocked        = "locked"
 	LoginReasonBanned        = "banned"
 	LoginReasonInvalidInput  = "invalid_input"
+	// LoginReasonBlocked は、管理者がブロックした IP からの試行(持ち主なし)。
+	LoginReasonBlocked = "blocked"
 )
 
 // LoginEvent は、login_events テーブルの1行。サインアップとログインの、成功と失敗の履歴。
