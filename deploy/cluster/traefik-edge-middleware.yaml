@@ -1,0 +1,12 @@
+# launchs-edge の Middleware(Traefik の namespace に 1 つ作る)。
+# trustedCIDRs は、Cloudflare のヘッダーを信じてよい接続元(cloudflared の Pod の範囲)。それ以外から来た Cf-* は、捨てる。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: launchs-edge
+  namespace: traefik
+spec:
+  plugin:
+    launchs-edge:
+      trustedCIDRs:
+        - 10.244.0.0/16

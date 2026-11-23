@@ -1,0 +1,8 @@
+# Traefik の namespace。ラベル `name: traefik` を付けておく(launchs の NetworkPolicy などが、この名前で選ぶ)。
+# Traefik のチャート自体は、Argo CD の Application `traefik` が入れる(deploy/argocd/applications.yaml)。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+  labels:
+    name: traefik

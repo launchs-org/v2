@@ -1,0 +1,79 @@
+# Argo CD の Application(クラスターに、launchs と、その土台を、全部入れる)。
+# Argo CD が入っているクラスターで、1 回だけ、次のように適用する(中身の同期は、Argo CD の画面か CLI で行う):
+#   kubectl apply -f deploy/argocd/applications.yaml
+# 同期は、手動(自動にはしていない)。順序: ①traefik → ②launchs-cluster → ③launchs-prod(deploy/README.md、deploy/cluster/README.md)。
+# 先に必要なもの(Git に入れない秘密): launchs の Secret(deploy/settings/secret.example.yaml)、cloudflared の Secret(deploy/cluster/tunnel-token.example.yaml)。
+---
+# ① Traefik(Helm のチャートと、launchs のプラグインを含む values。values は、deploy/cluster/traefik-values.yaml)。
+# values は、プラグインのソースから作る(python3 traefik-plugins/render_helm_values.py --full)。ソースを変えたら、作り直して、コミットする(CI が、ずれを検査する)。
+# 既に Helm で入れてある Traefik は、同じ値で描画できるので、同期しても、中身は変わらない(Argo CD が、管理を引き継ぐ)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      # チャートの版(上げるときは、ここだけ)。
+      targetRevision: 42.3.2
+      helm:
+        releaseName: traefik
+        valueFiles:
+          - $values/deploy/cluster/traefik-values.yaml
+    - repoURL: https://github.com/launchs-org/v2
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+---
+# ② クラスター全体に 1 回のもの: metrics-server、launchs-edge の Middleware、cloudflared(deploy/cluster/)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: launchs-cluster
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/launchs-org/v2
+    targetRevision: main
+    path: deploy/cluster
+    # クラスターごとに違う値は、ここで上書きする(Git の値は、本番 launchs.org の Pod の範囲 10.244.0.0/16)。
+    # 別の範囲のクラスターでは、次の patches を有効にして、cloudflared の Pod の範囲(Pod の CIDR)にする。
+    # kustomize:
+    #   patches:
+    #     - target: {kind: Middleware, name: launchs-edge}
+    #       patch: |-
+    #         - {op: replace, path: /spec/plugin/launchs-edge/trustedCIDRs, value: ["10.240.0.0/16"]}
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    syncOptions:
+      # Traefik の CRD(Middleware)が、まだ無くても、検査で止めない(①の後に、もう一度同期すれば、入る)。
+      - SkipDryRunOnMissingResource=true
+---
+# ③ launchs 本体(deploy/。環境ごとの設定 deploy/settings/ は、Application に含めない。手で先に適用する)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: launchs-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/launchs-org/v2
+    targetRevision: main
+    path: deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: launchs
+  syncPolicy:
+    syncOptions:
+      - SkipDryRunOnMissingResource=true
