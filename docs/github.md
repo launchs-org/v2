@@ -13,6 +13,11 @@ launchs は、GitHub のコードを直接は読みません。**GitHub Actions*
 
 デプロイの [[概要]] → [[自動デプロイ(webhook)]] → [[GitHub Actions で自動デプロイ]]。
 
+![デプロイの「概要」にある、自動デプロイ(webhook)](assets/images/deploy-webhook.png)
+
+![「GitHub Actions で自動デプロイ」。4 つの手順で、YAML まで作れる](assets/images/github-actions.png)
+
+
 :::steps
 1. **YAML を作る**
 

@@ -43,6 +43,20 @@ crumb: "使い方"
    Ingress のカードを押して、URL を開きます。数分かかることがあります。
 :::
 
+## 画面の流れ
+
+
+
+![① イメージ。候補から選べる](assets/images/wizard-1-image.png)
+
+![② スペック。迷ったら small](assets/images/wizard-2-spec.png)
+
+![③ 公開。ポートは 80](assets/images/wizard-3-publish.png)
+
+![④ 確認して、作成する](assets/images/wizard-4-confirm.png)
+
+![作成後の構成図](assets/images/canvas.png)
+
 ## 自分のアプリを動かすとき
 
 | やりたいこと | 読むページ |

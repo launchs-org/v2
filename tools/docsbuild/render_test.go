@@ -68,3 +68,20 @@ func TestCheckNav(testingT *testing.T) {
 		testingT.Errorf("正しいナビが通りません: %v %v", order, err)
 	}
 }
+
+// TestFigureAndTOC は、画像が figure(説明つき)になることと、右の目次が作られることを確かめる。
+func TestFigureAndTOC(testingT *testing.T) {
+	// 見出し 2 つと、画像だけの段落を持つ本文を、HTML にする。
+	output, err := renderBody("## 一\n\n![画面の説明](assets/images/a.png)\n\n## 二\n", "")
+	if err != nil {
+		testingT.Fatal(err)
+	}
+	if !strings.Contains(output, `<figure><img src="assets/images/a.png" alt="画面の説明" loading="lazy"><figcaption>画面の説明</figcaption></figure>`) {
+		testingT.Errorf("画像が figure になりません:\n%s", output)
+	}
+	// 目次に、2 つの見出しへのリンクが入る。
+	toc := renderTOC(output)
+	if strings.Count(toc, "<a ") != 2 {
+		testingT.Errorf("目次のリンクが 2 つになりません: %s", toc)
+	}
+}
