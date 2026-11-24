@@ -146,6 +146,10 @@ func loadPages(src string) (map[string]page, error) {
 			return nil, err
 		}
 		name := strings.TrimSuffix(filepath.Base(file), ".md")
+		// README.md は、GitHub で見たときの入口(目次)であり、サイトでは、ホーム(index.html)になる。
+		if name == "README" {
+			name = "index"
+		}
 		text := string(content)
 		// front matter(先頭の --- と、次の --- の間)を取り出す。
 		if !strings.HasPrefix(text, "---\n") {
