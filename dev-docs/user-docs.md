@@ -22,6 +22,7 @@ task docs:test    # 生成ツールのテスト
 
 - `docs/<名前>.md` が 1 ページ(`docs/start.md` → `start.html`)。フォルダは使わない(直下だけ)。
 - **全てのページを `docs/nav.yaml` に書く**(サイドバーの見出しと並び。ページの前へ / 次への順番もここ)。無いページは、ビルドが失敗する。
+- **`docs/README.md` は、ホーム(`index.html`)になる**。GitHub で `docs/` を開いたときに、最初に見える目次なので、ページを足したら、ここの目次(表)にも足す。凝った HTML は使わず、普通の Markdown だけで書く(GitHub でも読めるように)。
 - 見た目は `docs/assets/style.css`(`assets/` の中のファイルは、サイトの直下に写る)。
 
 ## ページの先頭(front matter)
