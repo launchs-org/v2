@@ -1,5 +1,5 @@
 -- 認証コンテナのデータ(auth データベース)。アプリのデータベースとは、別のデータベース。
--- 仕様は docs/endpoints/auth.md、設計は docs/auth.md。
+-- 仕様は dev-docs/endpoints/auth.md、設計は dev-docs/auth.md。
 
 -- ユーザー。
 CREATE TABLE users (

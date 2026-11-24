@@ -1,4 +1,4 @@
-// Package tracking は、worker が実行する Workflow を、プロジェクトのタスクとして記録する(docs/tasks.md)。
+// Package tracking は、worker が実行する Workflow を、プロジェクトのタスクとして記録する(dev-docs/tasks.md)。
 //
 // Workflow の開始と終了のところに、interceptor で割り込む。各 Workflow のコードには、手を入れない。
 // 記録の失敗は、Workflow を失敗させない(ログに残すだけ)。

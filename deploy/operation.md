@@ -168,7 +168,7 @@ kubectl -n launchs scale deploy/frontend --replicas=2
 # 1 つだけ、再起動する
 kubectl -n launchs rollout restart deploy/backend
 ```
-- **招待コードの発行**: 管理者でログインして、`POST /auth/admin/invitations` を呼びます([docs/endpoints/auth_admin.md](../docs/endpoints/auth_admin.md))。
+- **招待コードの発行**: 管理者でログインして、`POST /auth/admin/invitations` を呼びます([dev-docs/endpoints/auth_admin.md](../dev-docs/endpoints/auth_admin.md))。
 - **サインアップの公開範囲**: `settings/config.yaml` の `AUTH_SIGNUP_MODE`(`open` か `invite`)を変えて、`kubectl apply -k settings/` し、`rollout restart deploy/auth` します(設定は、本体とは別に適用します)。
 
 ## 8. よくある問題

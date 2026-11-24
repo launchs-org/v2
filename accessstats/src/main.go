@@ -1,4 +1,4 @@
-// accessstats は、Traefik の Pod のログから、ingress のアクセスの集計(プラグイン launchs-stats の出力)を読み取り、DB に保存する(docs/ingress-plugins.md)。
+// accessstats は、Traefik の Pod のログから、ingress のアクセスの集計(プラグイン launchs-stats の出力)を読み取り、DB に保存する(dev-docs/ingress-plugins.md)。
 //
 // 同時に1つだけ動く(PostgreSQL の advisory lock でリーダーを決める。他は、リーダーが止まるまで待つ)。
 package main

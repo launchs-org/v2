@@ -186,7 +186,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/apply", volumeController.ApplySize)
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/discard", volumeController.DiscardSize)
 
-	// ConfigMap(プロジェクトで共有する設定ファイル。docs/configmap.md)。本文は、base64 や JSON のエスケープで大きくなるので、この API だけ上限を広げる。
+	// ConfigMap(プロジェクトで共有する設定ファイル。dev-docs/configmap.md)。本文は、base64 や JSON のエスケープで大きくなるので、この API だけ上限を広げる。
 	configMapController := controller.NewConfigMapController(service.NewConfigMapService(repository.NewConfigMapRepository(dependencies.Database)))
 	configMapBodyLimit := middleware.BodyLimit(configMapRequestBodyLimitBytes)
 	apiGroup.POST("/projects/:projectId/configmaps", configMapController.Create, configMapBodyLimit)

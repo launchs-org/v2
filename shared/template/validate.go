@@ -21,7 +21,7 @@ var (
 	resourceNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 	// portNamePattern は、service のポート名の形(小文字の英数字とハイフン。先頭と末尾のハイフン、連続するハイフンは不可)。
-	// docs/endpoints/services.md と同じ規則(15文字までと、英字を1つ以上含むことは、別に確かめる)。
+	// dev-docs/endpoints/services.md と同じ規則(15文字までと、英字を1つ以上含むことは、別に確かめる)。
 	portNamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 	// letterPattern は、英字を含むかの確認用。
@@ -481,7 +481,7 @@ func validateDeploy(where string, resource Resource, volumes map[string]bool, co
 	return nil
 }
 
-// validateServicePorts は、service のポートの規則(1〜20個、名前、番号、プロトコル、重複)を確かめる(docs/endpoints/services.md と同じ)。
+// validateServicePorts は、service のポートの規則(1〜20個、名前、番号、プロトコル、重複)を確かめる(dev-docs/endpoints/services.md と同じ)。
 //
 // 引数:
 //   - where: エラーに添える場所。

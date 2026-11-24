@@ -12,7 +12,7 @@ import (
 	"launchs/shared/apperror"
 )
 
-// このファイルは、deploy の「ファイル」(設定ファイルなどを、ConfigMap としてマウントする。docs/templates.md の段階 A)の、
+// このファイルは、deploy の「ファイル」(設定ファイルなどを、ConfigMap としてマウントする。dev-docs/templates.md の段階 A)の、
 // 形の検査と、状態を変える操作を持つ。メソッドは、メモリ上の値だけを変える(保存は repository が行う)。
 
 const (

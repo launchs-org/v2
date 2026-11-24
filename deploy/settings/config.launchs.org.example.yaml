@@ -18,7 +18,7 @@ data:
   # Traefik の IngressRoute の apiVersion と、受け付ける entryPoint。
   TRAEFIK_API_VERSION: traefik.io/v1alpha1
   TRAEFIK_ENTRY_POINTS: web
-  # アクセスログのプラグイン(launchs-stats)の名前。Traefik にプラグインを入れていないなら、空にする(docs/ingress-plugins.md)。
+  # アクセスログのプラグイン(launchs-stats)の名前。Traefik にプラグインを入れていないなら、空にする(dev-docs/ingress-plugins.md)。
   INGRESS_STATS_PLUGIN: launchs-stats
   # volume の PVC の StorageClass(空ならクラスターの既定)と、アクセスモード。
   VOLUME_STORAGE_CLASS: longhorn

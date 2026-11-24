@@ -1,5 +1,5 @@
 // Package launchs_stats は、ingress ごとのアクセスを集計して、一定の間隔で、標準出力に 1 行の JSON として出す Traefik のプラグイン。
-// 標準ライブラリだけを使う(Yaegi で動かすため)。設計は docs/ingress-plugins.md §4。
+// 標準ライブラリだけを使う(Yaegi で動かすため)。設計は dev-docs/ingress-plugins.md §4。
 package launchs_stats
 
 import (

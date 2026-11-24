@@ -1,5 +1,5 @@
 // Package launchs_edge は、Traefik のミドルウェア(Yaegi のプラグイン)。entryPoint 全体に 1 つ入れて、アプリに、
-// 本当のクライアント IP と、正しい X-Forwarded-Proto / X-Forwarded-Port を届ける(docs/ingress-plugins.md §3)。
+// 本当のクライアント IP と、正しい X-Forwarded-Proto / X-Forwarded-Port を届ける(dev-docs/ingress-plugins.md §3)。
 //
 // 標準ライブラリだけを使う(Yaegi は、外部パッケージを読み込めない)。全リクエストが通るので、小さく、安全に保つ:
 // パニックしても、リクエストを止めず、そのまま通す。

@@ -1,5 +1,5 @@
 // Package accessstats は、ingress のアクセスの集計(Traefik のプラグイン launchs-stats の出力)の型と、読み取り・足し合わせ・集計を持つ。
-// 設計は docs/ingress-plugins.md。
+// 設計は dev-docs/ingress-plugins.md。
 package accessstats
 
 import (

@@ -67,7 +67,7 @@ func run() error {
 	defer temporalClient.Close()
 
 	// 一般の Task Queue を処理するワーカーを作り、Workflow と Activity を登録する。
-	// 全ての Workflow を、プロジェクトのタスクとして記録する(docs/tasks.md)。
+	// 全ての Workflow を、プロジェクトのタスクとして記録する(dev-docs/tasks.md)。
 	taskRepository := repository.NewProjectTaskRepository(appDatabase)
 	generalWorker := worker.New(temporalClient, sharedworkflow.TaskQueueGeneral, worker.Options{
 		Interceptors: []interceptor.WorkerInterceptor{tracking.NewTaskInterceptor(taskRepository, appLogger)},

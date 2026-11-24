@@ -1,4 +1,4 @@
--- テンプレートから部品を作る、1 回の実行(docs/templates.md 段階 C)。計画(展開済みの部品の一覧)と、進み具合を持つ。
+-- テンプレートから部品を作る、1 回の実行(dev-docs/templates.md 段階 C)。計画(展開済みの部品の一覧)と、進み具合を持つ。
 CREATE TABLE template_applies (
     -- "apply-" + UUID v4。アプリ側で作る。
     id          text        PRIMARY KEY,

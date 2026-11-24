@@ -1,6 +1,6 @@
 // Package apperror は、アプリケーション全体で使うエラーの型を定義する。
 //
-// エラーの種類(Kind)は、共通ルール(docs/endpoints/common.md)のエラーレスポンスの
+// エラーの種類(Kind)は、共通ルール(dev-docs/endpoints/common.md)のエラーレスポンスの
 // code と1対1で対応する。service と repository はこのエラーを返し、
 // controller のエラーハンドラーが HTTP のステータスとレスポンスのボディに変換する。
 package apperror
@@ -50,7 +50,7 @@ const (
 func (kind Kind) StatusCode() int {
 	// 種類ごとに、対応する HTTP のステータスコードを選ぶ。
 	switch kind {
-	// 種類とステータスコードの対応。共通ルール(docs/endpoints/common.md)に合わせている。
+	// 種類とステータスコードの対応。共通ルール(dev-docs/endpoints/common.md)に合わせている。
 	case KindInvalidRequest:
 		return http.StatusBadRequest
 	case KindUnauthorized:

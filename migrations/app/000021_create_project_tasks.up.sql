@@ -1,4 +1,4 @@
--- プロジェクトのタスク(Temporal の Workflow 1 回につき 1 行。docs/tasks.md)。
+-- プロジェクトのタスク(Temporal の Workflow 1 回につき 1 行。dev-docs/tasks.md)。
 -- worker の interceptor が、Workflow の開始と終了のときに書く。画面の「タスク」で、状態と失敗の理由を見るために使う。
 CREATE TABLE project_tasks (
     -- "task-" + UUID v4。

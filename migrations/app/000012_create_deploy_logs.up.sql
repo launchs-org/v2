@@ -1,4 +1,4 @@
--- deploy のコンテナの出力ログ(docs/logs.md)。書き手は logcollector だけ。backend は読むだけ。
+-- deploy のコンテナの出力ログ(dev-docs/logs.md)。書き手は logcollector だけ。backend は読むだけ。
 -- どちらも deploy の行を消すと、一緒に消える(ON DELETE CASCADE)。
 
 -- Pod 1つの、収集の状態。Pod が消えても残る(保持期間の間)。podId の持ち主の確認にも使う。

@@ -1,4 +1,4 @@
-// Package projecttask は、プロジェクトのタスク(Temporal の Workflow 1 回につき 1 行の記録。docs/tasks.md)の、種類の対応と、失敗の理由の整え方を持つ。
+// Package projecttask は、プロジェクトのタスク(Temporal の Workflow 1 回につき 1 行の記録。dev-docs/tasks.md)の、種類の対応と、失敗の理由の整え方を持つ。
 package projecttask
 
 import (
