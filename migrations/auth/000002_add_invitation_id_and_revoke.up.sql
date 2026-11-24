@@ -1,4 +1,4 @@
--- 招待に、管理 API で扱うための ID と、メモ、取り消しの日時を足す(docs/auth.md §6)。
+-- 招待に、管理 API で扱うための ID と、メモ、取り消しの日時を足す(dev-docs/auth.md §6)。
 ALTER TABLE invitations ADD COLUMN id text;
 -- 既にある招待(あれば)にも ID を付ける。
 UPDATE invitations SET id = 'invitation-' || gen_random_uuid()::text WHERE id IS NULL;

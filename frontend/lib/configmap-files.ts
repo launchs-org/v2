@@ -1,4 +1,4 @@
-// ConfigMap のファイル(docs/configmap.md、docs/endpoints/configmaps.md)の、手元での検査と、読み込み・書き出し。
+// ConfigMap のファイル(dev-docs/configmap.md、dev-docs/endpoints/configmaps.md)の、手元での検査と、読み込み・書き出し。
 // 上限と規則は、バックエンド(shared/model/configmap.go)と同じにする。サーバーも確かめるが、送る前に止めて、すぐ知らせる。
 import type { ConfigMapFile } from "@/lib/types"
 

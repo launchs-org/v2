@@ -180,7 +180,7 @@ func TestIngressAPICreateListGet(testingT *testing.T) {
 			subTest.Errorf("404、404、409 のはず: %d %d %d", missingStatus, otherStatus, deletingStatus)
 		}
 	})
-	testingT.Run("一覧は、新しい順で、ingressId と host だけを返し、ページングできる。他人は 404", func(subTest *testing.T) {
+	testingT.Run("一覧は、新しい順で、ingressId と host と tags だけを返し、ページングできる。他人は 404", func(subTest *testing.T) {
 		environment := newIngressTestEnvironment(subTest)
 		environment.generator.hosts = []string{"a-a-a.launchs.org", "b-b-b.launchs.org", "c-c-c.launchs.org"}
 		for count := 0; count < 3; count++ {
@@ -192,8 +192,8 @@ func TestIngressAPICreateListGet(testingT *testing.T) {
 			subTest.Fatalf("2件と次のページがあるはず: %d %v", statusCode, body)
 		}
 		first := items[0].(map[string]any)
-		if len(first) != 2 || first["host"] != "c-c-c.launchs.org" {
-			subTest.Errorf("新しい順で、ingressId と host だけのはず: %v", first)
+		if len(first) != 3 || first["host"] != "c-c-c.launchs.org" || first["tags"] == nil {
+			subTest.Errorf("新しい順で、ingressId と host と tags だけのはず: %v", first)
 		}
 		_, nextBody := environment.ownerClient.call(http.MethodGet, environment.basePath+"?limit=2&cursor="+body["nextCursor"].(string), "")
 		nextItems, _ := nextBody["ingresses"].([]any)

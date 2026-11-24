@@ -54,7 +54,7 @@ export type DeployConfig = {
   pending_args: string[] | null
   pending_image_ref?: string | null
 }
-/** deploy が、共有の ConfigMap の 1 ファイルを、1 つの path にマウントする指定(docs/endpoints/deploys.md)。 */
+/** deploy が、共有の ConfigMap の 1 ファイルを、1 つの path にマウントする指定(dev-docs/endpoints/deploys.md)。 */
 export type ConfigMapMount = {
   configMapId: string
   /** 固定している版。保存するとき、省略(0)なら、サーバーが決める。 */
@@ -109,6 +109,12 @@ export type IngressDetail = {
   /** アクセスの集計(Traefik のプラグイン launchs-stats)を有効にしているか。 */
   accessStats?: boolean
 }
+/** カスタムドメインの所有を確かめるために、DNS に設定してもらう内容。TXT か CNAME の、どちらかでよい。 */
+export type IngressDomainChallenge = { txtName: string; txtValue: string; cnameValue: string }
+/** ingress のカスタムドメイン 1 件。pending は確認待ち、verified は確認済み(ルーティングに入っている)。 */
+export type IngressDomain = { domainId: string; hostname: string; status: "pending" | "verified"; verifiedAt: string | null; challenge: IngressDomainChallenge }
+/** カスタムドメインの確認の結果。DNS が合わないときは、verified が false で、reason に理由が入る。 */
+export type IngressDomainVerifyResult = { verified: boolean; reason: string; domain: IngressDomain }
 /** プロジェクトのタスク(worker が記録した Workflow の履歴)。 */
 export type TaskStatus = "running" | "succeeded" | "failed" | "canceled" | "lost"
 /** タスクの手順(Activity)1 つの進み具合。extra は、後始末など、定義に無い手順。 */
@@ -143,7 +149,7 @@ export type LoginHistoryResponse = {
 export type BuildListItem = { buildId: string; status: string; imageRef: string; createdAt: string }
 export type BuildListResponse = { builds: BuildListItem[]; nextCursor: string | null }
 export type QuotaUsage = { used: number; limit: number }
-/** GET /api/v1/quota の応答(docs/endpoints/quota.md)。 */
+/** GET /api/v1/quota の応答(dev-docs/endpoints/quota.md)。 */
 export type QuotaResponse = {
   maxReplicas: number
   maxVolumeSizeMB: number
@@ -153,7 +159,7 @@ export type QuotaResponse = {
   volumeTotalMB: QuotaUsage
   deploysBySpec: Record<string, QuotaUsage>
 }
-/** GET /auth/login-history の応答(docs/endpoints/auth.md)。 */
+/** GET /auth/login-history の応答(dev-docs/endpoints/auth.md)。 */
 export type LoginEvent = { kind: "signup" | "login"; result: "success" | "failure"; reason: string | null; ip: string; userAgent: string; at: string }
 export type LoginEventsResponse = { events: LoginEvent[] }
 
@@ -177,7 +183,7 @@ export type ProjectEventListResponse = { events: ProjectEvent[]; nextCursor: str
 export type ConfigMapFile = { key: string; encoding: "text" | "base64"; content: string }
 /** 取得のレスポンスのファイル(size は、元のバイト数)。 */
 export type ConfigMapFileView = ConfigMapFile & { size: number }
-/** GET /api/v1/configmaps/:configMapId(docs/endpoints/configmaps.md)。 */
+/** GET /api/v1/configmaps/:configMapId(dev-docs/endpoints/configmaps.md)。 */
 export type ConfigMapDetail = {
   configMapId: string
   projectId: string
@@ -251,7 +257,7 @@ export type TemplateApplyStep = {
   resourceId: string
   error: string | null
 }
-/** GET /api/v1/projects/:projectId/template-applies/:applyId(docs/endpoints/templates.md)。 */
+/** GET /api/v1/projects/:projectId/template-applies/:applyId(dev-docs/endpoints/templates.md)。 */
 export type TemplateApplyProgress = {
   applyId: string
   templateId: string

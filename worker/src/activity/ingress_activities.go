@@ -16,6 +16,9 @@ type IngressStore interface {
 	// FindForWorker は、持ち主を問わずに、ingress を1件取得する。
 	FindForWorker(requestContext context.Context, ingressID string) (model.Ingress, error)
 
+	// VerifiedDomainHosts は、ingress に付いている、確認済みのカスタムドメイン名を返す。
+	VerifiedDomainHosts(requestContext context.Context, ingressID string) ([]string, error)
+
 	// CommitRulesApply は、ルールの反映の結果を確定する(applying の ingress だけ)。確定できたかを返す。
 	CommitRulesApply(requestContext context.Context, ingressID string, succeeded bool) (bool, error)
 
@@ -47,7 +50,7 @@ func NewIngressActivities(ingressStore IngressStore, ingressOperator IngressOper
 	return &IngressActivities{ingressStore: ingressStore, ingressOperator: ingressOperator, appLogger: appLogger}
 }
 
-// rulesToDefinition は、ingress と、反映するルール(JSON)から、IngressRoute に反映する内容を組み立てる。
+// rulesToDefinition は、ingress と、反映するルール(JSON)と、確認済みのカスタムドメインから、IngressRoute に反映する内容を組み立てる。
 //
 // 引数:
 //   - ingress: 対象の ingress(プロジェクト、ID、ホスト名を使う)。
@@ -55,7 +58,7 @@ func NewIngressActivities(ingressStore IngressStore, ingressOperator IngressOper
 //
 // 戻り値:
 //   - IngressRoute に反映する内容。ルールが読めないときは、リトライしないエラー。
-func rulesToDefinition(ingress model.Ingress, rulesJSON []byte) (IngressRouteDefinition, error) {
+func rulesToDefinition(ingress model.Ingress, rulesJSON []byte, extraHosts []string) (IngressRouteDefinition, error) {
 	// ルールを読み込む。壊れていたら、何度やっても同じなので、リトライしない。
 	rules, parseError := model.ParseIngressRules(rulesJSON)
 	if parseError != nil {
@@ -66,7 +69,7 @@ func rulesToDefinition(ingress model.Ingress, rulesJSON []byte) (IngressRouteDef
 	for _, rule := range rules {
 		routeRules = append(routeRules, IngressRouteRule{Path: rule.Path, ServiceName: rule.ServiceID, Port: int32(rule.Port)})
 	}
-	return IngressRouteDefinition{Namespace: ingress.ProjectID, Name: ingress.ID, Host: ingress.Host, Rules: routeRules, AccessStats: ingress.AccessStats}, nil
+	return IngressRouteDefinition{Namespace: ingress.ProjectID, Name: ingress.ID, Host: ingress.Host, ExtraHosts: extraHosts, Rules: routeRules, AccessStats: ingress.AccessStats}, nil
 }
 
 // ApplyIngressRules は、pending のルールで、IngressRoute を更新する。
@@ -90,7 +93,11 @@ func (ingressActivities *IngressActivities) ApplyIngressRules(requestContext con
 		return temporal.NewNonRetryableApplicationError("適用するルールがありません", "NoPendingRules", nil)
 	}
 	// pending のルールから、IngressRoute の内容を組み立てて、k8s を操作するものに任せる。
-	definition, definitionError := rulesToDefinition(ingress, ingress.PendingRules)
+	extraHosts, hostsError := ingressActivities.ingressStore.VerifiedDomainHosts(requestContext, ingress.ID)
+	if hostsError != nil {
+		return hostsError
+	}
+	definition, definitionError := rulesToDefinition(ingress, ingress.PendingRules, extraHosts)
 	if definitionError != nil {
 		return definitionError
 	}
@@ -115,7 +122,11 @@ func (ingressActivities *IngressActivities) ReapplyIngressRoute(requestContext c
 	if findError != nil {
 		return findError
 	}
-	definition, definitionError := rulesToDefinition(ingress, ingress.Rules)
+	extraHosts, hostsError := ingressActivities.ingressStore.VerifiedDomainHosts(requestContext, ingress.ID)
+	if hostsError != nil {
+		return hostsError
+	}
+	definition, definitionError := rulesToDefinition(ingress, ingress.Rules, extraHosts)
 	if definitionError != nil {
 		return definitionError
 	}
@@ -138,7 +149,11 @@ func (ingressActivities *IngressActivities) RollbackIngressRules(requestContext 
 	if findError != nil {
 		return findError
 	}
-	definition, definitionError := rulesToDefinition(ingress, ingress.Rules)
+	extraHosts, hostsError := ingressActivities.ingressStore.VerifiedDomainHosts(requestContext, ingress.ID)
+	if hostsError != nil {
+		return hostsError
+	}
+	definition, definitionError := rulesToDefinition(ingress, ingress.Rules, extraHosts)
 	if definitionError != nil {
 		return definitionError
 	}

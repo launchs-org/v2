@@ -84,7 +84,7 @@ type QuotaLimits struct {
 	MaxDeploysBySpec map[string]int
 }
 
-// QuotaUsage は、ユーザーの使用量。数え方は docs/auth.md §8.2。
+// QuotaUsage は、ユーザーの使用量。数え方は dev-docs/auth.md §8.2。
 type QuotaUsage struct {
 	// Projects は、プロジェクトの数(deleting 以外)。
 	Projects int

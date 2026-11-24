@@ -37,7 +37,7 @@ type ConfigMapStore interface {
 }
 
 // ConfigMapService は、ConfigMap に関するユースケース。
-// ConfigMap の編集は、版を足すだけで、k8s にも Temporal にも触れない(docs/configmap.md §3)。
+// ConfigMap の編集は、版を足すだけで、k8s にも Temporal にも触れない(dev-docs/configmap.md §3)。
 type ConfigMapService struct {
 	configMapStore ConfigMapStore
 }

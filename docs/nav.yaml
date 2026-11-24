@@ -1,0 +1,12 @@
+# サイドバーの並び(ページ名は、拡張子なしのファイル名)。ここに無いページは、ビルドが失敗する。
+groups:
+  - title: はじめに
+    pages: [index, start, concepts, first-deploy]
+  - title: 基礎知識(〜とは)
+    pages: [what-is-container, what-is-volume, what-is-service, what-is-ingress, what-is-configmap, what-is-tag, what-is-task, metrics]
+  - title: 機能ごとの使い方
+    pages: [deploy, publish, storage, database, templates, monitoring, github, cicd, account, api]
+  - title: 管理者の方へ
+    pages: [admin]
+  - title: 困ったとき
+    pages: [faq]

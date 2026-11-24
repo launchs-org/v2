@@ -102,7 +102,7 @@ kubectl top nodes
 ## Traefik のプラグイン(launchs-edge と launchs-stats)
 - `launchs-edge`: Cloudflare 経由で、元のスキーム(https)とクライアント IP を、Traefik が受け取れない問題を直す(`Cf-Connecting-Ip`、`Cf-Visitor` から `X-Real-Ip`、`X-Forwarded-Proto/Port` を作る)。**入れないと、code-server などの WebSocket が 1006 で切れる**。
 - `launchs-stats`: アクセスの集計とアクセスログ(accessstats が、Traefik のログから読む)。
-- 設計は `docs/ingress-plugins.md`、ソースは `traefik-plugins/`。**Traefik の再起動を伴う**(1 レプリカだと、数秒、全ての公開が止まる)。
+- 設計は `dev-docs/ingress-plugins.md`、ソースは `traefik-plugins/`。**Traefik の再起動を伴う**(1 レプリカだと、数秒、全ての公開が止まる)。
 
 ```bash
 # 1) Middleware を先に作る(trustedCIDRs は cloudflared の Pod の範囲 = Pod の CIDR)

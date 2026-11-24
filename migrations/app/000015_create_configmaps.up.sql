@@ -1,4 +1,4 @@
--- プロジェクトで共有する ConfigMap(設定ファイルの組。docs/configmap.md)。
+-- プロジェクトで共有する ConfigMap(設定ファイルの組。dev-docs/configmap.md)。
 -- 編集のたびに、新しい版(configmap_revisions の行)が増える。k8s の ConfigMap は、deploy が適用するときに、版ごとに作る(段階 2)。
 CREATE TABLE configmaps (
     -- "configmap-" + UUID v4。アプリ側で作る。

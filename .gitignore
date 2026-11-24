@@ -4,3 +4,5 @@ node_modules
 .pnpm-store
 # Monaco Editor の写し(frontend/scripts/copy-monaco.mjs が作る)
 frontend/public/monaco/
+# 利用者向けドキュメントの生成物(task docs:build)
+_site/

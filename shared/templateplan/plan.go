@@ -1,4 +1,4 @@
-// Package templateplan は、テンプレートから部品を作る「計画」(docs/templates.md の段階 C)の型を持つ。
+// Package templateplan は、テンプレートから部品を作る「計画」(dev-docs/templates.md の段階 C)の型を持つ。
 //
 // 計画は、変数を展開し終えた、作る部品の一覧で、ステップの順に並ぶ。バックエンド(受け付ける側)が作って、
 // template_applies テーブルに保存し、ワーカーの Workflow が読んで、順に実行する。どちらからも使うので、shared に置く。

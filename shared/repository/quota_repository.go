@@ -11,7 +11,7 @@ import (
 	"launchs/shared/model"
 )
 
-// countUsage は、ユーザーの使用量を数える。数え方は docs/auth.md §8.2。
+// countUsage は、ユーザーの使用量を数える。数え方は dev-docs/auth.md §8.2。
 //
 // プロジェクトと deploy は deleting 以外、volume は全て数える。スペックごとの deploy の数や、volume の大きさの足し算は、モデルのメソッドに任せる。
 // どの操作も、クォータの行をロックしてから呼ぶので、数えている間に、同じユーザーの作成・拡張は入り込まない。

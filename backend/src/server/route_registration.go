@@ -137,6 +137,18 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PATCH("/projects/:projectId/ingresses/:ingressId", ingressController.UpdateAccessStats)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/apply", ingressController.ApplyRules)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/discard", ingressController.DiscardRules)
+	// ingress のカスタムドメイン(利用者のドメインを、DNS で所有を確かめてから、ルーティングに加える)。
+	// ベースドメインは、払い出しのホスト名を作るものから取る(取れなければ、空で、ベースドメインの検査をしない)。
+	baseDomain := ""
+	if baseDomainProvider, ok := dependencies.IngressHostGenerator.(interface{ BaseDomain() string }); ok {
+		baseDomain = baseDomainProvider.BaseDomain()
+	}
+	ingressDomainController := controller.NewIngressDomainController(service.NewIngressDomainService(
+		ingressRepository, repository.NewIngressDomainRepository(dependencies.Database), service.NewDNSDomainVerifier(), dependencies.IngressWorkflowStarter, baseDomain))
+	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.List)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.Add)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/domains/:domainId/verify", ingressDomainController.Verify)
+	apiGroup.DELETE("/projects/:projectId/ingresses/:ingressId/domains/:domainId", ingressDomainController.Remove)
 	accessStatsController := controller.NewAccessStatsController(service.NewAccessStatsService(ingressRepository, repository.NewAccessStatsRepository(dependencies.Database)))
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/access-stats", accessStatsController.Get)
 	accessLogController := controller.NewAccessLogController(service.NewAccessLogService(ingressRepository, repository.NewAccessStatsRepository(dependencies.Database)))
@@ -186,7 +198,7 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/apply", volumeController.ApplySize)
 	apiGroup.POST("/projects/:projectId/volumes/:volumeId/discard", volumeController.DiscardSize)
 
-	// ConfigMap(プロジェクトで共有する設定ファイル。docs/configmap.md)。本文は、base64 や JSON のエスケープで大きくなるので、この API だけ上限を広げる。
+	// ConfigMap(プロジェクトで共有する設定ファイル。dev-docs/configmap.md)。本文は、base64 や JSON のエスケープで大きくなるので、この API だけ上限を広げる。
 	configMapController := controller.NewConfigMapController(service.NewConfigMapService(repository.NewConfigMapRepository(dependencies.Database)))
 	configMapBodyLimit := middleware.BodyLimit(configMapRequestBodyLimitBytes)
 	apiGroup.POST("/projects/:projectId/configmaps", configMapController.Create, configMapBodyLimit)

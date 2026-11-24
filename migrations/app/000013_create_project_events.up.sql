@@ -1,4 +1,4 @@
--- プロジェクトの namespace で起きた、k8s の Event(docs/project-events.md)。書き手は watcher だけ。backend は読むだけ。
+-- プロジェクトの namespace で起きた、k8s の Event(dev-docs/project-events.md)。書き手は watcher だけ。backend は読むだけ。
 -- k8s の Event は、約 1 時間で消えるので、ここに溜めて、過去も見られるようにする。
 
 CREATE TABLE project_events (

@@ -11,7 +11,7 @@ import (
 	"launchs/shared/apperror"
 )
 
-// このファイルは、deploy が共有の ConfigMap のファイルをマウントする構成(docs/configmap.md §2、§5)の、
+// このファイルは、deploy が共有の ConfigMap のファイルをマウントする構成(dev-docs/configmap.md §2、§5)の、
 // 形の検査と、状態を変える操作を持つ。メソッドは、メモリ上の値だけを変える(保存は repository が行う)。
 
 const (

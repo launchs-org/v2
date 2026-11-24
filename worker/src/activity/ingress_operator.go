@@ -22,8 +22,11 @@ type IngressRouteDefinition struct {
 	// Name は、IngressRoute の名前(ingress の ID)。
 	Name string
 
-	// Host は、受け付けるホスト名。
+	// Host は、受け付けるホスト名(払い出したもの)。
 	Host string
+
+	// ExtraHosts は、Host のほかに受け付けるホスト名(確認済みのカスタムドメイン)。無ければ空。
+	ExtraHosts []string
 
 	// Rules は、path ごとのルール。空のときは、IngressRoute を置かない(あれば削除する)。
 	Rules []IngressRouteRule

@@ -44,7 +44,7 @@ type Dependencies struct {
 	// ActivityObserver は、タスクの進み具合(動いている Activity)を、Temporal の履歴から読み取るもの。nil のときは、進み具合を出さない(テスト用)。
 	ActivityObserver service.ActivityObserver
 
-	// TemplateRegistry は、読み込み済みのテンプレート(docs/templates.md)。nil のときは、同梱のものを読み込む(テスト用)。
+	// TemplateRegistry は、読み込み済みのテンプレート(dev-docs/templates.md)。nil のときは、同梱のものを読み込む(テスト用)。
 	TemplateRegistry *template.Registry
 
 	// VolumeMaxSizeMB は、volume の大きさの上限(MB)。0 のときは、既定(5120)を使う。

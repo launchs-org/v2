@@ -73,6 +73,16 @@ tasks:
     cmds:
       - docker build -f frontend/dockerfile --target Production -t launchs-frontend:local .
 
+  docs:build:
+    desc: 利用者向けのドキュメント(docs/)を、静的なサイト(_site/)にする(リンク切れも検査する。コンテナの中で)
+    cmds:
+      - docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e GOCACHE=/tmp/gocache -v "$PWD":/w -w /w/tools/docsbuild golang:1.27 go run . -src ../../docs -templates ../../templates/templates -out ../../_site
+
+  docs:test:
+    desc: ドキュメントの生成ツール(tools/docsbuild)のテストを実行する(コンテナの中で)
+    cmds:
+      - docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e GOCACHE=/tmp/gocache -v "$PWD":/w -w /w/tools/docsbuild golang:1.27 go test ./...
+
   test:
     desc: 全てのテストを実行する
     deps: [image]

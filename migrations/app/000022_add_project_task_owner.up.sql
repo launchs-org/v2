@@ -1,4 +1,4 @@
--- タスクに、持ち主と、プロジェクトの名前を、控える(docs/tasks.md)。
+-- タスクに、持ち主と、プロジェクトの名前を、控える(dev-docs/tasks.md)。
 -- プロジェクト一覧の画面で、全てのプロジェクトのタスクを見るため(user_id)と、プロジェクトが削除されたあとも、削除のタスクに名前を出すため(project_name)。
 ALTER TABLE project_tasks ADD COLUMN user_id text NOT NULL DEFAULT '';
 ALTER TABLE project_tasks ADD COLUMN project_name text NOT NULL DEFAULT '';

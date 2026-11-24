@@ -17,7 +17,7 @@ type ErrorBody struct {
 
 // ErrorResponse は、エラーのときに返すレスポンスのボディ。
 //
-// 共通ルール(docs/endpoints/common.md)の形式で、
+// 共通ルール(dev-docs/endpoints/common.md)の形式で、
 // {"error": {"code": "not_found", "message": "..."}} になる。
 type ErrorResponse struct {
 	// Error は、エラーの内容。
