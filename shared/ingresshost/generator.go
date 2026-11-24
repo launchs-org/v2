@@ -68,6 +68,15 @@ func NewGenerator(baseDomain string, reservedSubdomains []string) (*Generator, e
 	return &Generator{baseDomain: trimmedDomain, reserved: reserved}, nil
 }
 
+// BaseDomain は、払い出すホスト名の後ろに付くベースドメインを返す(小文字、前後のドットなし)。
+//
+// 戻り値:
+//   - ベースドメイン(例: shconn.org)。
+func (generator *Generator) BaseDomain() string {
+	// 保持しているベースドメインを、そのまま返す。
+	return generator.baseDomain
+}
+
 // IsReserved は、サブドメインが、払い出さないものかを返す。
 //
 // 引数:
