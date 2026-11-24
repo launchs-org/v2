@@ -219,11 +219,16 @@ func convertInline(line string) string {
 	return result.String()
 }
 
+// imagePattern は、1 つの画像だけの段落(`![説明](assets/images/x.png)` を、Markdown が変換したもの)。
+var imagePattern = regexp.MustCompile(`<p><img src="([^"]+)" alt="([^"]*)"\s*/?></p>`)
+
 // decorate は、HTML に、このサイトの見た目のための印を足す: 表を囲み、h2 に sec を付ける。
 func decorate(output string) string {
 	output = strings.ReplaceAll(output, "<table>", "<div class=\"table-wrap\"><table>")
 	output = strings.ReplaceAll(output, "</table>", "</table></div>")
 	output = headingPattern.ReplaceAllString(output, "<h2 class=\"sec\"$1")
+	// 画像だけの段落は、説明(alt)を図の下の説明にした、figure にする。
+	output = imagePattern.ReplaceAllString(output, "<figure><img src=\"$1\" alt=\"$2\" loading=\"lazy\"><figcaption>$2</figcaption></figure>")
 	return output
 }
 

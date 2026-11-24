@@ -116,6 +116,9 @@ func build(src, templatesDir, out string) error {
 	if err := checkLinks(rendered); err != nil {
 		return err
 	}
+	if err := checkImages(src, rendered); err != nil {
+		return err
+	}
 	for _, name := range order {
 		document := renderPage(nav, pages, order, name, rendered[name])
 		if err := os.WriteFile(filepath.Join(out, name+".html"), []byte(document), 0o644); err != nil {
@@ -123,7 +126,7 @@ func build(src, templatesDir, out string) error {
 		}
 	}
 	// 見た目のファイルと、Jekyll を使わない印を置く。
-	if err := copyDirectory(filepath.Join(src, "assets"), out); err != nil {
+	if err := copyDirectory(filepath.Join(src, "assets"), filepath.Join(out, "assets")); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(out, ".nojekyll"), nil, 0o644); err != nil {
@@ -244,6 +247,26 @@ func checkLinks(rendered map[string]string) error {
 	return nil
 }
 
+// imageSourcePattern は、本文の中の、assets 以下の画像への参照。
+var imageSourcePattern = regexp.MustCompile(`src="(assets/[^"]+)"`)
+
+// checkImages は、本文が参照している画像のファイルが、src の下にあることを確かめる。
+func checkImages(src string, rendered map[string]string) error {
+	var problems []string
+	for name, body := range rendered {
+		for _, match := range imageSourcePattern.FindAllStringSubmatch(body, -1) {
+			if _, err := os.Stat(filepath.Join(src, match[1])); err != nil {
+				problems = append(problems, fmt.Sprintf("%s.md: 画像 %s がありません", name, match[1]))
+			}
+		}
+	}
+	sort.Strings(problems)
+	if len(problems) > 0 {
+		return fmt.Errorf("画像が見つかりません:\n  %s", strings.Join(problems, "\n  "))
+	}
+	return nil
+}
+
 // renderPage は、ページ 1 つの HTML 全体(サイドバー、パンくず、題、本文、前後の案内)を作る。
 func renderPage(nav navFile, pages map[string]page, order []string, name string, body string) string {
 	current := pages[name]
@@ -257,12 +280,15 @@ func renderPage(nav navFile, pages map[string]page, order []string, name string,
 	if current.Meta.Lead != "" {
 		buffer.WriteString("<meta name=\"description\" content=\"" + html.EscapeString(current.Meta.Lead) + "\">\n")
 	}
-	buffer.WriteString("<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n<div class=\"layout\">\n")
+	buffer.WriteString("<link rel=\"stylesheet\" href=\"assets/style.css\">\n</head>\n<body>\n")
+	// 狭い画面で、ナビを開け閉めするための、チェックボックス(CSS だけで動く)。
+	buffer.WriteString("<input type=\"checkbox\" id=\"menu-toggle\" aria-label=\"メニュー\">\n")
+	buffer.WriteString("<header class=\"topbar\"><label class=\"menu-button\" for=\"menu-toggle\" aria-label=\"メニューを開く\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z\"/></svg></label><a class=\"brand\" href=\"index.html\">launchs</a><span class=\"section\">ドキュメント</span></header>\n<div class=\"layout\">\n")
 	buffer.WriteString(renderSidebar(nav, pages, name))
 	buffer.WriteString("\n<main>\n")
 	if !current.Meta.Home {
 		crumb := current.Meta.Crumb
-		buffer.WriteString("<div class=\"crumb\"><a href=\"index.html\">ホーム</a> ／ " + html.EscapeString(crumb) + "</div>\n")
+		buffer.WriteString("<div class=\"crumb\"><a href=\"index.html\">ホーム</a> / " + html.EscapeString(crumb) + "</div>\n")
 		buffer.WriteString("<h1>" + html.EscapeString(current.Meta.Title) + "</h1>")
 		if current.Meta.Lead != "" {
 			buffer.WriteString("<p class=\"lead\">" + html.EscapeString(current.Meta.Lead) + "</p>")
@@ -273,7 +299,34 @@ func renderPage(nav navFile, pages map[string]page, order []string, name string,
 	if !current.Meta.Home {
 		buffer.WriteString(renderPager(pages, order, name))
 	}
-	buffer.WriteString("\n<footer>このガイドは、launchs の画面の言葉に合わせて書いています。画面が変わったときは、このガイドも更新します。</footer>\n</main>\n</div>\n</body>\n</html>\n")
+	buffer.WriteString("\n<footer>このドキュメントは、launchs の画面の言葉に合わせて書いています。画面が変わったときは、ここも更新します。</footer>\n</main>\n")
+	buffer.WriteString(renderTOC(body))
+	buffer.WriteString("\n</div>\n</body>\n</html>\n")
+	return buffer.String()
+}
+
+// headingLinkPattern は、本文の中の、h2 と h3(id つき)。右の目次に使う。
+var headingLinkPattern = regexp.MustCompile(`(?s)<h([23])[^>]*id="([^"]+)"[^>]*>(.*?)</h[23]>`)
+
+// tagPattern は、HTML のタグ(目次の見出しの文字から、タグを除くため)。
+var tagPattern = regexp.MustCompile(`<[^>]+>`)
+
+// renderTOC は、ページの右に出す「このページの内容」(h2 と h3 へのリンク)を作る。見出しが 2 つ未満なら、出さない。
+func renderTOC(body string) string {
+	matches := headingLinkPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) < 2 {
+		return "<nav class=\"toc\"></nav>"
+	}
+	var buffer strings.Builder
+	buffer.WriteString("<nav class=\"toc\" aria-label=\"このページの内容\"><strong>このページの内容</strong>")
+	for _, match := range matches {
+		class := ""
+		if match[1] == "3" {
+			class = " class=\"h3\""
+		}
+		buffer.WriteString("<a" + class + " href=\"#" + match[2] + "\">" + tagPattern.ReplaceAllString(match[3], "") + "</a>")
+	}
+	buffer.WriteString("</nav>")
 	return buffer.String()
 }
 
@@ -288,7 +341,7 @@ func navName(current page) string {
 // renderSidebar は、サイドバー(ナビ)の HTML を作る。現在のページには aria-current を付ける。
 func renderSidebar(nav navFile, pages map[string]page, name string) string {
 	var buffer strings.Builder
-	buffer.WriteString("<aside class=\"side\">\n<a class=\"brand\" href=\"index.html\"><span class=\"logo\">L</span>launchs</a>\n<p class=\"tag\">利用ガイド<br>はじめての人にも、やさしく。</p>\n")
+	buffer.WriteString("<aside class=\"side\">\n")
 	for _, group := range nav.Groups {
 		buffer.WriteString("<h2>" + html.EscapeString(group.Title) + "</h2>\n<div class=\"group\">\n")
 		for _, pageName := range group.Pages {
@@ -337,7 +390,7 @@ func renderPager(pages map[string]page, order []string, name string) string {
 	return buffer.String()
 }
 
-// copyDirectory は、フォルダの中のファイルを、出力のフォルダの直下へ写す(フォルダが無ければ何もしない)。
+// copyDirectory は、フォルダの中身(下のフォルダも)を、出力のフォルダへ写す(フォルダが無ければ何もしない)。
 func copyDirectory(from, to string) error {
 	entries, err := os.ReadDir(from)
 	if os.IsNotExist(err) {
@@ -346,8 +399,14 @@ func copyDirectory(from, to string) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		return err
+	}
 	for _, entry := range entries {
 		if entry.IsDir() {
+			if err := copyDirectory(filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name())); err != nil {
+				return err
+			}
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(from, entry.Name()))

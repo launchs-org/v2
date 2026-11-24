@@ -26,6 +26,9 @@ crumb: "使い方"
 :::steps
 1. **最初のデプロイを作る**
 
+![「自動デプロイ(webhook)」でトークンを発行する](assets/images/deploy-webhook.png)
+
+
    [最初にデプロイする方法](first-deploy.md)で、動かしておきます。
 
 2. **トークンを発行する**
