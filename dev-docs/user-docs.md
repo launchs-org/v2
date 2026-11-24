@@ -7,7 +7,7 @@
 | `dev-docs/` | 開発者 | 設計、エンドポイントの仕様、規約、作業の記録 |
 | `docs/` | launchs の利用者、管理者 | 使い方(画面の言葉で、やさしく)。**GitHub Pages で公開する** |
 
-`docs/` の Markdown を、`tools/docsbuild`(Go)が、静的なサイト(HTML + CSS)にする。`main` への push で、`.github/workflows/pages.yml` が公開する(リポジトリの Settings → Pages → Source を「GitHub Actions」にしておく)。
+`docs/` の Markdown を、`tools/docsbuild`(Go)が、静的なサイト(HTML + CSS)にする。`develop` への push で、`.github/workflows/pages.yml` が公開する(リポジトリの Settings → Pages → Source を「GitHub Actions」にしておく)。
 
 ## 作る・確かめる
 
