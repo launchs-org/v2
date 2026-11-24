@@ -8,34 +8,21 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"launchs/backend/src/middlewares"
-	"launchs/backend/src/service"
 	"launchs/shared/model"
 )
 
-// IngressDomainUseCase は、ingress のカスタムドメインの処理を、controller から見たもの。service.IngressDomainService が実装する。
+// IngressDomainUseCase は、ingress の追加のホスト名(利用者が選ぶサブドメイン)の処理を、controller から見たもの。service.IngressDomainService が実装する。
 type IngressDomainUseCase interface {
 	List(requestContext context.Context, userID string, projectID string, ingressID string) (model.Ingress, []model.IngressDomain, error)
-	Add(requestContext context.Context, userID string, projectID string, ingressID string, rawHostname string) (model.IngressDomain, model.Ingress, error)
-	Verify(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) (service.IngressDomainVerifyResult, model.Ingress, error)
+	Add(requestContext context.Context, userID string, projectID string, ingressID string, rawSubdomain string) (model.IngressDomain, model.Ingress, error)
 	Remove(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) error
+	BaseDomain() string
 }
 
-// AddIngressDomainRequest は、カスタムドメインの追加のリクエスト。
+// AddIngressDomainRequest は、ホスト名の追加のリクエスト。
 type AddIngressDomainRequest struct {
-	// Hostname は、追加するドメイン名(必須。形は service で確かめる)。
-	Hostname string `json:"hostname" validate:"required,max=253"`
-}
-
-// IngressDomainChallengeResponse は、所有の確認のために、DNS に設定してもらう内容。
-type IngressDomainChallengeResponse struct {
-	// TXTName は、TXT レコードの名前。
-	TXTName string `json:"txtName"`
-
-	// TXTValue は、TXT レコードの値。
-	TXTValue string `json:"txtValue"`
-
-	// CNAMEValue は、CNAME で向ける先(払い出されたホスト名)。TXT の代わりに、CNAME でも確認できる。
-	CNAMEValue string `json:"cnameValue"`
+	// Subdomain は、追加する名前(必須。例: myapp。<名前>.<ベースドメイン> になる。形は service で確かめる)。
+	Subdomain string `json:"subdomain" validate:"required,max=253"`
 }
 
 // IngressDomainResponse は、カスタムドメイン 1 件のレスポンス。
@@ -46,32 +33,20 @@ type IngressDomainResponse struct {
 	// Hostname は、ドメイン名。
 	Hostname string `json:"hostname"`
 
-	// Status は、状態(pending=確認待ち、verified=確認済み)。
+	// Status は、状態(verified=有効)。今は、追加するとすぐに有効になるので、verified だけ。
 	Status string `json:"status"`
 
-	// VerifiedAt は、確認した日時(RFC 3339)。確認待ちなら null。
+	// VerifiedAt は、有効にした日時(RFC 3339)。
 	VerifiedAt *string `json:"verifiedAt"`
-
-	// Challenge は、確認のために DNS に設定してもらう内容。
-	Challenge IngressDomainChallengeResponse `json:"challenge"`
 }
 
 // ListIngressDomainsResponse は、カスタムドメインの一覧のレスポンス。
 type ListIngressDomainsResponse struct {
-	// Domains は、追加した順のドメイン(無ければ空の配列)。
+	// BaseDomain は、名前の後ろに付くベースドメイン(画面が、入力欄の後ろに出す)。
+	BaseDomain string `json:"baseDomain"`
+
+	// Domains は、追加した順のホスト名(無ければ空の配列)。
 	Domains []IngressDomainResponse `json:"domains"`
-}
-
-// VerifyIngressDomainResponse は、確認のレスポンス。
-type VerifyIngressDomainResponse struct {
-	// Verified は、確認できたか。
-	Verified bool `json:"verified"`
-
-	// Reason は、確認できなかった理由(確認できたときは空)。
-	Reason string `json:"reason"`
-
-	// Domain は、確認後のドメイン。
-	Domain IngressDomainResponse `json:"domain"`
 }
 
 // IngressDomainController は、ingress のカスタムドメインの HTTP ハンドラーをまとめる。
@@ -92,15 +67,14 @@ func NewIngressDomainController(useCase IngressDomainUseCase) *IngressDomainCont
 	return &IngressDomainController{useCase: useCase}
 }
 
-// newIngressDomainResponse は、ドメインを、レスポンスの形にする。
+// newIngressDomainResponse は、ホスト名を、レスポンスの形にする。
 //
 // 引数:
 //   - domain: ドメイン。
-//   - ingress: 付け先の ingress(CNAME の向き先に使う)。
 //
 // 戻り値:
 //   - レスポンス。
-func newIngressDomainResponse(domain model.IngressDomain, ingress model.Ingress) IngressDomainResponse {
+func newIngressDomainResponse(domain model.IngressDomain) IngressDomainResponse {
 	// 状態と、確認した日時を決める。
 	status := "pending"
 	var verifiedAt *string
@@ -111,7 +85,6 @@ func newIngressDomainResponse(domain model.IngressDomain, ingress model.Ingress)
 	}
 	return IngressDomainResponse{
 		DomainID: domain.ID, Hostname: domain.Hostname, Status: status, VerifiedAt: verifiedAt,
-		Challenge: IngressDomainChallengeResponse{TXTName: domain.ChallengeName(), TXTValue: domain.Token, CNAMEValue: ingress.Host},
 	}
 }
 
@@ -129,19 +102,19 @@ func (ingressDomainController *IngressDomainController) List(echoContext *echo.C
 		return userIDError
 	}
 	// ingress とドメインを読む。
-	ingress, domains, listError := ingressDomainController.useCase.List(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"))
+	_, domains, listError := ingressDomainController.useCase.List(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"))
 	if listError != nil {
 		return listError
 	}
 	// レスポンスにする(空でも配列)。
 	responses := make([]IngressDomainResponse, 0, len(domains))
 	for _, domain := range domains {
-		responses = append(responses, newIngressDomainResponse(domain, ingress))
+		responses = append(responses, newIngressDomainResponse(domain))
 	}
-	return echoContext.JSON(http.StatusOK, ListIngressDomainsResponse{Domains: responses})
+	return echoContext.JSON(http.StatusOK, ListIngressDomainsResponse{BaseDomain: ingressDomainController.useCase.BaseDomain(), Domains: responses})
 }
 
-// Add は、POST /projects/:projectId/ingresses/:ingressId/domains のハンドラー。ドメインを、確認待ちで追加する。
+// Add は、POST /projects/:projectId/ingresses/:ingressId/domains のハンドラー。ホスト名を追加する(すぐに有効になる)。
 //
 // 引数:
 //   - echoContext: Echo のリクエストの context。
@@ -160,32 +133,11 @@ func (ingressDomainController *IngressDomainController) Add(echoContext *echo.Co
 		return bindError
 	}
 	// 追加する。
-	domain, ingress, addError := ingressDomainController.useCase.Add(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"), request.Hostname)
+	domain, _, addError := ingressDomainController.useCase.Add(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"), request.Subdomain)
 	if addError != nil {
 		return addError
 	}
-	return echoContext.JSON(http.StatusCreated, newIngressDomainResponse(domain, ingress))
-}
-
-// Verify は、POST /projects/:projectId/ingresses/:ingressId/domains/:domainId/verify のハンドラー。DNS を見て、所有を確かめる。
-//
-// 引数:
-//   - echoContext: Echo のリクエストの context。
-//
-// 戻り値:
-//   - 確認の結果(200。DNS が合わないときも 200 で、verified=false と理由)。無ければ 404、削除中・他の ingress が確認済みなら 409。
-func (ingressDomainController *IngressDomainController) Verify(echoContext *echo.Context) error {
-	// 認証されたユーザーを取り出す。
-	userID, userIDError := middlewares.UserIDFrom(echoContext)
-	if userIDError != nil {
-		return userIDError
-	}
-	// 確認する。
-	result, ingress, verifyError := ingressDomainController.useCase.Verify(echoContext.Request().Context(), userID, echoContext.Param("projectId"), echoContext.Param("ingressId"), echoContext.Param("domainId"))
-	if verifyError != nil {
-		return verifyError
-	}
-	return echoContext.JSON(http.StatusOK, VerifyIngressDomainResponse{Verified: result.Verified, Reason: result.Reason, Domain: newIngressDomainResponse(result.Domain, ingress)})
+	return echoContext.JSON(http.StatusCreated, newIngressDomainResponse(domain))
 }
 
 // Remove は、DELETE /projects/:projectId/ingresses/:ingressId/domains/:domainId のハンドラー。ドメインを外す。

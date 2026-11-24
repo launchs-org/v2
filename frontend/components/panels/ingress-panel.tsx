@@ -143,7 +143,7 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
           <a className="mono" style={{ fontWeight: 500, color: "var(--accent)", overflowWrap: "anywhere" }} href={`https://${detail.host}`} target="_blank" rel="noreferrer">https://{detail.host}</a>
         </div>
-        {/* カスタムドメイン(自分のドメインを、DNS で持ち主を確かめてから、使えるようにする)。 */}
+        {/* 好きな名前のホスト名(<名前>.<ベースドメイン>。追加するとすぐに使える)。 */}
         <IngressDomains basePath={path} locked={detail.status === "deleting"} notify={notify} />
         {/* アクセスログ(1 リクエストごとの表。日時、パス、IP、ステータスなどで絞り込める)。 */}
         <div className="card" style={{ overflow: "hidden" }}>

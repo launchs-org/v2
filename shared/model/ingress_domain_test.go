@@ -5,29 +5,23 @@ import (
 	"testing"
 )
 
-// TestValidateCustomHostname は、カスタムドメインとして、受け付ける形と、受け付けない形を確かめる。
-func TestValidateCustomHostname(testingT *testing.T) {
+// TestValidateSubdomain は、サブドメインとして、受け付ける形と、受け付けない形を確かめる。
+func TestValidateSubdomain(testingT *testing.T) {
 	// 受け付ける形。
-	for _, valid := range []string{"example.com", "app.example.co.jp", "a-b.example.com", "xn--eckwd4c7c.jp"} {
-		if validateError := ValidateCustomHostname(valid, "shconn.org"); validateError != nil {
+	for _, valid := range []string{"myapp", "my-app", "app2", "abc", "a-b-c", strings.Repeat("a", 63)} {
+		if validateError := ValidateSubdomain(valid); validateError != nil {
 			testingT.Errorf("%q は受け付けるはず: %v", valid, validateError)
 		}
 	}
 	// 受け付けない形。
-	tooLong := strings.Repeat("a", 64) + ".example.com"
 	for name, invalid := range map[string]string{
-		"空": "", "ドット無し": "localhost", "IP": "192.0.2.1", "ワイルドカード": "*.example.com", "大文字": "Example.com",
-		"先頭のハイフン": "-a.example.com", "アンダースコア": "a_b.example.com", "空のラベル": "a..example.com",
-		"数字だけの TLD": "example.123", "ラベルが長すぎる": tooLong, "ベースドメイン": "shconn.org", "ベースドメインの下": "app.shconn.org",
-		"引用符": "a`b.example.com", "空白": "a b.example.com",
+		"空": "", "短い": "ab", "長い": strings.Repeat("a", 64), "ドット": "a.b.c", "大文字": "MyApp", "先頭のハイフン": "-app",
+		"末尾のハイフン": "app-", "アンダースコア": "my_app", "ワイルドカード": "*app", "引用符": "a`b", "空白": "a b",
+		"日本語": "あいう", "punycode": "xn--eckwd4c7c",
 	} {
-		if validateError := ValidateCustomHostname(invalid, "shconn.org"); validateError == nil {
+		if validateError := ValidateSubdomain(invalid); validateError == nil {
 			testingT.Errorf("%s(%q)は拒否するはず", name, invalid)
 		}
-	}
-	// ベースドメインに似ているだけのドメインは、受け付ける。
-	if validateError := ValidateCustomHostname("notshconn.org", "shconn.org"); validateError != nil {
-		testingT.Errorf("ベースドメインの末尾が同じだけのドメインは、受け付けるはず: %v", validateError)
 	}
 }
 

@@ -2,93 +2,87 @@ package service
 
 import (
 	"context"
-	"errors"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
-	"launchs/shared/repository"
 )
 
-// IngressDomainStore は、カスタムドメインの保存先。IngressDomainRepository が実装する。
+// IngressDomainStore は、追加のホスト名の保存先。IngressDomainRepository が実装する。
 type IngressDomainStore interface {
-	// Create は、ingress にドメインを(確認待ちで)付ける。
+	// Create は、ingress にホスト名を付ける。
 	Create(requestContext context.Context, userID string, projectID string, domain *model.IngressDomain) error
 
-	// List は、ingress に付いているドメインを、追加した順に返す。
+	// List は、ingress に付いているホスト名を、追加した順に返す。
 	List(requestContext context.Context, userID string, projectID string, ingressID string) ([]model.IngressDomain, error)
 
-	// Find は、ドメインを 1 件返す。
-	Find(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) (model.IngressDomain, error)
-
-	// MarkVerified は、ドメインを確認済みにする。
-	MarkVerified(requestContext context.Context, domainID string) error
-
-	// Delete は、ドメインを外し、外したドメインを返す。
+	// Delete は、ホスト名を外し、外したホスト名を返す。
 	Delete(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) (model.IngressDomain, error)
 }
 
-// IngressDomainReader は、カスタムドメインの操作のために、ingress を読むもの。IngressRepository が実装する。
+// IngressDomainReader は、ホスト名の操作のために、ingress を読むもの。IngressRepository が実装する。
 type IngressDomainReader interface {
 	// FindByID は、持ち主の ingress を 1 件返す。
 	FindByID(requestContext context.Context, userID string, projectID string, ingressID string) (model.Ingress, error)
 }
 
-// IngressDomainVerifier は、DNS を見て、ドメインの持ち主であることを確かめるもの。
-type IngressDomainVerifier interface {
-	// Verify は、TXT(_launchs-challenge.<ドメイン> に token がある)か、CNAME(ドメインが cnameTarget を指す)のどちらかが満たされているかを返す。
-	// 満たされないときは、false と、利用者に見せる理由を返す。
-	Verify(requestContext context.Context, hostname string, token string, cnameTarget string) (bool, string)
+// IngressSubdomainPolicy は、利用者が選べるサブドメインの決まり(ベースドメインと、払い出さない名前)。
+// ingresshost.Generator が実装する。
+type IngressSubdomainPolicy interface {
+	// BaseDomain は、ホスト名の後ろに付くベースドメイン(例: launchs.org)を返す。
+	BaseDomain() string
+
+	// IsReserved は、サブドメインが、払い出さない名前(www、api など)かを返す。
+	IsReserved(subdomain string) bool
 }
 
-// IngressDomainService は、ingress のカスタムドメイン(追加、確認、削除)の処理をまとめる。
+// IngressDomainService は、ingress の追加のホスト名(利用者が選ぶサブドメイン。追加、削除)の処理をまとめる。
+// 外部のドメイン(CNAME で向けるもの)は、Cloudflare の側の登録が要るので、今は扱わない。
 type IngressDomainService struct {
 	// ingressReader は、ingress を読む。
 	ingressReader IngressDomainReader
 
-	// domainStore は、カスタムドメインの保存先。
+	// domainStore は、ホスト名の保存先。
 	domainStore IngressDomainStore
 
-	// verifier は、DNS で所有を確かめる。
-	verifier IngressDomainVerifier
-
-	// workflowStarter は、確認済みのドメインが変わったときに、IngressRoute を作り直す Workflow を開始する。
+	// workflowStarter は、ホスト名が変わったときに、IngressRoute を作り直す Workflow を開始する。
 	workflowStarter IngressWorkflowStarter
 
-	// baseDomain は、払い出すホスト名のベースドメイン(これと、その下は、カスタムドメインにできない)。
-	baseDomain string
+	// subdomainPolicy は、サブドメインの決まり(ベースドメインと、払い出さない名前)。nil なら、追加できない。
+	subdomainPolicy IngressSubdomainPolicy
 }
 
 // NewIngressDomainService は、IngressDomainService を作る。
 //
 // 引数:
 //   - ingressReader: ingress を読むもの。
-//   - domainStore: カスタムドメインの保存先。
-//   - verifier: DNS で所有を確かめるもの。
+//   - domainStore: ホスト名の保存先。
 //   - workflowStarter: IngressRoute を作り直す Workflow を開始するもの。
-//   - baseDomain: 払い出すホスト名のベースドメイン。
+//   - subdomainPolicy: サブドメインの決まり(nil なら、追加を断る)。
 //
 // 戻り値:
 //   - 作った service。
-func NewIngressDomainService(ingressReader IngressDomainReader, domainStore IngressDomainStore, verifier IngressDomainVerifier, workflowStarter IngressWorkflowStarter, baseDomain string) *IngressDomainService {
+func NewIngressDomainService(ingressReader IngressDomainReader, domainStore IngressDomainStore, workflowStarter IngressWorkflowStarter, subdomainPolicy IngressSubdomainPolicy) *IngressDomainService {
 	// 渡されたものを保持する。
-	return &IngressDomainService{ingressReader: ingressReader, domainStore: domainStore, verifier: verifier, workflowStarter: workflowStarter, baseDomain: baseDomain}
+	return &IngressDomainService{ingressReader: ingressReader, domainStore: domainStore, workflowStarter: workflowStarter, subdomainPolicy: subdomainPolicy}
 }
 
-// IngressDomainVerifyResult は、確認の結果。
-type IngressDomainVerifyResult struct {
-	// Domain は、確認後のドメイン。
-	Domain model.IngressDomain
-
-	// Verified は、確認できたか(すでに確認済みだった場合も true)。
-	Verified bool
-
-	// Reason は、確認できなかった理由(利用者に見せる。確認できたときは空)。
-	Reason string
+// BaseDomain は、ホスト名の後ろに付くベースドメインを返す(画面が、入力欄の後ろに出す)。
+//
+// 戻り値:
+//   - ベースドメイン。決まりが無いときは空。
+func (ingressDomainService *IngressDomainService) BaseDomain() string {
+	// 決まりが無ければ、空を返す。
+	if ingressDomainService.subdomainPolicy == nil {
+		return ""
+	}
+	return ingressDomainService.subdomainPolicy.BaseDomain()
 }
 
-// List は、ingress に付いているカスタムドメインと、ingress を返す。
+// List は、ingress に付いている追加のホスト名と、ingress を返す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -97,14 +91,14 @@ type IngressDomainVerifyResult struct {
 //   - ingressID: ingress の ID。
 //
 // 戻り値:
-//   - ingress と、ドメインの一覧。ingress が無いときは not_found。
+//   - ingress と、ホスト名の一覧。ingress が無いときは not_found。
 func (ingressDomainService *IngressDomainService) List(requestContext context.Context, userID string, projectID string, ingressID string) (model.Ingress, []model.IngressDomain, error) {
 	// ingress を読む(持ち主でなければ not_found)。
 	ingress, findError := ingressDomainService.ingressReader.FindByID(requestContext, userID, projectID, ingressID)
 	if findError != nil {
 		return model.Ingress{}, nil, findError
 	}
-	// ドメインを読む。
+	// ホスト名を読む。
 	domains, listError := ingressDomainService.domainStore.List(requestContext, userID, projectID, ingressID)
 	if listError != nil {
 		return model.Ingress{}, nil, listError
@@ -112,22 +106,32 @@ func (ingressDomainService *IngressDomainService) List(requestContext context.Co
 	return ingress, domains, nil
 }
 
-// Add は、ingress にカスタムドメインを(確認待ちで)追加する。
+// Add は、ingress に、利用者が選んだサブドメイン(<名前>.<ベースドメイン>)を追加し、すぐにルーティングに加える。
+// ベースドメインの下の名前は、ワイルドカードで、すでに Traefik に届くので、所有の確認は要らない。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: プロジェクトの ID。
 //   - ingressID: ingress の ID。
-//   - rawHostname: 利用者が入力したドメイン名。
+//   - rawSubdomain: 利用者が入力した名前(例: myapp。末尾に .<ベースドメイン> が付いていても、取り除く)。
 //
 // 戻り値:
-//   - 追加したドメインと、ingress。形が不正なら invalid_request、削除中の ingress、上限、重複は conflict。
-func (ingressDomainService *IngressDomainService) Add(requestContext context.Context, userID string, projectID string, ingressID string, rawHostname string) (model.IngressDomain, model.Ingress, error) {
-	// ドメイン名を整えて、形を確かめる。
-	hostname := model.NormalizeHostname(rawHostname)
-	if validateError := model.ValidateCustomHostname(hostname, ingressDomainService.baseDomain); validateError != nil {
+//   - 追加したホスト名と、ingress。形が不正、または払い出さない名前なら invalid_request。
+//     削除中の ingress、上限、すでに使われている名前は conflict。IngressRoute の作り直しを始められなければ internal(このとき、追加は取り消す)。
+func (ingressDomainService *IngressDomainService) Add(requestContext context.Context, userID string, projectID string, ingressID string, rawSubdomain string) (model.IngressDomain, model.Ingress, error) {
+	// 決まり(ベースドメイン)が無ければ、追加できない。
+	if ingressDomainService.subdomainPolicy == nil || ingressDomainService.subdomainPolicy.BaseDomain() == "" {
+		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindInternal, "ベースドメインが設定されていません")
+	}
+	baseDomain := ingressDomainService.subdomainPolicy.BaseDomain()
+	// 名前を整えて、末尾のベースドメインを取り除き、形と、払い出さない名前かを確かめる。
+	subdomain := strings.TrimSuffix(model.NormalizeHostname(rawSubdomain), "."+baseDomain)
+	if validateError := model.ValidateSubdomain(subdomain); validateError != nil {
 		return model.IngressDomain{}, model.Ingress{}, validateError
+	}
+	if ingressDomainService.subdomainPolicy.IsReserved(subdomain) {
+		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindInvalidRequest, "この名前は、予約されているので、使えません")
 	}
 	// ingress を読み、削除中でないことを確かめる。
 	ingress, findError := ingressDomainService.ingressReader.FindByID(requestContext, userID, projectID, ingressID)
@@ -135,94 +139,49 @@ func (ingressDomainService *IngressDomainService) Add(requestContext context.Con
 		return model.IngressDomain{}, model.Ingress{}, findError
 	}
 	if ingress.Status == model.IngressStatusDeleting {
-		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindConflict, "削除中の ingress には、ドメインを追加できません")
+		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindConflict, "削除中の ingress には、ホスト名を追加できません")
 	}
-	// 確認のための値を作って、保存する。
+	// 保存する(すぐに有効にする)。全体で重なる名前は、保存のときに conflict になる。
 	token, tokenError := model.NewIngressDomainToken()
 	if tokenError != nil {
 		return model.IngressDomain{}, model.Ingress{}, tokenError
 	}
-	domain := model.IngressDomain{ID: model.IngressDomainIDPrefix + uuid.NewString(), IngressID: ingressID, Hostname: hostname, Token: token}
+	verifiedAt := time.Now()
+	domain := model.IngressDomain{ID: model.IngressDomainIDPrefix + uuid.NewString(), IngressID: ingressID, Hostname: subdomain + "." + baseDomain, Token: token, VerifiedAt: &verifiedAt}
 	if createError := ingressDomainService.domainStore.Create(requestContext, userID, projectID, &domain); createError != nil {
 		return model.IngressDomain{}, model.Ingress{}, createError
+	}
+	// ルーティングに加える。始められなければ、追加を取り消す(見た目だけ有効なホスト名を残さない)。
+	if reapplyError := ingressDomainService.reapplyIfRouted(requestContext, ingress); reapplyError != nil {
+		_, _ = ingressDomainService.domainStore.Delete(requestContext, userID, projectID, ingressID, domain.ID)
+		return model.IngressDomain{}, model.Ingress{}, reapplyError
 	}
 	return domain, ingress, nil
 }
 
-// Verify は、DNS を見て、ドメインの持ち主であることを確かめ、確認できたら、ルーティングに加える。
-// すでに確認済みのドメインに対しては、IngressRoute の作り直しを、もう一度依頼する(やり直しのため)。
+// Remove は、ingress からホスト名を外し、ルーティングからも外す。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: プロジェクトの ID。
 //   - ingressID: ingress の ID。
-//   - domainID: ドメインの ID。
+//   - domainID: ホスト名の ID。
 //
 // 戻り値:
-//   - 確認の結果と、ingress。DNS が合わないのは、エラーではなく、Verified が false の結果。
-//     ingress が削除中、または、別の ingress がすでに確認済みのときは conflict。
-func (ingressDomainService *IngressDomainService) Verify(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) (IngressDomainVerifyResult, model.Ingress, error) {
-	// ingress とドメインを読む。
-	ingress, findError := ingressDomainService.ingressReader.FindByID(requestContext, userID, projectID, ingressID)
-	if findError != nil {
-		return IngressDomainVerifyResult{}, model.Ingress{}, findError
-	}
-	if ingress.Status == model.IngressStatusDeleting {
-		return IngressDomainVerifyResult{}, model.Ingress{}, apperror.New(apperror.KindConflict, "削除中の ingress の、ドメインは確認できません")
-	}
-	domain, domainError := ingressDomainService.domainStore.Find(requestContext, userID, projectID, ingressID, domainID)
-	if domainError != nil {
-		return IngressDomainVerifyResult{}, model.Ingress{}, domainError
-	}
-	// 確認済みでなければ、DNS を見る。合わなければ、理由を返して終わる。
-	if !domain.IsVerified() {
-		verified, reason := ingressDomainService.verifier.Verify(requestContext, domain.Hostname, domain.Token, ingress.Host)
-		if !verified {
-			return IngressDomainVerifyResult{Domain: domain, Verified: false, Reason: reason}, ingress, nil
-		}
-		// 確認済みにする。別の ingress が先に確認済みなら、conflict にする。
-		if markError := ingressDomainService.domainStore.MarkVerified(requestContext, domain.ID); markError != nil {
-			if errors.Is(markError, repository.ErrIngressDomainTaken) {
-				return IngressDomainVerifyResult{}, model.Ingress{}, apperror.New(apperror.KindConflict, "このドメインは、すでに別の ingress で使われています")
-			}
-			return IngressDomainVerifyResult{}, model.Ingress{}, markError
-		}
-	}
-	// 確認後の状態を読み直して、ルーティングに加える。
-	domain, domainError = ingressDomainService.domainStore.Find(requestContext, userID, projectID, ingressID, domainID)
-	if domainError != nil {
-		return IngressDomainVerifyResult{}, model.Ingress{}, domainError
-	}
-	if reapplyError := ingressDomainService.reapplyIfRouted(requestContext, ingress); reapplyError != nil {
-		return IngressDomainVerifyResult{}, model.Ingress{}, reapplyError
-	}
-	return IngressDomainVerifyResult{Domain: domain, Verified: true}, ingress, nil
-}
-
-// Remove は、ingress からカスタムドメインを外す。確認済みのドメインなら、ルーティングからも外す。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - userID: 持ち主のユーザー ID。
-//   - projectID: プロジェクトの ID。
-//   - ingressID: ingress の ID。
-//   - domainID: ドメインの ID。
-//
-// 戻り値:
-//   - ドメインや ingress が無いときは not_found。IngressRoute の作り直しを始められなければ internal。
+//   - ホスト名や ingress が無いときは not_found。IngressRoute の作り直しを始められなければ internal。
 func (ingressDomainService *IngressDomainService) Remove(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) error {
 	// ingress を読む(持ち主でなければ not_found)。
 	ingress, findError := ingressDomainService.ingressReader.FindByID(requestContext, userID, projectID, ingressID)
 	if findError != nil {
 		return findError
 	}
-	// ドメインを外す。
+	// ホスト名を外す。
 	removed, deleteError := ingressDomainService.domainStore.Delete(requestContext, userID, projectID, ingressID, domainID)
 	if deleteError != nil {
 		return deleteError
 	}
-	// 確認済みだったものは、ルーティングからも外す(IngressRoute を作り直す)。
+	// 有効だったものは、ルーティングからも外す(IngressRoute を作り直す)。
 	if removed.IsVerified() {
 		return ingressDomainService.reapplyIfRouted(requestContext, ingress)
 	}
