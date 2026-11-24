@@ -33,6 +33,11 @@ func (fakeStore *fakeIngressStore) FindForWorker(_ context.Context, _ string) (m
 }
 
 // CommitRulesApply は、結果を覚えて、決めたエラーを返す。
+func (fakeStore *fakeIngressStore) VerifiedDomainHosts(_ context.Context, _ string) ([]string, error) {
+	// テストでは、カスタムドメインは無いものとして扱う。
+	return nil, nil
+}
+
 func (fakeStore *fakeIngressStore) CommitRulesApply(_ context.Context, ingressID string, succeeded bool) (bool, error) {
 	fakeStore.commits = append(fakeStore.commits, fmt.Sprintf("%s|%v", ingressID, succeeded))
 	return true, fakeStore.storeError

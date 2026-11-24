@@ -11,6 +11,7 @@ import { ApplyBar, Badge, DiffBox, ErrorState, LoadingState, Modal, ToastNotice,
 import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 import { IngressAccessLog, updateAccessLogEnabled } from "@/components/panels/ingress-access-log"
+import { IngressDomains } from "@/components/panels/ingress-domains"
 
 /** ルールの転送先に選べる、Service のポート 1 つ。 */
 type ServiceChoice = { serviceId: string; label: string; ports: number[] }
@@ -142,6 +143,8 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
           <span className="faint" style={{ fontSize: 12 }}>公開 URL</span>
           <a className="mono" style={{ fontWeight: 500, color: "var(--accent)", overflowWrap: "anywhere" }} href={`https://${detail.host}`} target="_blank" rel="noreferrer">https://{detail.host}</a>
         </div>
+        {/* カスタムドメイン(自分のドメインを、DNS で持ち主を確かめてから、使えるようにする)。 */}
+        <IngressDomains basePath={path} locked={detail.status === "deleting"} notify={notify} />
         {/* アクセスログ(1 リクエストごとの表。日時、パス、IP、ステータスなどで絞り込める)。 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <IngressAccessLog basePath={path} enabled={detail.accessStats !== false} locked={locked || busy}

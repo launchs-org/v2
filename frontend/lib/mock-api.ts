@@ -13,6 +13,7 @@ import type {
   ProjectTask,
   ProjectTaskListResponse,
   IngressDetail,
+  IngressDomain,
   IngressListItem,
   Project,
   ServicePort,
@@ -135,6 +136,8 @@ let volumesByProject: Record<string, Volume[]> = {
   ],
 }
 
+/** 見せかけの、カスタムドメイン(ingress の ID ごと)。確認は、1 回目は DNS が合わない扱い、2 回目で通る。 */
+const mockDomainsByIngress: Record<string, (IngressDomain & { attempts: number })[]> = {}
 let ingressesByProject: Record<string, IngressDetail[]> = {
   prj_northstar: [
     {
@@ -541,6 +544,30 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           } else if (segments.length === 6 && method === "PATCH") {
             ingress.accessStats = Boolean(payload.accessStats)
             result = clone(ingress)
+          } else if (segments[6] === "domains") {
+            const domains = (mockDomainsByIngress[ingress.ingressId] ??= [])
+            const view = ({ attempts: _attempts, ...domain }: IngressDomain & { attempts: number }): IngressDomain => domain
+            if (segments.length === 7 && method === "GET") result = { domains: clone(domains.map(view)) }
+            else if (segments.length === 7 && method === "POST") {
+              const hostname = String(payload.hostname ?? "").trim().toLowerCase()
+              if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(hostname)) throw new Error("ドメイン名は、小文字の英数字とハイフンを、ドットで区切った形で入力してください")
+              if (domains.some((item) => item.hostname === hostname)) throw new Error("このドメインは、すでに追加されています")
+              if (domains.length >= 5) throw new Error("1 つの ingress に付けられるドメインは、5 つまでです")
+              const domain = { domainId: newId("domain"), hostname, status: "pending" as const, verifiedAt: null, attempts: 0, challenge: { txtName: `_launchs-challenge.${hostname}`, txtValue: `launchs-verify=${newId("t")}`, cnameValue: ingress.host } }
+              domains.push(domain)
+              result = view(domain)
+            } else {
+              const domain = domains.find((item) => item.domainId === segments[7])
+              if (!domain) throw new Error("ドメインが見つかりません")
+              if (segments[8] === "verify" && method === "POST") {
+                domain.attempts += 1
+                if (domain.attempts >= 2) { domain.status = "verified"; domain.verifiedAt = now() }
+                result = { verified: domain.status === "verified", reason: domain.status === "verified" ? "" : `TXT レコード(_launchs-challenge.${domain.hostname})にも、CNAME(${ingress.host})にも、確認できる設定が見つかりませんでした。DNS の反映には、数分から数時間かかることがあります。`, domain: clone(view(domain)) }
+              } else if (segments.length === 8 && method === "DELETE") {
+                mockDomainsByIngress[ingress.ingressId] = domains.filter((item) => item.domainId !== domain.domainId)
+                result = {}
+              }
+            }
           } else if (segments[6] === "access-logs" && method === "GET") {
             result = mockAccessLogs(url.searchParams)
           } else if (segments[6] === "apply" && method === "POST") {

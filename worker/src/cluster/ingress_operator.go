@@ -124,6 +124,12 @@ func (operator *KubernetesIngressOperator) ApplyIngressRoute(requestContext cont
 	if !hostPattern.MatchString(definition.Host) {
 		return fmt.Errorf("ホスト名の形が正しくありません: %q", definition.Host)
 	}
+	// カスタムドメインも、ルールの式に埋め込むので、同じ形かを確かめる。
+	for _, extraHost := range definition.ExtraHosts {
+		if !hostPattern.MatchString(extraHost) {
+			return fmt.Errorf("ホスト名の形が正しくありません: %q", extraHost)
+		}
+	}
 	// アクセスの集計を付けるかを決める(プラグインが無効な環境では、付けない)。
 	withStats := definition.AccessStats && operator.statsPlugin != ""
 	// 付けるなら、IngressRoute より先に、Middleware を用意する(参照先が無い時間を作らない)。
@@ -254,6 +260,27 @@ func (operator *KubernetesIngressOperator) DeleteIngressRoute(requestContext con
 	return nil
 }
 
+// hostMatchExpression は、受け付けるホスト名の、Traefik のルールの式を作る。
+// 払い出したホスト名だけなら Host(`a`)、カスタムドメインもあれば (Host(`a`) || Host(`b`)) にする。
+//
+// 引数:
+//   - definition: 反映する内容(Host と ExtraHosts を使う)。
+//
+// 戻り値:
+//   - ルールの式の、ホストの部分。
+func hostMatchExpression(definition activity.IngressRouteDefinition) string {
+	// 払い出したホスト名だけのときは、これまでと同じ式にする。
+	if len(definition.ExtraHosts) == 0 {
+		return "Host(`" + definition.Host + "`)"
+	}
+	// 払い出したホスト名と、カスタムドメインを、「または」でつなぐ。
+	expressions := []string{"Host(`" + definition.Host + "`)"}
+	for _, extraHost := range definition.ExtraHosts {
+		expressions = append(expressions, "Host(`"+extraHost+"`)")
+	}
+	return "(" + strings.Join(expressions, " || ") + ")"
+}
+
 // buildIngressRoute は、定義から、IngressRoute のオブジェクトを組み立てる。
 //
 // ルールごとに、Host(...) && PathPrefix(...) の式で、Service のポートへ流す。
@@ -271,7 +298,7 @@ func (operator *KubernetesIngressOperator) buildIngressRoute(definition activity
 	for _, rule := range definition.Rules {
 		route := map[string]any{
 			"kind":  "Rule",
-			"match": "Host(`" + definition.Host + "`) && PathPrefix(`" + rule.Path + "`)",
+			"match": hostMatchExpression(definition) + " && PathPrefix(`" + rule.Path + "`)",
 			"services": []any{
 				map[string]any{"name": rule.ServiceName, "port": int64(rule.Port)},
 			},

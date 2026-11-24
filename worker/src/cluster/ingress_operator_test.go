@@ -250,3 +250,18 @@ func TestKubernetesIngressOperatorDeleteAndSettings(testingT *testing.T) {
 		}
 	}
 }
+
+// TestHostMatchExpression は、払い出したホスト名だけのときと、カスタムドメインがあるときの、ルールの式を確かめる。
+func TestHostMatchExpression(testingT *testing.T) {
+	// カスタムドメインが無ければ、これまでと同じ式。
+	only := activity.IngressRouteDefinition{Host: "a.shconn.org"}
+	if got := hostMatchExpression(only); got != "Host(`a.shconn.org`)" {
+		testingT.Errorf("払い出したホスト名だけの式が違う: %s", got)
+	}
+	// カスタムドメインがあれば、「または」でつなぐ。
+	withExtra := activity.IngressRouteDefinition{Host: "a.shconn.org", ExtraHosts: []string{"app.example.com", "www.example.com"}}
+	want := "(Host(`a.shconn.org`) || Host(`app.example.com`) || Host(`www.example.com`))"
+	if got := hostMatchExpression(withExtra); got != want {
+		testingT.Errorf("カスタムドメインつきの式が違う: %s", got)
+	}
+}
