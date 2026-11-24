@@ -1,4 +1,4 @@
-// logcollector は、deploy のコンテナの出力ログを、Pod ごとに購読して、DB に保存する(docs/logs.md)。
+// logcollector は、deploy のコンテナの出力ログを、Pod ごとに購読して、DB に保存する(dev-docs/logs.md)。
 //
 // 同時に1つだけ動く(PostgreSQL の advisory lock でリーダーを決める。他は、リーダーが止まるまで待つ)。
 package main

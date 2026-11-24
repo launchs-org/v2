@@ -72,6 +72,13 @@ jobs:
       - name: ビルド
         run: go build -o /dev/null ./...
 
+      # 利用者向けのドキュメント(docs/)の生成ツールのテストと、リンク切れの検査(生成が失敗すれば、落ちる)。
+      - name: ドキュメントの生成ツールのテストと、ドキュメントのビルド
+        run: |
+          cd tools/docsbuild
+          go test ./...
+          go run . -src ../../docs -templates ../../templates/templates -out /tmp/site
+
       # データベースを使うテストが、飛ばされずに実行されることを、-v の出力で確認する。
       - name: テスト
         run: go test -v ./... | tee test-output.txt

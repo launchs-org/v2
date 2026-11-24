@@ -15,7 +15,7 @@ import (
 	"launchs/shared/apperror"
 )
 
-// このファイルは、プロジェクトで共有する ConfigMap(docs/configmap.md)の、モデルと、中身の検査を持つ。
+// このファイルは、プロジェクトで共有する ConfigMap(dev-docs/configmap.md)の、モデルと、中身の検査を持つ。
 // メソッドは、メモリ上の値だけを扱う(保存は repository が行う)。
 
 const (

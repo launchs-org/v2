@@ -1,4 +1,4 @@
-// Package events は、プロジェクトの namespace で起きた k8s の Event を観測し、DB に保存する(docs/project-events.md)。
+// Package events は、プロジェクトの namespace で起きた k8s の Event を観測し、DB に保存する(dev-docs/project-events.md)。
 package events
 
 import (

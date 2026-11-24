@@ -5,7 +5,7 @@ import (
 	"launchs/shared/template"
 )
 
-// TemplateService は、テンプレート(docs/templates.md)の一覧と取得の、ビジネスルールを担当する。
+// TemplateService は、テンプレート(dev-docs/templates.md)の一覧と取得の、ビジネスルールを担当する。
 //
 // テンプレートは、リポジトリの YAML を起動時に読み込んだもので、データベースには無い。利用者によらず、全員に同じものを見せる。
 type TemplateService struct {

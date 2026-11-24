@@ -1,4 +1,4 @@
--- セキュリティ: IP のブロックと、管理操作の監査ログ(docs/security.md)。
+-- セキュリティ: IP のブロックと、管理操作の監査ログ(dev-docs/security.md)。
 
 -- ブロックする IP(1 つの IP か、範囲)。ログインとサインアップを、拒否する。期限が無ければ、解除するまで続く。
 CREATE TABLE blocked_ips (

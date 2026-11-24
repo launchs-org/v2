@@ -1,4 +1,4 @@
--- ingress のアクセスの集計(Traefik のプラグイン launchs-stats が 1 分ごとに出し、accessstats が保存する。docs/ingress-plugins.md)。
+-- ingress のアクセスの集計(Traefik のプラグイン launchs-stats が 1 分ごとに出し、accessstats が保存する。dev-docs/ingress-plugins.md)。
 -- minutes は 1 分ごと(Traefik の Pod ごと)の行。hours は、minutes を 1 時間ごとにまとめた行(replica は空文字)。
 -- ingress の削除では消さず、保存期間で消える(集計の行は、ingress の外に出さない)。
 CREATE TABLE ingress_access_minutes (

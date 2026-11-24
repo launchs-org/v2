@@ -93,7 +93,7 @@ type WorkerConfig struct {
 	TraefikEntryPoints []string
 
 	// IngressStatsPlugin は、アクセスの集計の Traefik プラグインの名前(環境変数 INGRESS_STATS_PLUGIN。例: launchs-stats)。
-	// 空なら、アクセスの集計は使わない(既定。Traefik にプラグインを入れてから指定する。docs/ingress-plugins.md)。
+	// 空なら、アクセスの集計は使わない(既定。Traefik にプラグインを入れてから指定する。dev-docs/ingress-plugins.md)。
 	IngressStatsPlugin string
 
 	// VolumeStorageClass は、PVC に指定する StorageClass(環境変数 VOLUME_STORAGE_CLASS)。空なら、クラスターの既定。拡張に対応したものが前提。

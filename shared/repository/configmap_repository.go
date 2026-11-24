@@ -16,7 +16,7 @@ import (
 )
 
 // ConfigMapRepository は、configmaps と configmap_revisions テーブルの読み書きを担当する。
-// ConfigMap の編集は、版を足すだけで、k8s には触れない(docs/configmap.md §3)。
+// ConfigMap の編集は、版を足すだけで、k8s には触れない(dev-docs/configmap.md §3)。
 type ConfigMapRepository struct {
 	database *gorm.DB
 }

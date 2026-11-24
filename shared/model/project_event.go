@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// ProjectEvent は、プロジェクトの namespace で起きた、k8s の Event(docs/project-events.md)。
+// ProjectEvent は、プロジェクトの namespace で起きた、k8s の Event(dev-docs/project-events.md)。
 //
 // 書き手は watcher だけ。backend は読むだけ。k8s の Event は、約 1 時間で消えるので、DB に溜めて、過去も見られるようにする。
 type ProjectEvent struct {

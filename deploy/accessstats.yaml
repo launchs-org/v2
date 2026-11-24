@@ -1,4 +1,4 @@
-# Traefik の Pod のログから、ingress のアクセスログを読み取って DB に保存する(docs/ingress-plugins.md)。同時に動くのは 1 つ(advisory lock)。
+# Traefik の Pod のログから、ingress のアクセスログを読み取って DB に保存する(dev-docs/ingress-plugins.md)。同時に動くのは 1 つ(advisory lock)。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

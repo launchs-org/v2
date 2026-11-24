@@ -2,7 +2,7 @@ package workflow
 
 import "time"
 
-// テンプレートから部品を作る処理(docs/templates.md 段階 C)の、Workflow と Activity の名前、入出力の型を定める。
+// テンプレートから部品を作る処理(dev-docs/templates.md 段階 C)の、Workflow と Activity の名前、入出力の型を定める。
 
 const (
 	// ApplyTemplateWorkflowName は、計画のステップを順に実行して、部品を作る Workflow の名前。

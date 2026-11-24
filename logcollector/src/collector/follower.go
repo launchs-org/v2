@@ -69,7 +69,7 @@ type FollowerSettings struct {
 // 戻り値:
 //   - Follower の設定。
 func DefaultFollowerSettings(maxLineBytes int, ingestBytesPerSecond int, flushInterval time.Duration) FollowerSettings {
-	// 待ち時間などは、設計(docs/logs.md §5)の値にする。
+	// 待ち時間などは、設計(dev-docs/logs.md §5)の値にする。
 	return FollowerSettings{
 		MaxLineBytes: maxLineBytes, IngestBytesPerSecond: ingestBytesPerSecond, BatchLines: 500, FlushInterval: flushInterval,
 		MinBackoff: time.Second, MaxBackoff: 30 * time.Second, StableAfter: 10 * time.Second, Now: time.Now,
@@ -111,7 +111,7 @@ func NewFollower(store FollowerStore, source LogSource, settings FollowerSetting
 
 // Run は、Pod のログを、ctx が終わるまで(または、Pod が無くなる・コンテナが終わるまで)、保存し続ける。
 //
-// 流れ(docs/logs.md §5):
+// 流れ(dev-docs/logs.md §5):
 //  1. Pod が deploy_pods に無ければ、ストリームを終了にして、終わる。
 //  2. コンテナの再起動の回数が増えていれば、前のコンテナのログの残りを、1回読む。
 //  3. いまのコンテナのログを、follow で読んで、保存する。

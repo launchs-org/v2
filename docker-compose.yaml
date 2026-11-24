@@ -48,7 +48,7 @@ services:
       - .:/app
       - frontend-node-modules:/app/frontend/node_modules
 
-  # 認証のコンテナ。ユーザーの登録・ログイン・トークンの発行と、公開鍵(JWKS)の配信(docs/auth.md)。
+  # 認証のコンテナ。ユーザーの登録・ログイン・トークンの発行と、公開鍵(JWKS)の配信(dev-docs/auth.md)。
   auth:
     build:
       context: .
@@ -154,7 +154,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       # 既定では k8s につながず、namespace を削除しない。k8s につなぐときは、
-      # docker-compose.kubernetes.yaml を重ねる(docs/coding-conventions.md を参照)。
+      # docker-compose.kubernetes.yaml を重ねる(dev-docs/coding-conventions.md を参照)。
       KUBERNETES_ACCESS: none
     volumes:
       - .:/app
@@ -186,7 +186,7 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
-  # deploy のコンテナの出力ログを、Pod ごとに購読して DB に保存する(docs/logs.md)。同時に動くのは1つ(advisory lock でリーダーを決める)。
+  # deploy のコンテナの出力ログを、Pod ごとに購読して DB に保存する(dev-docs/logs.md)。同時に動くのは1つ(advisory lock でリーダーを決める)。
   logcollector:
     build:
       context: .
@@ -209,7 +209,7 @@ services:
       - .:/app
       - go-module-cache:/go/pkg/mod
 
-  # ingress のアクセスの集計(Traefik のプラグイン launchs-stats の出力)を、Traefik の Pod のログから読み取り、DB に保存する(docs/ingress-plugins.md)。同時に動くのは1つ。
+  # ingress のアクセスの集計(Traefik のプラグイン launchs-stats の出力)を、Traefik の Pod のログから読み取り、DB に保存する(dev-docs/ingress-plugins.md)。同時に動くのは1つ。
   accessstats:
     build:
       context: .

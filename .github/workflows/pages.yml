@@ -1,0 +1,63 @@
+# 利用者向けのドキュメント(docs/ の Markdown)を、静的なサイトにして、GitHub Pages に公開する。
+# リポジトリの Settings → Pages → Source を「GitHub Actions」にしておく。
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "tools/docsbuild/**"
+      - "templates"
+      - ".github/workflows/pages.yml"
+  # 手動でも、公開できる。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開は、1 つずつ。新しいものが来たら、前のものは止める。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # テンプレートの一覧を作るために、templates/(別のリポジトリ。submodule)を取る。--recursive にしない。
+          submodules: true
+          token: ${{ secrets.TEMPLATES_TOKEN || github.token }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/docsbuild/go.mod
+          cache-dependency-path: tools/docsbuild/go.sum
+
+      # リンク切れ、ナビに無いページ、閉じていないブロックがあると、ここで落ちる。
+      - name: サイトを作る
+        run: |
+          cd tools/docsbuild
+          go test ./...
+          go run . -src ../../docs -templates ../../templates/templates -out ../../_site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

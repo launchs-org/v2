@@ -1,4 +1,4 @@
--- ingress のアクセスログ(1 リクエストにつき 1 行。Traefik のプラグイン launchs-stats が出し、accessstats が保存する。docs/ingress-plugins.md)。
+-- ingress のアクセスログ(1 リクエストにつき 1 行。Traefik のプラグイン launchs-stats が出し、accessstats が保存する。dev-docs/ingress-plugins.md)。
 -- 保存は、保存期間と、ingress ごとの行数の上限の、どちらか早い方で消える。URL は、クエリも含めて、そのまま保存する。
 CREATE TABLE ingress_access_logs (
     id           bigserial        PRIMARY KEY,
