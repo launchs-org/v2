@@ -119,7 +119,7 @@ Ingress を作っただけでは、ルールが空なので、URL を開いて�
 
 ## どんなお客さんが来たかを見る
 
-Ingress のパネルに、**アクセスログ**(1 回ずつのアクセスの記録)が出ます。くわしくは [様子を見る](monitoring.md#access)。
+Ingress のパネルに、**アクセスログ**(1 回ずつのアクセスの記録)が出ます。くわしくは [様子を見る](monitoring.md#access)。24 時間で消えるので、残したいときは、[Google Drive や webhook に書き出せます](log-export.md)。
 
 ![アクセスログ。ステータス、パス、IP などで絞り込める](assets/images/ingress.png)
 

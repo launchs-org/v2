@@ -14,7 +14,7 @@ launchs 本体と、その土台(Traefik とプラグイン、metrics-server、c
 
 | 場所 | 内容 |
 |---|---|
-| `*.yaml`、`kustomization.yaml` | 本体(PostgreSQL、Temporal、auth、backend、worker、watcher、logcollector、accessstats、frontend、IngressRoute) |
+| `*.yaml`、`kustomization.yaml` | 本体(PostgreSQL、Temporal、auth、backend、worker、watcher、logcollector、accessstats、exporter、frontend、IngressRoute) |
 | `settings/` | 環境ごとの設定(ConfigMap と、Secret。`secret.yaml` は Git に入れない) |
 | `cluster/` | クラスター全体に 1 回のもの(metrics-server、launchs-edge の Middleware、cloudflared、Traefik の values) |
 | `argocd/` | Argo CD の Application(traefik、launchs-cluster、launchs-prod) |

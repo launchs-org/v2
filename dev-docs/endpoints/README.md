@@ -15,6 +15,7 @@
 - [デプロイ・起動設定関連](deploys.md) (/deploy)
 - [サービス関連](services.md) (/deploy/:deployId/service)
 - [イングレス関連](ingresses.md) (/projects/:projectId/ingresses)
+- [アクセスログの転送](log_exports.md) (/projects/:projectId/ingresses/:ingressId/log-exports、/account/google-drive)
 - [ボリューム関連](volumes.md) (/projects/:projectId/volumes, /deploy/:deployId/mounts)
 - [ConfigMap 関連](configmaps.md) (/projects/:projectId/configmaps, /configmaps/:configMapId)
 - [クォータ(アカウントごとの上限)](quota.md) (/quota)

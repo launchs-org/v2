@@ -100,13 +100,26 @@ type ingressTestEnvironment struct {
 // 戻り値:
 //   - 用意した環境。
 func newIngressTestEnvironment(testingT *testing.T) *ingressTestEnvironment {
+	// アクセスログの転送の設定は、環境変数から読む(試験では、空なので、無効)。
+	return newIngressTestEnvironmentWithExport(testingT, nil)
+}
+
+// newIngressTestEnvironmentWithExport は、newIngressTestEnvironment に、アクセスログの転送の設定(暗号化と Google)を渡せるようにしたもの。
+//
+// 引数:
+//   - testingT: 呼び出し元のテスト。
+//   - exportDependencies: 転送の設定(nil なら、環境変数から読む)。
+//
+// 戻り値:
+//   - 用意した環境。
+func newIngressTestEnvironmentWithExport(testingT *testing.T, exportDependencies *ExportDependencies) *ingressTestEnvironment {
 	// 依存するものを差し替えて、2人のユーザーのクライアントを作る。
 	database := testdatabase.New(testingT)
 	starter := &fakeIngressWorkflowStarter{}
 	generator := &fakeHostGenerator{hosts: []string{"brave-blue-fox.launchs.org"}}
 	dependencies := Dependencies{
 		Database: database, DeployWorkflowStarter: &fakeDeployWorkflowStarter{}, ServiceWorkflowStarter: &fakeServiceWorkflowStarter{},
-		IngressWorkflowStarter: starter, IngressHostGenerator: generator, ActivityObserver: fakeActivityObserver{},
+		IngressWorkflowStarter: starter, IngressHostGenerator: generator, ActivityObserver: fakeActivityObserver{}, Export: exportDependencies,
 	}
 	ownerClient := newProjectAPIClient(testingT, "user-a", dependencies)
 	otherClient := newProjectAPIClient(testingT, "user-b", dependencies)

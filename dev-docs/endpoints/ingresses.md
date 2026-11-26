@@ -272,7 +272,7 @@
 - Note: `from` 以上、`to` より前の日時に絞れる(RFC 3339。読めなければ 400)
 - Note: 絞り込みは全て AND。`status` は `2xx`〜`5xx` の分類か、`404` のような数字(それ以外は 400)。`method` は大文字小文字を問わない。`ip` は完全一致。`q` は、URL に含まれる文字列(大文字小文字を問わない。`%` と `_` は、そのままの文字として探す)
 - Note: `status` が 0 のものは、ステータスを記録できなかったもの(WebSocket などの接続の切り替えと、イベントストリーム)
-- Note: 保存は、保存期間(既定 24 時間。`ACCESS_LOG_RETENTION`)と、ingress ごとの行数の上限(既定 5000。`ACCESS_LOG_MAX_ROWS`)の、どちらか早い方まで。リクエストが多いときは、プラグインが 10 秒ごとに出す記録に上限(200 件)があり、超えた分は、記録されない(集計の件数には入る)。`ACCESS_STATS_KEEP_CLIENTS=false` では `clientIp` は空
+- Note: 保存は、保存期間(既定 24 時間。`ACCESS_LOG_RETENTION`)と、ingress ごとの行数の上限(既定 10000。`ACCESS_LOG_MAX_ROWS`)の、どちらか早い方まで。リクエストが多いときは、プラグインが 10 秒ごとに出す記録に上限(200 件)があり、超えた分は、記録されない(集計の件数には入る)。`ACCESS_STATS_KEEP_CLIENTS=false` では `clientIp` は空
 - Note: 他のユーザーの ingress は 404
 
 ### 好きな名前のホスト名(サブドメイン)の一覧

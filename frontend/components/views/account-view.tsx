@@ -6,6 +6,7 @@ import { authenticatedFetcher } from "@/lib/api"
 import { shortDateTime } from "@/lib/format-date"
 import type { LoginEventsResponse, User } from "@/lib/types"
 import { ApiTokenSection } from "@/components/api-token-section"
+import { GoogleDriveSection } from "@/components/google-drive-section"
 import { InvitationSection } from "@/components/invitation-section"
 import { PasswordChangeForm } from "@/components/password-change"
 import { Badge, ErrorState, LoadingState, ToastNotice } from "@/components/ui-kit"
@@ -41,6 +42,8 @@ export function AccountView({ user, refreshInterval, onLogout }: { user: User; r
         <PasswordChangeForm key={formKey} onChanged={() => { setFormKey((current) => current + 1); setToast("パスワードを変更しました") }} />
       </div>
       <ApiTokenSection refreshInterval={refreshInterval} />
+      {/* Google Drive の接続(ingress のアクセスログの転送先に使う) */}
+      <GoogleDriveSection refreshInterval={refreshInterval} />
       {/* 招待は、管理者だけ(サーバーも、毎回、管理者かどうかを DB で確かめる) */}
       {user.role === "admin" && <InvitationSection refreshInterval={refreshInterval} />}
       <div className="card tscroll"><div className="tinner">

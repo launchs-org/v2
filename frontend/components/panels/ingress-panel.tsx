@@ -12,6 +12,7 @@ import { TagEditor } from "@/components/tag-editor"
 import { PanelFrame } from "@/components/panels/panel-frame"
 import { IngressAccessLog, updateAccessLogEnabled } from "@/components/panels/ingress-access-log"
 import { IngressDomains } from "@/components/panels/ingress-domains"
+import { IngressLogExports } from "@/components/panels/ingress-log-exports"
 
 /** ルールの転送先に選べる、Service のポート 1 つ。 */
 type ServiceChoice = { serviceId: string; label: string; ports: number[] }
@@ -145,6 +146,8 @@ export function IngressPanel({ project, refreshInterval, ingressId, onClose }: P
         </div>
         {/* 好きな名前のホスト名(<名前>.<ベースドメイン>。追加するとすぐに使える)。 */}
         <IngressDomains basePath={path} locked={detail.status === "deleting"} notify={notify} />
+        {/* アクセスログの転送(webhook と Google Drive)。 */}
+        <IngressLogExports basePath={path} locked={detail.status === "deleting"} notify={notify} />
         {/* アクセスログ(1 リクエストごとの表。日時、パス、IP、ステータスなどで絞り込める)。 */}
         <div className="card" style={{ overflow: "hidden" }}>
           <IngressAccessLog basePath={path} enabled={detail.accessStats !== false} locked={locked || busy}

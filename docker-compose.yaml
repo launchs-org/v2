@@ -19,6 +19,15 @@ services:
       AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://auth:8080/auth/.well-known/jwks.json}
       # API トークン(機械向けの JWT)の署名の秘密(64 文字以上)。空なら、API トークンの機能は無効。
       API_TOKEN_SECRET: ${API_TOKEN_SECRET:-}
+      # アクセスログの転送(dev-docs/log-export.md)。EXPORT_CREDENTIAL_KEY(openssl rand -base64 32)が空なら、機能は無効。
+      # Google Drive は、GOOGLE_OAUTH_CLIENT_ID と GOOGLE_OAUTH_CLIENT_SECRET も要る(戻り先は GOOGLE_OAUTH_REDIRECT_URL。開発では http://localhost:3000/api/v1/export/google/callback など)。
+      EXPORT_CREDENTIAL_KEY: ${EXPORT_CREDENTIAL_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URL: ${GOOGLE_OAUTH_REDIRECT_URL:-}
+      # webhook の URL の検査のゆるめ方(開発用。http と、内部のネットワークへの送信を許す)。本番では、設定しない。
+      EXPORT_ALLOW_HTTP: ${EXPORT_ALLOW_HTTP:-false}
+      EXPORT_ALLOW_PRIVATE_NETWORKS: ${EXPORT_ALLOW_PRIVATE_NETWORKS:-false}
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       # ingress に払い出すホスト名の、ベースドメインと、払い出さないサブドメイン(カンマ区切り。指定すると既定の一覧を置き換える)。
@@ -228,9 +237,35 @@ services:
       ACCESS_STATS_KEEP_CLIENTS: ${ACCESS_STATS_KEEP_CLIENTS:-true}
       # アクセスログを残す期間と、ingress ごとの行数の上限。
       ACCESS_LOG_RETENTION: ${ACCESS_LOG_RETENTION:-24h}
-      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-5000}
+      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-10000}
       # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
       KUBERNETES_ACCESS: none
+    volumes:
+      - .:/app
+      - go-module-cache:/go/pkg/mod
+
+  # ingress のアクセスログを、利用者が設定した送り先(webhook と Google Drive)に書き出す(dev-docs/log-export.md)。同時に動くのは1つ。
+  exporter:
+    build:
+      context: .
+      dockerfile: exporter/dockerfile
+      target: Develop
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/app?sslmode=disable
+      # 秘密を暗号化する鍵(backend と同じ値)。空なら、エクスポートは動かない。
+      EXPORT_CREDENTIAL_KEY: ${EXPORT_CREDENTIAL_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      # 見回りの間隔と、Google Drive へ前倒しで書き出す、たまった行数。
+      EXPORT_CHECK_INTERVAL: ${EXPORT_CHECK_INTERVAL:-10s}
+      EXPORT_DRIVE_FLUSH_ROWS: ${EXPORT_DRIVE_FLUSH_ROWS:-6000}
+      # 開発用(backend と同じ)。本番では、設定しない。
+      EXPORT_ALLOW_HTTP: ${EXPORT_ALLOW_HTTP:-false}
+      EXPORT_ALLOW_PRIVATE_NETWORKS: ${EXPORT_ALLOW_PRIVATE_NETWORKS:-false}
     volumes:
       - .:/app
       - go-module-cache:/go/pkg/mod

@@ -27,6 +27,9 @@ Git の値は既定。環境ごとに違う値は、**Argo CD の Application �
 3. `kubectl apply -f argocd/applications.yaml`(Application を作る)
 4. **traefik → launchs-cluster → launchs-prod** の順に同期する(Traefik とプラグイン、metrics-server、cloudflared、launchs 本体が入る)
 
+### 2.5 アクセスログの転送を使うとき(任意)
+webhook と Google Drive への書き出しは、Secret に鍵を足すまで、**無効のまま**です。使うときは、[operation.md](operation.md) の「アクセスログの転送(exporter)を有効にする」(Secret の 3 つのキーと、Google Cloud 側の準備。スコープは `drive.file` と `openid email` だけ)に従ってください。
+
 ### 3. Cloudflare の手作業
 - Tunnel の公開ホスト名に、`www.launchs.org` と `*.launchs.org` を、`http://traefik.traefik:80` で向ける。
 - Zero Trust の Access は、この 2 つに付けない。

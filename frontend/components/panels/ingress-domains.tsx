@@ -78,8 +78,8 @@ export function IngressDomains({ basePath, locked, notify }: { basePath: string;
           <button className="btn sm danger" type="button" disabled={locked || busy !== ""} onClick={() => void remove(domain)}>外す</button>
         </div>
       ))}
-      <div className="row" style={{ padding: "12px 18px 14px", borderTop: "1px solid var(--line)", gap: 8 }}>
-        <input className="inp mono grow" value={subdomain} onChange={(event) => setSubdomain(event.target.value.toLowerCase())} onKeyDown={(event) => { if (event.key === "Enter") void add() }}
+      <div className="row" style={{ padding: "12px 18px 14px", borderTop: "1px solid var(--line)", gap: 8, flexWrap: "nowrap", alignItems: "center" }}>
+        <input className="inp mono grow" style={{ minWidth: 0, width: "auto", flex: "1 1 0" }} value={subdomain} onChange={(event) => setSubdomain(event.target.value.toLowerCase())} onKeyDown={(event) => { if (event.key === "Enter") void add() }}
           placeholder="myapp" aria-label="追加する名前" maxLength={59} disabled={locked || domains.length >= MAX_DOMAINS} />
         <span className="mono mut" style={{ whiteSpace: "nowrap" }}>{NAME_SUFFIX}{baseDomain && `.${baseDomain}`}</span>
         <button className="btn sm primary" type="button" disabled={locked || busy !== "" || !subdomain.trim() || domains.length >= MAX_DOMAINS} onClick={() => void add()}>追加</button>
