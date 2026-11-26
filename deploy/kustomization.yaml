@@ -53,13 +53,13 @@ replicas:
 # イメージのタグ。main に push されるたび、sha-<コミットの短い SHA> と latest が、GHCR に push される(.github/workflows/release.yml)。
 # 本番では、latest ではなく、sha-… を指定して、固定する(どのコミットが動いているかが、分かるように)。
 images:
-  - {name: ghcr.io/launchs-org/v2/backend, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/worker, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/watcher, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/logcollector, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/accessstats, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/exporter, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/admin, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/auth, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/frontend, newTag: sha-d5fa8ea}
-  - {name: ghcr.io/launchs-org/v2/migrate, newTag: sha-d5fa8ea}
+  - {name: ghcr.io/launchs-org/v2/backend, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/worker, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/watcher, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/logcollector, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/accessstats, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/exporter, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/admin, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/auth, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/frontend, newTag: sha-c061a2d}
+  - {name: ghcr.io/launchs-org/v2/migrate, newTag: sha-c061a2d}
