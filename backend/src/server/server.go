@@ -52,6 +52,9 @@ type Dependencies struct {
 
 	// ProjectDeletionStarter は、プロジェクトの実体の削除(Workflow)を開始するもの。
 	ProjectDeletionStarter service.ProjectDeletionStarter
+
+	// Export は、アクセスログの転送が使う、暗号化と Google の設定。nil のときは、環境変数から読む(試験では、ここで渡す)。
+	Export *ExportDependencies
 }
 
 // New は、バックエンドの Echo のサーバーを組み立てる。

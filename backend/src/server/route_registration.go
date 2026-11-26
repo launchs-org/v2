@@ -6,6 +6,8 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 	"launchs/backend/src/middlewares"
 	"launchs/shared/apitoken"
+	"launchs/shared/exportsend"
+	"launchs/shared/googledrive"
 	"launchs/shared/template"
 	"launchs/templates"
 	"os"
@@ -142,6 +144,34 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	subdomainPolicy, _ := dependencies.IngressHostGenerator.(service.IngressSubdomainPolicy)
 	ingressDomainController := controller.NewIngressDomainController(service.NewIngressDomainService(
 		ingressRepository, repository.NewIngressDomainRepository(dependencies.Database), dependencies.IngressWorkflowStarter, subdomainPolicy))
+	// アクセスログの転送(webhook と Google Drive)。Google Drive の接続は、アカウントに属する(アカウント設定)。
+	exportDependencies := dependencies.Export
+	if exportDependencies == nil {
+		loaded := loadExportDependencies()
+		exportDependencies = &loaded
+	}
+	exportRepository := repository.NewExportRepository(dependencies.Database)
+	googleClient := googledrive.NewClient(exportDependencies.Google, nil)
+	var exportDriveWriter *exportsend.DriveWriter
+	var exportWebhookSender *exportsend.WebhookSender
+	if exportDependencies.Cipher != nil {
+		exportWebhookSender = exportsend.NewWebhookSender(exportDependencies.Cipher, exportDependencies.SafeOptions)
+		if googleClient.CanWrite() {
+			exportDriveWriter = exportsend.NewDriveWriter(googleClient, exportRepository, exportDependencies.Cipher, 0)
+		}
+	}
+	exportController := controller.NewExportController(service.NewExportService(exportRepository, exportDependencies.Cipher, googleClient, exportWebhookSender, exportDriveWriter,
+		exportDependencies.SafeOptions, stateKey(exportDependencies.CredentialKey)))
+	apiGroup.GET("/account/google-drive", exportController.GoogleStatus)
+	apiGroup.POST("/account/google-drive/authorize", exportController.GoogleAuthorize)
+	apiGroup.DELETE("/account/google-drive", exportController.GoogleDisconnect)
+	// Google の同意のあとの戻り先は、認証のヘッダーが付かないので、グループの外に置く(state の署名で、ユーザーを確かめる)。
+	echoServer.GET("/api/v1/export/google/callback", exportController.GoogleCallback)
+	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/log-exports", exportController.List)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/log-exports", exportController.Create)
+	apiGroup.PATCH("/projects/:projectId/ingresses/:ingressId/log-exports/:logExportId", exportController.Update)
+	apiGroup.DELETE("/projects/:projectId/ingresses/:ingressId/log-exports/:logExportId", exportController.Delete)
+	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/log-exports/:logExportId/test", exportController.Test)
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.List)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.Add)
 	apiGroup.DELETE("/projects/:projectId/ingresses/:ingressId/domains/:domainId", ingressDomainController.Remove)

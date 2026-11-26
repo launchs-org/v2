@@ -46,6 +46,10 @@ function Logo() {
  */
 export function ConsoleShell({ user, onLogout }: ConsoleShellProps) {
   const [view, setView] = useState<View>("projects")
+  // Google Drive の接続から戻ってきたとき(URL に ?google=…)は、アカウント設定を開く(結果の知らせは、そちらが出す)。
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("google")) setView("account")
+  }, [])
   // スマホでは、構成図の代わりにリソースの表を出すので、タブの名前も合わせる。
   const narrow = useNarrow()
   const [projectId, setProjectId] = useState("")

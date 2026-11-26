@@ -112,6 +112,27 @@ export type IngressDetail = {
 /** カスタムドメインの所有を確かめるために、DNS に設定してもらう内容。TXT か CNAME の、どちらかでよい。 */
 /** ingress に追加したホスト名 1 件(<利用者が選んだ名前>.<ベースドメイン>)。追加するとすぐに有効(verified)になる。 */
 export type IngressDomain = { domainId: string; hostname: string; status: "pending" | "verified"; verifiedAt: string | null }
+/** アカウントの Google Drive の接続の状態。available は、サーバーで Drive に新しくつなげるか(管理者が、設定しているか)。 */
+export type GoogleDriveStatus = { available: boolean; connected: boolean; accountEmail: string; status: "" | "active" | "reauth_required"; lastError: string }
+/** アクセスログの転送の種類と状態。reauth_required は、Google の再接続が必要。 */
+export type LogExportKind = "webhook" | "google_drive"
+export type LogExportStatus = "active" | "failing" | "reauth_required"
+/** ある ingress のアクセスログを、外へ送る設定 1 件。secret は、webhook を作ったときのレスポンスにだけ入る。 */
+export type LogExport = {
+  logExportId: string
+  kind: LogExportKind
+  enabled: boolean
+  status: LogExportStatus
+  url?: string
+  intervalSeconds?: number
+  lastSuccessAt: string | null
+  lastError: string
+  failureCount: number
+  createdAt: string
+  secret?: string
+}
+/** テスト送信の結果。送れなかったときは、ok が false で、message に理由が入る。 */
+export type LogExportTestResult = { ok: boolean; message: string }
 /** プロジェクトのタスク(worker が記録した Workflow の履歴)。 */
 export type TaskStatus = "running" | "succeeded" | "failed" | "canceled" | "lost"
 /** タスクの手順(Activity)1 つの進み具合。extra は、後始末など、定義に無い手順。 */

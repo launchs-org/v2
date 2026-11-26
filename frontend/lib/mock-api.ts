@@ -14,6 +14,8 @@ import type {
   ProjectTaskListResponse,
   IngressDetail,
   IngressDomain,
+  GoogleDriveStatus,
+  LogExport,
   IngressListItem,
   Project,
   ServicePort,
@@ -139,6 +141,10 @@ let volumesByProject: Record<string, Volume[]> = {
 /** 見せかけの、追加のホスト名(ingress の ID ごと)。追加するとすぐに有効になる。 */
 const mockDomainsByIngress: Record<string, IngressDomain[]> = {}
 const MOCK_BASE_DOMAIN = "launchs.org"
+/** 見せかけの、Google Drive の接続(アカウントに 1 つ)。 */
+let mockGoogleDrive: GoogleDriveStatus = { available: true, connected: false, accountEmail: "", status: "", lastError: "" }
+/** 見せかけの、アクセスログの転送(ingress の ID ごと)。 */
+const mockLogExportsByIngress: Record<string, LogExport[]> = {}
 let ingressesByProject: Record<string, IngressDetail[]> = {
   prj_northstar: [
     {
@@ -406,7 +412,18 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
       }
     }
   } else if (segments[0] === "api" && segments[1] === "v1") {
-    if (segments[2] === "quota") {
+    if (segments[2] === "account" && segments[3] === "google-drive") {
+      if (segments.length === 4 && method === "GET") result = clone(mockGoogleDrive)
+      else if (segments[4] === "authorize" && method === "POST") {
+        // 同意の画面は出さず、すぐにつながったことにして、画面に戻す URL を返す。
+        mockGoogleDrive = { available: true, connected: true, accountEmail: "demo@example.com", status: "active", lastError: "" }
+        result = { url: "/?google=connected" }
+      } else if (segments.length === 4 && method === "DELETE") {
+        mockGoogleDrive = { available: true, connected: false, accountEmail: "", status: "", lastError: "" }
+        for (const list of Object.values(mockLogExportsByIngress)) for (let index = list.length - 1; index >= 0; index--) if (list[index].kind === "google_drive") list.splice(index, 1)
+        result = {}
+      }
+    } else if (segments[2] === "quota") {
       const allVolumes = Object.values(volumesByProject).flat()
       const volumeUsed = allVolumes.reduce((sum, volume) => sum + volume.sizeMB, 0)
       result = {
@@ -545,6 +562,41 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
           } else if (segments.length === 6 && method === "PATCH") {
             ingress.accessStats = Boolean(payload.accessStats)
             result = clone(ingress)
+          } else if (segments[6] === "log-exports") {
+            const exportsList = (mockLogExportsByIngress[ingress.ingressId] ??= [])
+            if (segments.length === 7 && method === "GET") result = { logExports: clone(exportsList) }
+            else if (segments.length === 7 && method === "POST") {
+              const kind = String(payload.kind ?? "")
+              if (Object.values(mockLogExportsByIngress).flat().length >= 10) throw new Error("転送の設定は、1 つのアカウントで 10 個までです")
+              const created: LogExport = { logExportId: newId("export"), kind: kind as LogExport["kind"], enabled: true, status: "active", lastSuccessAt: null, lastError: "", failureCount: 0, createdAt: now() }
+              if (kind === "webhook") {
+                const targetUrl = String(payload.url ?? "")
+                if (!/^https:\/\/[^/\s]+/.test(targetUrl)) throw new Error("URL は、https:// で始めてください")
+                created.url = targetUrl.replace(/\?.*$/, targetUrl.includes("?") ? "?…" : "")
+                created.intervalSeconds = Number(payload.intervalSeconds ?? 30)
+                exportsList.push(created)
+                result = { ...clone(created), secret: `whsec_${newId("s")}${newId("s")}` }
+              } else if (kind === "google_drive") {
+                if (!mockGoogleDrive.connected) throw new Error("先に、アカウント設定で、Google Drive に接続してください")
+                if (exportsList.some((item) => item.kind === "google_drive")) throw new Error("この ingress には、すでに Google Drive への転送があります")
+                exportsList.push(created)
+                result = clone(created)
+              } else throw new Error("kind は、webhook か google_drive にしてください")
+            } else {
+              const target = exportsList.find((item) => item.logExportId === segments[7])
+              if (!target) throw new Error("転送の設定が見つかりません")
+              if (segments.length === 8 && method === "PATCH") {
+                if (payload.enabled !== undefined) target.enabled = Boolean(payload.enabled)
+                if (payload.intervalSeconds !== undefined) target.intervalSeconds = Number(payload.intervalSeconds)
+                result = clone(target)
+              } else if (segments.length === 8 && method === "DELETE") {
+                mockLogExportsByIngress[ingress.ingressId] = exportsList.filter((item) => item.logExportId !== target.logExportId)
+                result = {}
+              } else if (segments[8] === "test" && method === "POST") {
+                target.lastSuccessAt = now()
+                result = { ok: true, message: "" }
+              }
+            }
           } else if (segments[6] === "domains") {
             const domains = (mockDomainsByIngress[ingress.ingressId] ??= [])
             if (segments.length === 7 && method === "GET") result = { baseDomain: MOCK_BASE_DOMAIN, domains: clone(domains) }
