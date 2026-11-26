@@ -228,7 +228,7 @@ services:
       ACCESS_STATS_KEEP_CLIENTS: ${ACCESS_STATS_KEEP_CLIENTS:-true}
       # アクセスログを残す期間と、ingress ごとの行数の上限。
       ACCESS_LOG_RETENTION: ${ACCESS_LOG_RETENTION:-24h}
-      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-5000}
+      ACCESS_LOG_MAX_ROWS: ${ACCESS_LOG_MAX_ROWS:-10000}
       # 既定では k8s につながず、何も集めない。つなぐときは、docker-compose.kubernetes.yaml を重ねる。
       KUBERNETES_ACCESS: none
     volumes:

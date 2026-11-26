@@ -29,7 +29,7 @@ const (
 
 	// defaultLogRetention と defaultLogMaxRows は、アクセスログを残す期間と、ingress ごとの行数の上限の既定。
 	defaultLogRetention = 24 * time.Hour
-	defaultLogMaxRows   = 5000
+	defaultLogMaxRows   = 10000
 )
 
 // AccessStatsConfig は、accessstats の設定。
@@ -62,7 +62,7 @@ type AccessStatsConfig struct {
 	// LogRetention は、アクセスログを残す期間(環境変数 ACCESS_LOG_RETENTION。既定 24 時間)。
 	LogRetention time.Duration
 
-	// LogMaxRows は、ingress ごとに残すアクセスログの最大の行数(環境変数 ACCESS_LOG_MAX_ROWS。既定 5000)。
+	// LogMaxRows は、ingress ごとに残すアクセスログの最大の行数(環境変数 ACCESS_LOG_MAX_ROWS。既定 10000)。
 	LogMaxRows int
 }
 

@@ -149,7 +149,7 @@ accessstats(新しいコンテナ)──(k8s の API で、ログを読む)─�
 ## 13. アクセスログ(1 リクエストごと。2026-11-18 に追加)
 「アクセスの集計」だけでは、1 つずつのリクエストが見えないため、アクセスログを足した。
 - **プラグイン**: 出力の間隔の既定を、60 秒から **10 秒**に縮め(worker が作る Middleware も 10 秒)、出力の行に、`requests`(`t` ミリ秒の時刻、`m` メソッド、`u` パスとクエリ、`s` ステータス、`d` ミリ秒、`ip`、`b` バイト)を足した。**クエリ文字列も、落とさない**。1 回の出力に入れるのは、最大 200 件(`requestsDropped` に、超えた数)。URL は 1000 バイトまで。メモリは、上限で頭打ち。
-- **保存**: `ingress_access_logs`(1 リクエストにつき 1 行)。`(ingress_id, replica, batch_start, seq)` が一意で、同じ出力を読み直しても、二重にならない。accessstats が、保存期間(`ACCESS_LOG_RETENTION`。既定 24 時間)と、ingress ごとの行数(`ACCESS_LOG_MAX_ROWS`。既定 5000)で、1 分ごとに削除する。集計の行(`ingress_access_minutes`)は、出力の間隔が短くなったので、行が増える(区間の始まりの時刻は、そろえていない。API が、1 分ごとなどに足し合わせる)。
+- **保存**: `ingress_access_logs`(1 リクエストにつき 1 行)。`(ingress_id, replica, batch_start, seq)` が一意で、同じ出力を読み直しても、二重にならない。accessstats が、保存期間(`ACCESS_LOG_RETENTION`。既定 24 時間)と、ingress ごとの行数(`ACCESS_LOG_MAX_ROWS`。既定 10000)で、1 分ごとに削除する。集計の行(`ingress_access_minutes`)は、出力の間隔が短くなったので、行が増える(区間の始まりの時刻は、そろえていない。API が、1 分ごとなどに足し合わせる)。
 - **API**: `GET .../ingresses/:ingressId/access-logs`(`dev-docs/endpoints/ingresses.md`)。
 - **画面**: ingress パネルの「アクセスログ」は、**表だけ**(グラフは無し)。列は、日時、メソッド、パス(URL)、ステータス、時間、IP、サイズ。日時の範囲、パス(URL に含まれる文字)、IP、ステータス、メソッドで絞り込める。「更新」ボタンと、自動更新(5 秒。切り替えられる)、「記録する」(有効・無効)、「さらに読み込む」(古い分)。集計の API(`access-stats`)は、画面からは使わなくなったが、残している。
 - **取りこぼし**: 反映(Middleware が付く)の前のアクセスは、記録されない。WebSocket などは、接続の開始だけ(ステータス 0)。
