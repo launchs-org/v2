@@ -81,7 +81,10 @@ jobs:
 
       # データベースを使うテストが、飛ばされずに実行されることを、-v の出力で確認する。
       - name: テスト
-        run: go test -v ./... | tee test-output.txt
+        # パイプの途中の go test が失敗したときに、ステップも失敗させる(pipefail。無いと、tee の終了コードで、緑になってしまう)。
+        run: |
+          set -o pipefail
+          go test -v ./... | tee test-output.txt
 
       - name: データベースのテストが飛ばされていないか確認する
         run: |
