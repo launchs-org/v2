@@ -41,7 +41,7 @@ main に入れる → GitHub Actions が、テストを通して、イメージ�
 
 ## 3. リリースの手順(通常の更新)
 1. **更新する内容を確認する**: マージされた PR に、**マイグレーションの追加**(`migrations/…`)や、**環境変数・RBAC の変更**(`deploy/` の差分)が、あるかを見ます。ある場合は、§3.2 も読みます。
-2. **イメージが出ていることを確認する**: GitHub Actions の `release` が、成功していて、`ghcr.io/launchs-org/v2/<名前>:sha-<短い SHA>` が、8 つ(backend、worker、watcher、auth、logcollector、accessstats、frontend、migrate)ともあること。
+2. **イメージが出ていることを確認する**: GitHub Actions の `release` が、成功していて、`ghcr.io/launchs-org/v2/<名前>:sha-<短い SHA>` が、10 個(backend、worker、watcher、auth、logcollector、accessstats、exporter、admin、frontend、migrate)ともあること。
 3. **バックアップを取る**(§5)。**マイグレーションがある更新は、必ず**取ります。
 4. **タグを取り込む**: `release` が成功すると、CI が、`deploy/kustomization.yaml` の `images` の、**8 つ全部**の `newTag` を、今回の `sha-…` に書き換えて、`main` に、`deploy: イメージのタグを sha-… に更新する` というコミットを、自動で入れます(§3.3)。**`git pull` で、このコミットを取り込みます**。手元のコピーで運用しているときは、`kustomization.yaml` の `newTag` を、同じ `sha-…` に、8 つ全部書き換えます(1 つでも古いと、アプリとマイグレーションの版が、食い違います)。
 5. **差分を見る**:
@@ -67,7 +67,7 @@ main に入れる → GitHub Actions が、テストを通して、イメージ�
 9. **記録する**: どの `sha-…` を、いつ、適用したかを、控えます(戻すときに、使います)。
 
 ### 3.3 タグの自動更新(CI)
-- **しくみ**: `.github/workflows/release.yml` の `update-tags` ジョブが、8 つのイメージが、全部出たあとで、`.github/scripts/update-image-tags.sh` を使って、`newTag` を書き換え、`main` にコミットします(`github-actions[bot]`)。**クラスターには、適用しません**(オンプレで、GitHub のランナーから届かないため)。
+- **しくみ**: `.github/workflows/release.yml` の `update-tags` ジョブが、10 個のイメージが、全部出たあとで、`.github/scripts/update-image-tags.sh` を使って、`newTag` を書き換え、`main` にコミットします(`github-actions[bot]`)。**クラスターには、適用しません**(オンプレで、GitHub のランナーから届かないため)。
 - **無限ループにならない**: `GITHUB_TOKEN` での push は、新しいワークフローを起こさないので、このコミットで、`release` は、もう一度動きません。
 - **`main` への直接 push**: ブランチ保護で、直接 push が禁止されていると、このジョブは、失敗します(その場合は、ブランチ保護の例外に、`github-actions[bot]` を足すか、PR を作る方式に、替えます)。
 - **失敗したとき**: ジョブが失敗しても、イメージは、すでに出ています。`gh workflow run release.yml` で、やり直すか、手で、`newTag` を書き換えます。
@@ -77,7 +77,7 @@ main に入れる → GitHub Actions が、テストを通して、イメージ�
 ### 3.1 `latest` タグで運用しているとき
 `newTag: latest` のままだと、マニフェストが変わらないので、`kubectl apply -k .` では、Pod が、入れ替わりません。新しいイメージを使うには、次のようにします。
 ```sh
-kubectl -n launchs rollout restart deploy/backend deploy/auth deploy/worker deploy/watcher deploy/logcollector deploy/accessstats deploy/frontend
+kubectl -n launchs rollout restart deploy/backend deploy/auth deploy/worker deploy/watcher deploy/logcollector deploy/accessstats deploy/exporter deploy/frontend
 ```
 ただし、**どの版が動いているかが、分からなくなる**ので、本番では、`sha-…` で、固定してください。
 
@@ -133,7 +133,7 @@ Longhorn の画面(または `kubectl`)で、PostgreSQL の PVC(`data-postgres-0
 **データを上書きします。** 復元の前に、アプリを止めます。
 ```sh
 # 1. アプリを止める(データベースに、つながないようにする)
-kubectl -n launchs scale deploy/backend deploy/auth deploy/worker deploy/watcher deploy/logcollector deploy/accessstats --replicas=0
+kubectl -n launchs scale deploy/backend deploy/auth deploy/worker deploy/watcher deploy/logcollector deploy/accessstats deploy/exporter --replicas=0
 
 # 2. 復元する(--clean で、既存のものを消してから)
 kubectl -n launchs exec -i postgres-0 -- pg_restore -U postgres -d app --clean --if-exists --no-owner < backup-app-<日時>.dump
@@ -187,3 +187,17 @@ for DB in app auth temporal temporal_visibility; do
   kubectl -n launchs exec postgres-0 -- psql -U postgres -c "CREATE DATABASE $DB"
 done
 ```
+
+## アクセスログの転送(exporter)を有効にする
+
+アクセスログを、webhook や Google Drive に書き出す機能(`dev-docs/log-export.md`)は、**Secret `launchs-secret` に、次の値を足して、backend と exporter を再起動する**と、有効になります(**無くても、Pod は起動します**。そのときは、機能が無効です)。
+
+| キー | 中身 | 無いと |
+|---|---|---|
+| `EXPORT_CREDENTIAL_KEY` | 秘密(Google の合鍵、webhook の署名の秘密)を DB に暗号化して保存する鍵。`openssl rand -base64 32` | **転送の機能が、全部無効**(作る・テストは 503) |
+| `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET` | Google Cloud の OAuth クライアント(種類は Web アプリ) | **Google Drive だけ**が無効(webhook は使える) |
+
+- **`EXPORT_CREDENTIAL_KEY` は、変えない**。変えると、保存済みの秘密を復号できなくなり、Google の再接続と、webhook の作り直しが、全員に要ります。バックアップして、保管してください。
+- Google Cloud 側: OAuth クライアントのリダイレクト URI に `https://<LAUNCHS_HOST>/api/v1/export/google/callback` を登録します。同意の画面は**「本番」に公開**します(「テスト」のままだと、合鍵が **7 日で切れます**。`drive.file` は審査の軽い権限です)。戻り先を変えるときは、`GOOGLE_OAUTH_REDIRECT_URL`(ConfigMap か Secret)。
+- exporter は、外向きの HTTPS(webhook の宛先と、Google の API)に接続します。`launchs` の namespace から、外へ出られることを確認してください。
+- 確認: `kubectl -n launchs logs deploy/exporter` に「exporter を起動する」と出て、リーダーになったものが 1 つあること。`EXPORT_CREDENTIAL_KEY` が空だと、「エクスポートは無効です」と出て、待機します。

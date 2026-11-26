@@ -69,6 +69,17 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
+  name: exporter
+  namespace: launchs
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: exporter
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
   name: frontend
   namespace: launchs
 spec:
