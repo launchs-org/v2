@@ -18,7 +18,7 @@ func TestTemplateAPI(testingT *testing.T) {
 		if statusCode != http.StatusOK || len(templates) != 17 {
 			subTest.Fatalf("200 で、17 個のはず: %d %v", statusCode, responseBody)
 		}
-		// id で引けるようにし、並びは、id の順(code-server、mariadb、nginx、postgres、redis、wordpress)になっていることを確かめる。
+		// id で引けるようにし、並びは、id の順(cloudbeaver、code-server、…、wordpress)になっていることを確かめる。
 		byID := map[string]map[string]any{}
 		ids := make([]string, 0, len(templates))
 		for _, raw := range templates {
@@ -30,7 +30,7 @@ func TestTemplateAPI(testingT *testing.T) {
 				subTest.Errorf("%s: resources は返さないはず", item["id"])
 			}
 		}
-		if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
+		if strings.Join(ids, ",") != "cloudbeaver,code-server,excalidraw,gitea,grafana,hello-world,mailpit,mariadb,memos,n8n,nginx,postgres,redash,redis,uptime-kuma,vaultwarden,wordpress" {
 			subTest.Errorf("id の順のはず: %v", ids)
 		}
 		// 要約: postgres は deploy 1・volume 1・ingress なし・ファイル 1、nginx は ingress あり、code-server は volume と ingress あり。
