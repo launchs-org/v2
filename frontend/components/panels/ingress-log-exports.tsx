@@ -123,7 +123,7 @@ export function IngressLogExports({ basePath, locked, notify }: { basePath: stri
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <b>{item.kind === "google_drive" ? "Google Drive" : "webhook"}</b>
               {item.kind === "webhook" && <span className="mono grow" style={{ overflowWrap: "anywhere", fontSize: 12.5 }}>{item.url}</span>}
-              {item.kind === "google_drive" && <span className="grow faint" style={{ fontSize: 12.5 }}>launchs-access-logs / プロジェクト名 / ホスト名_日付.ndjson(1 時間ごと)</span>}
+              {item.kind === "google_drive" && <span className="grow" />}
               <span className={`badge ${view.badge}`}><i />{view.label}</span>
               <button className="btn sm" type="button" disabled={locked || busy !== ""} onClick={() => void test(item)}>{busy === item.logExportId ? "処理中…" : "テスト送信"}</button>
               <button className="btn sm" type="button" disabled={locked || busy !== ""} onClick={() => void toggle(item)}>{item.enabled ? "停止する" : "再開する"}</button>
@@ -131,6 +131,7 @@ export function IngressLogExports({ basePath, locked, notify }: { basePath: stri
             </div>
             <div className="faint" style={{ fontSize: 12 }}>
               {item.kind === "webhook" && item.intervalSeconds ? `${INTERVAL_CHOICES.find((choice) => choice.value === item.intervalSeconds)?.label ?? `${item.intervalSeconds} 秒ごと`} · ` : ""}
+              {item.kind === "google_drive" ? "launchs-access-logs / プロジェクト名 / ホスト名_日付.ndjson に、1 時間ごと · " : ""}
               {item.lastSuccessAt ? `最後に送れた日時: ${shortDateTime(item.lastSuccessAt)}` : "まだ送れていません"}
               {item.failureCount > 0 ? ` · 失敗が ${item.failureCount} 回続いています` : ""}
             </div>

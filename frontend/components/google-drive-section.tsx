@@ -32,6 +32,13 @@ export function GoogleDriveSection({ refreshInterval }: { refreshInterval: numbe
   const [confirming, setConfirming] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
 
+  // 同意の画面から「戻る」で戻ってきたとき(ブラウザが、ページを使い回すとき)に、処理中のまま固まらないようにする。
+  useEffect(() => {
+    const release = () => setBusy(false)
+    window.addEventListener("pageshow", release)
+    return () => window.removeEventListener("pageshow", release)
+  }, [])
+
   // Google から戻ってきた結果を、知らせる(知らせたら、URL から消す)。
   useEffect(() => {
     const result = new URLSearchParams(window.location.search).get("google")
@@ -49,6 +56,8 @@ export function GoogleDriveSection({ refreshInterval }: { refreshInterval: numbe
     try {
       const result = await api.post<{ url: string }>("/api/v1/account/google-drive/authorize")
       window.location.href = result.url
+      // 同じ画面の中の移動(見せかけのモード)では、画面が開き直らないので、処理中を戻す。
+      if (result.url.startsWith("#")) setBusy(false)
     } catch (connectError) {
       setToast({ message: connectError instanceof Error ? connectError.message : "接続を始められませんでした", type: "error" })
       setBusy(false)

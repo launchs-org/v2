@@ -402,22 +402,22 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
     else if (segments[1] === "password" && method === "POST") result = { token: "mock-refresh-token" }
     else if (segments[1] === "logout") result = undefined
     else if (segments[1] === "login-history") {
+      // 本物の API と同じ形(events。種類、結果、理由、IP、ブラウザ、日時)にする。
       result = {
-        history: [
-          { historyId: "hist_current", ip: "127.0.0.1", userAgent: "Local preview · Demo session", createdAt: now() },
-          { historyId: "hist_previous", ip: "192.0.2.24", userAgent: "Chrome · macOS", createdAt: "2026-11-15T08:34:00.000Z" },
-          { historyId: "hist_older", ip: "192.0.2.24", userAgent: "Chrome · macOS", createdAt: "2026-11-12T16:10:00.000Z" },
+        events: [
+          { kind: "login", result: "success", reason: null, ip: "127.0.0.1", userAgent: "Local preview · Demo session", at: now() },
+          { kind: "login", result: "failure", reason: "wrong_password", ip: "192.0.2.24", userAgent: "Chrome · macOS", at: "2026-11-15T08:30:00.000Z" },
+          { kind: "login", result: "success", reason: null, ip: "192.0.2.24", userAgent: "Chrome · macOS", at: "2026-11-12T16:10:00.000Z" },
         ],
-        nextCursor: null,
       }
     }
   } else if (segments[0] === "api" && segments[1] === "v1") {
     if (segments[2] === "account" && segments[3] === "google-drive") {
       if (segments.length === 4 && method === "GET") result = clone(mockGoogleDrive)
       else if (segments[4] === "authorize" && method === "POST") {
-        // 同意の画面は出さず、すぐにつながったことにして、画面に戻す URL を返す。
+        // 同意の画面は出さず、すぐにつながったことにする(同じ画面の中の移動にして、見せかけの状態と、ログインを保つ)。
         mockGoogleDrive = { available: true, connected: true, accountEmail: "demo@example.com", status: "active", lastError: "" }
-        result = { url: "/?google=connected" }
+        result = { url: "#google-drive" }
       } else if (segments.length === 4 && method === "DELETE") {
         mockGoogleDrive = { available: true, connected: false, accountEmail: "", status: "", lastError: "" }
         for (const list of Object.values(mockLogExportsByIngress)) for (let index = list.length - 1; index >= 0; index--) if (list[index].kind === "google_drive") list.splice(index, 1)
