@@ -29,14 +29,12 @@ type IngressDomainReader interface {
 	FindByID(requestContext context.Context, userID string, projectID string, ingressID string) (model.Ingress, error)
 }
 
-// IngressSubdomainPolicy は、利用者が選べるサブドメインの決まり(ベースドメインと、払い出さない名前)。
+// IngressSubdomainPolicy は、利用者が選べるサブドメインの決まり(ベースドメイン)。
 // ingresshost.Generator が実装する。
+// 名前の後ろには、固定の「-run」を付けるので、自分たちが使う名前(api、www など)とは、重ならない。予約語の検査は要らない。
 type IngressSubdomainPolicy interface {
 	// BaseDomain は、ホスト名の後ろに付くベースドメイン(例: launchs.org)を返す。
 	BaseDomain() string
-
-	// IsReserved は、サブドメインが、払い出さない名前(www、api など)かを返す。
-	IsReserved(subdomain string) bool
 }
 
 // IngressDomainService は、ingress の追加のホスト名(利用者が選ぶサブドメイン。追加、削除)の処理をまとめる。
@@ -106,7 +104,7 @@ func (ingressDomainService *IngressDomainService) List(requestContext context.Co
 	return ingress, domains, nil
 }
 
-// Add は、ingress に、利用者が選んだサブドメイン(<名前>.<ベースドメイン>)を追加し、すぐにルーティングに加える。
+// Add は、ingress に、利用者が選んだ名前のホスト名(<名前>-run.<ベースドメイン>)を追加し、すぐにルーティングに加える。
 // ベースドメインの下の名前は、ワイルドカードで、すでに Traefik に届くので、所有の確認は要らない。
 //
 // 引数:
@@ -114,10 +112,10 @@ func (ingressDomainService *IngressDomainService) List(requestContext context.Co
 //   - userID: 持ち主のユーザー ID。
 //   - projectID: プロジェクトの ID。
 //   - ingressID: ingress の ID。
-//   - rawSubdomain: 利用者が入力した名前(例: myapp。末尾に .<ベースドメイン> が付いていても、取り除く)。
+//   - rawSubdomain: 利用者が入力した名前(例: myapp → myapp-run.<ベースドメイン>)。ホスト名ごと貼り付けたとき(myapp-run.<ベースドメイン>)は、後ろの部分を取り除く。
 //
 // 戻り値:
-//   - 追加したホスト名と、ingress。形が不正、または払い出さない名前なら invalid_request。
+//   - 追加したホスト名と、ingress。形が不正なら invalid_request。
 //     削除中の ingress、上限、すでに使われている名前は conflict。IngressRoute の作り直しを始められなければ internal(このとき、追加は取り消す)。
 func (ingressDomainService *IngressDomainService) Add(requestContext context.Context, userID string, projectID string, ingressID string, rawSubdomain string) (model.IngressDomain, model.Ingress, error) {
 	// 決まり(ベースドメイン)が無ければ、追加できない。
@@ -125,13 +123,13 @@ func (ingressDomainService *IngressDomainService) Add(requestContext context.Con
 		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindInternal, "ベースドメインが設定されていません")
 	}
 	baseDomain := ingressDomainService.subdomainPolicy.BaseDomain()
-	// 名前を整えて、末尾のベースドメインを取り除き、形と、払い出さない名前かを確かめる。
-	subdomain := strings.TrimSuffix(model.NormalizeHostname(rawSubdomain), "."+baseDomain)
+	// 名前を整える。ホスト名ごと貼り付けられたときは、ベースドメインと、固定の後ろを取り除く。そのあと、形を確かめる。
+	subdomain := model.NormalizeHostname(rawSubdomain)
+	if strings.HasSuffix(subdomain, "."+baseDomain) {
+		subdomain = strings.TrimSuffix(strings.TrimSuffix(subdomain, "."+baseDomain), model.CustomSubdomainSuffix)
+	}
 	if validateError := model.ValidateSubdomain(subdomain); validateError != nil {
 		return model.IngressDomain{}, model.Ingress{}, validateError
-	}
-	if ingressDomainService.subdomainPolicy.IsReserved(subdomain) {
-		return model.IngressDomain{}, model.Ingress{}, apperror.New(apperror.KindInvalidRequest, "この名前は、予約されているので、使えません")
 	}
 	// ingress を読み、削除中でないことを確かめる。
 	ingress, findError := ingressDomainService.ingressReader.FindByID(requestContext, userID, projectID, ingressID)
@@ -147,7 +145,7 @@ func (ingressDomainService *IngressDomainService) Add(requestContext context.Con
 		return model.IngressDomain{}, model.Ingress{}, tokenError
 	}
 	verifiedAt := time.Now()
-	domain := model.IngressDomain{ID: model.IngressDomainIDPrefix + uuid.NewString(), IngressID: ingressID, Hostname: subdomain + "." + baseDomain, Token: token, VerifiedAt: &verifiedAt}
+	domain := model.IngressDomain{ID: model.IngressDomainIDPrefix + uuid.NewString(), IngressID: ingressID, Hostname: subdomain + model.CustomSubdomainSuffix + "." + baseDomain, Token: token, VerifiedAt: &verifiedAt}
 	if createError := ingressDomainService.domainStore.Create(requestContext, userID, projectID, &domain); createError != nil {
 		return model.IngressDomain{}, model.Ingress{}, createError
 	}

@@ -11,12 +11,12 @@
 
 ## 好きな名前のホスト名(サブドメイン)
 
-払い出されたホスト名のほかに、利用者が `<名前>.<ベースドメイン>` を選んで、ingress に足せる(1 つの ingress に 5 つまで)。仕様は [endpoints/ingresses.md](endpoints/ingresses.md)。
+払い出されたホスト名のほかに、利用者が `<名前>-run.<ベースドメイン>`(`-run` は、自動で付く固定の後ろ。`model.CustomSubdomainSuffix`)を選んで、ingress に足せる(1 つの ingress に 5 つまで)。仕様は [endpoints/ingresses.md](endpoints/ingresses.md)。
 
 - 表は `ingress_domains`(確認済みのホスト名は、全体で 1 つ。部分一意インデックス)。払い出された `ingresses.host` と同じ名前は、追加のトランザクションの中で拒否する。
 - `*.<ベースドメイン>` のワイルドカードが、すでに Traefik に届くので、**所有の確認は無く、追加するとすぐに有効**。worker は、IngressRoute の match を `(Host(払い出し) || Host(追加))` で作る(`worker/src/cluster/ingress_operator.go`)。
 - **外部のドメイン(CNAME で向けるもの)は、扱わない。** 本番は Cloudflare Tunnel なので、Cloudflare が、そのホスト名を知らないと、Traefik に届く前に Cloudflare が 404 を返す(Cloudflare for SaaS のカスタムホスト名の登録、または、トンネルの Public Hostname への追加が要る)。`token` と `verified_at` は、そのときの所有の確認のために残してある。
-- 既知の限界: 自動の払い出し(3 つの単語)が、先に取られた名前と、たまたま重なると、同じ Host の IngressRoute が 2 つできる(確率は、ほぼ無い)。
+- 固定の後ろ `-run` があるので、自分たちが使う名前(`api`、`www` など)や、自動の払い出し(形容詞-色-動物。`-run` で終わらない)とは、重ならない。払い出された `ingresses.host` と同じ名前も、念のため、追加のときに拒否する。
 
 ## Traefik とクラスターの用意(利用者がすること)
 

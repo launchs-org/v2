@@ -549,10 +549,9 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
             const domains = (mockDomainsByIngress[ingress.ingressId] ??= [])
             if (segments.length === 7 && method === "GET") result = { baseDomain: MOCK_BASE_DOMAIN, domains: clone(domains) }
             else if (segments.length === 7 && method === "POST") {
-              const subdomain = String(payload.subdomain ?? "").trim().toLowerCase().replace(`.${MOCK_BASE_DOMAIN}`, "")
-              if (subdomain.length < 3 || subdomain.length > 63 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomain)) throw new Error("名前は、3 文字以上 63 文字以内の、小文字の英数字とハイフン(先頭と末尾はハイフン以外)で入力してください")
-              if (["www", "api", "auth", "admin"].includes(subdomain)) throw new Error("この名前は、予約されているので、使えません")
-              const hostname = `${subdomain}.${MOCK_BASE_DOMAIN}`
+              const subdomain = String(payload.subdomain ?? "").trim().toLowerCase().replace(new RegExp(`(-run)?\\.${MOCK_BASE_DOMAIN.replace(".", "\\.")}$`), "")
+              if (subdomain.length < 3 || subdomain.length > 59 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomain)) throw new Error("名前は、3 文字以上 59 文字以内の、小文字の英数字とハイフン(先頭と末尾はハイフン以外)で入力してください")
+              const hostname = `${subdomain}-run.${MOCK_BASE_DOMAIN}`
               if (hostname === ingress.host || Object.values(mockDomainsByIngress).some((list) => list.some((item) => item.hostname === hostname))) throw new Error("この名前は、すでに使われています")
               if (domains.length >= 5) throw new Error("1 つの ingress に付けられるホスト名は、5 つまでです")
               const domain: IngressDomain = { domainId: newId("domain"), hostname, status: "verified", verifiedAt: now() }

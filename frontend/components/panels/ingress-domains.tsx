@@ -8,10 +8,13 @@ import type { IngressDomain } from "@/lib/types"
 /** 1 つの ingress に付けられる、追加のホスト名の数の上限(サーバーと同じ)。 */
 const MAX_DOMAINS = 5
 
+/** 入力した名前の後ろに、必ず付く固定の文字列(サーバーと同じ。api、www など、こちらで使う名前と重ならないようにするため)。 */
+const NAME_SUFFIX = "-run"
+
 /**
  * ingress の「好きな名前のホスト名」のカード(追加、一覧、削除)。
  *
- * 払い出されたホスト名(例: sunny-jade-cat.launchs.org)のほかに、<好きな名前>.<ベースドメイン> でも、
+ * 払い出されたホスト名(例: sunny-jade-cat.launchs.org)のほかに、<好きな名前>-run.<ベースドメイン> でも、
  * この ingress を開けるようにする。ベースドメインの下の名前は、すぐに有効になる(DNS の設定は要らない)。
  * 自分のドメイン(外部のドメイン)は、まだ使えない。
  *
@@ -63,7 +66,7 @@ export function IngressDomains({ basePath, locked, notify }: { basePath: string;
     <div className="card" style={{ overflow: "hidden" }}>
       <div className="row pad" style={{ paddingBottom: 4 }}><h2 className="h2 grow">好きな名前のホスト名</h2><span className="faint" style={{ fontSize: 12.5 }}>{domains.length} / {MAX_DOMAINS}</span></div>
       <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 10px" }}>
-        払い出されたホスト名のほかに、好きな名前({baseDomain ? `例: myapp.${baseDomain}` : "例: myapp"})でも、この ingress を開けるようにします。追加すると、すぐに使えます。
+        払い出されたホスト名のほかに、好きな名前({baseDomain ? `例: myapp${NAME_SUFFIX}.${baseDomain}` : "例: myapp"})でも、この ingress を開けるようにします。追加すると、すぐに使えます。
         自分のドメイン(example.com など)は、まだ使えません。
       </div>
       {error && !data && <div className="tr mut" style={{ ["--cols" as string]: "1fr" }}>ホスト名を取得できませんでした。</div>}
@@ -77,11 +80,11 @@ export function IngressDomains({ basePath, locked, notify }: { basePath: string;
       ))}
       <div className="row" style={{ padding: "12px 18px 14px", borderTop: "1px solid var(--line)", gap: 8 }}>
         <input className="inp mono grow" value={subdomain} onChange={(event) => setSubdomain(event.target.value.toLowerCase())} onKeyDown={(event) => { if (event.key === "Enter") void add() }}
-          placeholder="myapp" aria-label="追加する名前" maxLength={63} disabled={locked || domains.length >= MAX_DOMAINS} />
-        {baseDomain && <span className="mono mut">.{baseDomain}</span>}
+          placeholder="myapp" aria-label="追加する名前" maxLength={59} disabled={locked || domains.length >= MAX_DOMAINS} />
+        <span className="mono mut" style={{ whiteSpace: "nowrap" }}>{NAME_SUFFIX}{baseDomain && `.${baseDomain}`}</span>
         <button className="btn sm primary" type="button" disabled={locked || busy !== "" || !subdomain.trim() || domains.length >= MAX_DOMAINS} onClick={() => void add()}>追加</button>
       </div>
-      <div className="faint" style={{ fontSize: 12, padding: "0 18px 12px" }}>名前は、3〜63 文字の、小文字の英数字とハイフンです。ほかの人が使っている名前や、予約された名前(www、api など)は、使えません。</div>
+      <div className="faint" style={{ fontSize: 12, padding: "0 18px 12px" }}>名前は、3〜59 文字の、小文字の英数字とハイフンです。後ろには、自動で「-run」が付きます。ほかの人が使っている名前は、使えません。</div>
     </div>
   )
 }

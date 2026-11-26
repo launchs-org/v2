@@ -286,7 +286,7 @@
 {
   "baseDomain": "launchs.org",
   "domains": [
-    {"domainId": "domain-<uuid>", "hostname": "myapp.launchs.org", "status": "verified", "verifiedAt": "2026-11-24T05:00:00Z"}
+    {"domainId": "domain-<uuid>", "hostname": "myapp-run.launchs.org", "status": "verified", "verifiedAt": "2026-11-24T05:00:00Z"}
   ]
 }
 ```
@@ -303,8 +303,8 @@
 ```json
 {"subdomain": "myapp"}
 ```
-- Response (201): 一覧の 1 件と同じ形。`hostname` は `<subdomain>.<baseDomain>`
-- Note: `subdomain` は、前後の空白と大文字を整え、末尾に `.<baseDomain>` が付いていれば取り除く。3〜63 文字の、小文字の英数字とハイフン(先頭と末尾はハイフン以外。`xn--` で始まるものは不可)。ドットを含む(外部のドメインを含む)もの、`INGRESS_RESERVED_SUBDOMAINS` の名前は 400
+- Response (201): 一覧の 1 件と同じ形。`hostname` は `<subdomain>-run.<baseDomain>`
+- Note: `subdomain` は、前後の空白と大文字を整える。ホスト名ごと貼り付けられたとき(`.<baseDomain>` で終わるとき)は、`.<baseDomain>` と、後ろの `-run` を取り除く。3〜59 文字の、小文字の英数字とハイフン(先頭と末尾はハイフン以外。`xn--` で始まるものは不可)。ドットを含む(外部のドメインを含む)ものは 400。**保存するホスト名は、必ず `<subdomain>-run.<baseDomain>`**(定数 `model.CustomSubdomainSuffix`)。自分たちが使う名前(`api`、`www`、`auth` など)や、払い出しの名前(形容詞-色-動物)は、`-run` で終わらないので、決して重ならない。このため、予約語の検査は無い
 - Note: **追加すると、すぐに有効**(DNS の確認は無い。`*.<baseDomain>` のワイルドカードが、すでに Traefik に届くため)。反映済みのルールがあれば、IngressRoute の作り直し(`StartRouteReapply`)を始める。始められなければ 500 で、追加は取り消す
 - Note: 他の ingress(払い出された `host` を含む)が使っている名前は 409。1 つの ingress に 5 つまで(超えると 409)。削除中の ingress は 409
 - Note: IngressRoute の match は `(Host(払い出された名前) || Host(追加した名前)) && PathPrefix(...)` になる(追加した名前が無ければ、従来どおり)

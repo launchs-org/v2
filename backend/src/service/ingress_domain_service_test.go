@@ -81,14 +81,11 @@ func (starter *fakeReapplyStarter) StartIngressDeletion(_ context.Context, _ str
 	return nil
 }
 
-// fakeSubdomainPolicy は、テスト用の IngressSubdomainPolicy(ベースドメインは shconn.org、予約語は www と api)。
+// fakeSubdomainPolicy は、テスト用の IngressSubdomainPolicy(ベースドメインは shconn.org)。
 type fakeSubdomainPolicy struct{}
 
 // BaseDomain は、テスト用のベースドメインを返す。
 func (fakeSubdomainPolicy) BaseDomain() string { return "shconn.org" }
-
-// IsReserved は、www と api を予約語として扱う。
-func (fakeSubdomainPolicy) IsReserved(subdomain string) bool { return subdomain == "www" || subdomain == "api" }
 
 // newTestDomainService は、テスト用の service と、差し替えたものを返す。
 func newTestDomainService(ingress model.Ingress) (*IngressDomainService, *fakeDomainStore, *fakeReapplyStarter) {
@@ -104,16 +101,20 @@ func TestIngressDomainServiceAdd(testingT *testing.T) {
 	service, store, starter := newTestDomainService(routed)
 	// 整えて保存され、すぐに有効になり、ルーティングの作り直しが頼まれる。
 	domain, _, addError := service.Add(ctx, "user-a", "project-1", "ingress-1", " MyApp ")
-	if addError != nil || domain.Hostname != "myapp.shconn.org" || !store.domain.IsVerified() || starter.reapplied != 1 {
+	if addError != nil || domain.Hostname != "myapp-run.shconn.org" || !store.domain.IsVerified() || starter.reapplied != 1 {
 		testingT.Fatalf("整えて追加でき、すぐに有効になるはず: %v %+v 作り直し=%d", addError, domain, starter.reapplied)
 	}
-	// 末尾に、ベースドメインが付いていても、受け付ける。
-	if suffixed, _, suffixError := service.Add(ctx, "user-a", "project-1", "ingress-1", "other.shconn.org"); suffixError != nil || suffixed.Hostname != "other.shconn.org" {
-		testingT.Errorf("ベースドメイン付きでも追加できるはず: %v %+v", suffixError, suffixed)
+	// ホスト名ごと貼り付けても、固定の後ろは、重ねて付かない。
+	if pasted, _, pasteError := service.Add(ctx, "user-a", "project-1", "ingress-1", "other-run.shconn.org"); pasteError != nil || pasted.Hostname != "other-run.shconn.org" {
+		testingT.Errorf("ホスト名ごと貼り付けても追加できるはず: %v %+v", pasteError, pasted)
 	}
-	// 形が不正なもの(ドット入り、外部のドメイン、短い、日本語)と、予約語は、拒否する。
+	// api や www も、固定の後ろが付くので、追加できる(自分たちの api.、www. とは重ならない)。
+	if reserved, _, reservedError := service.Add(ctx, "user-a", "project-1", "ingress-1", "api"); reservedError != nil || reserved.Hostname != "api-run.shconn.org" {
+		testingT.Errorf("api も、api-run として追加できるはず: %v %+v", reservedError, reserved)
+	}
+	// 形が不正なもの(ドット入り、外部のドメイン、短い、日本語)は、拒否する。
 	var appError *apperror.Error
-	for _, invalid := range []string{"a.b", "app.example.com", "ab", "あいう", "My_App", "www", "api", ""} {
+	for _, invalid := range []string{"a.b", "app.example.com", "ab", "あいう", "My_App", ""} {
 		if _, _, invalidError := service.Add(ctx, "user-a", "project-1", "ingress-1", invalid); !errors.As(invalidError, &appError) || appError.Kind != apperror.KindInvalidRequest {
 			testingT.Errorf("%q は invalid_request のはず: %v", invalid, invalidError)
 		}

@@ -8,14 +8,14 @@ import (
 // TestValidateSubdomain は、サブドメインとして、受け付ける形と、受け付けない形を確かめる。
 func TestValidateSubdomain(testingT *testing.T) {
 	// 受け付ける形。
-	for _, valid := range []string{"myapp", "my-app", "app2", "abc", "a-b-c", strings.Repeat("a", 63)} {
+	for _, valid := range []string{"myapp", "my-app", "app2", "abc", "a-b-c", strings.Repeat("a", 59)} {
 		if validateError := ValidateSubdomain(valid); validateError != nil {
 			testingT.Errorf("%q は受け付けるはず: %v", valid, validateError)
 		}
 	}
 	// 受け付けない形。
 	for name, invalid := range map[string]string{
-		"空": "", "短い": "ab", "長い": strings.Repeat("a", 64), "ドット": "a.b.c", "大文字": "MyApp", "先頭のハイフン": "-app",
+		"空": "", "短い": "ab", "長い": strings.Repeat("a", 60), "ドット": "a.b.c", "大文字": "MyApp", "先頭のハイフン": "-app",
 		"末尾のハイフン": "app-", "アンダースコア": "my_app", "ワイルドカード": "*app", "引用符": "a`b", "空白": "a b",
 		"日本語": "あいう", "punycode": "xn--eckwd4c7c",
 	} {

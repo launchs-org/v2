@@ -80,11 +80,6 @@ func (generator *fakeHostGenerator) Generate() (string, error) {
 // BaseDomain は、テスト用のベースドメインを返す(利用者が選ぶサブドメインの試験に使う)。
 func (generator *fakeHostGenerator) BaseDomain() string { return "launchs.org" }
 
-// IsReserved は、www と api を予約語として扱う。
-func (generator *fakeHostGenerator) IsReserved(subdomain string) bool {
-	return subdomain == "www" || subdomain == "api"
-}
-
 // ingressTestEnvironment は、ingress の API のテストに必要なものの一式。
 type ingressTestEnvironment struct {
 	database    *gorm.DB

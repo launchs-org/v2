@@ -17,10 +17,14 @@ const (
 	// MaxIngressDomains は、1 つの ingress に付けられるカスタムドメインの数の上限。
 	MaxIngressDomains = 5
 
-	// MinSubdomainLength と MaxSubdomainLength は、利用者が選ぶサブドメイン(1 つ目のラベル)の長さの範囲。
-	// 上限は、DNS のラベルの上限(63 文字)。
+	// CustomSubdomainSuffix は、利用者が選んだ名前の後ろに、必ず付ける固定の文字列(myapp → myapp-run)。
+	// 自分たちが使う名前(api、www、auth など)や、払い出しの名前(形容詞-色-動物)と、決して重ならないようにするため。
+	CustomSubdomainSuffix = "-run"
+
+	// MinSubdomainLength と MaxSubdomainLength は、利用者が入力する名前(固定の後ろを除く)の長さの範囲。
+	// 上限は、DNS のラベルの上限(63 文字)から、固定の後ろの長さを引いたもの。
 	MinSubdomainLength = 3
-	MaxSubdomainLength = 63
+	MaxSubdomainLength = 63 - len(CustomSubdomainSuffix)
 )
 
 // subdomainPattern は、サブドメインの形(小文字の英数字とハイフン。先頭と末尾はハイフンでない)。
@@ -93,17 +97,17 @@ func NormalizeHostname(raw string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 }
 
-// ValidateSubdomain は、利用者が選ぶサブドメイン(1 つ目のラベル)の形を確かめる。整えたあと(NormalizeHostname)の値を渡す。
+// ValidateSubdomain は、利用者が入力した名前(固定の後ろ「-run」を付ける前)の形を確かめる。整えたあと(NormalizeHostname)の値を渡す。
 //
 // 引数:
-//   - subdomain: 確かめるサブドメイン(例: myapp)。ドット(.)は含められない。
+//   - subdomain: 確かめる名前(例: myapp)。ドット(.)は含められない。
 //
 // 戻り値:
 //   - 不正なら invalid_request(理由つき)。
 func ValidateSubdomain(subdomain string) error {
 	// 長さを確かめる。
 	if len(subdomain) < MinSubdomainLength || len(subdomain) > MaxSubdomainLength {
-		return apperror.New(apperror.KindInvalidRequest, "名前は、3 文字以上 63 文字以内で入力してください")
+		return apperror.New(apperror.KindInvalidRequest, "名前は、3 文字以上 59 文字以内で入力してください")
 	}
 	// 小文字の英数字とハイフンだけで、先頭と末尾がハイフンでないことを確かめる(ドットや記号は、ここで弾く)。
 	if !subdomainPattern.MatchString(subdomain) {
