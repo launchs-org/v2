@@ -103,6 +103,9 @@ curl -H "Authorization: Bearer lkt_…" https://<このサービスのホスト>
 | `GET / PUT / PATCH / DELETE` | `/projects/:projectId/ingresses/:ingressId` | 取得・ルールの変更・アクセス集計の切り替え・削除(`/apply`、`/discard`) |
 | `GET` | `/projects/:projectId/ingresses/:ingressId/access-stats` | アクセスの集計 |
 | `GET` | `/projects/:projectId/ingresses/:ingressId/access-logs` | アクセスログ |
+| `GET / POST` | `/projects/:projectId/ingresses/:ingressId/log-exports` | アクセスログの転送(webhook / Google Drive)の一覧・作成([アクセスログを外に残す](log-export.md)) |
+| `PATCH / DELETE` | `/projects/:projectId/ingresses/:ingressId/log-exports/:logExportId` | 転送の変更(有効・無効、URL、間隔)・削除(`/test` でテスト送信) |
+| `GET / DELETE` | `/account/google-drive` | アカウントの Google Drive の接続の状態・解除(`/authorize` で接続の URL) |
 
 ### ボリューム・ConfigMap {#storage}
 
