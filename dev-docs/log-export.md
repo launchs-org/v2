@@ -74,14 +74,15 @@ backend ── 送り先の登録・確認・OAuth ──▶ export_destinations
   ```
   フォルダは、接続のときに作り、ID を保存する(名前を後から変えても、ID で辿る)。利用者がフォルダを消した(ゴミ箱に入れた)ら、次の書き込みのときに、**自動で作り直す**。
 - **ファイル**: 1 日(**日本時間 `shared/jst` の 0 時区切り**。環境変数で変えられる)・ingress ごとに 1 ファイル。形式は **NDJSON**(1 行に、ログ 1 件。webhook の `logs` の 1 要素と同じ形)。
-- **追記ができない**ため、書き込みは「ダウンロード → 末尾に足す → 全体を、上書きでアップロード」(`files.get` と `files.update`)。**一定の間隔**(既定 5 分。環境変数 `EXPORT_DRIVE_FLUSH_INTERVAL`)か、たまった行が多い(2000 行)ときに、まとめて行う。成功してから、カーソルを進める。1 つのファイルが **50 MB** を超えたら、`_part2` に切り替える。
+- **追記ができない**ため、書き込みは「ダウンロード → 末尾に足す → 全体を、上書きでアップロード」(`files.get` と `files.update`)。**1 時間ごと**(環境変数 `EXPORT_DRIVE_FLUSH_INTERVAL`。既定 1h)に、**新しい行があるときだけ**行う(無ければ、ファイルを更新しない)。取りこぼしを防ぐため、**たまった行が 3000 行(ingress ごとの上限 5000 行の 6 割)を超えたら、1 時間を待たずに**行う。成功してから、カーソルを進める。1 つのファイルが **50 MB** を超えたら、`_part2` に切り替える。
 - **再認可(再接続)**: 合鍵が効かなくなったとき(`invalid_grant`。利用者が許可を取り消した、長く使わなかった、など)は、`status` を `reauth_required` にして、**書き込みを止める**。画面に「再接続が必要です」と出し、ボタンで、同意の流れをもう一度行う(同じ送り先に、新しい合鍵を入れる)。
 - **Google 側の準備(運営の作業)**: Google Cloud でプロジェクトを作り、OAuth クライアント(Web)を作る。リダイレクト URI は `https://<LAUNCHS_HOST>/api/v1/export/google/callback`。同意の画面は、**「本番」に公開**する(`drive.file` は、審査の軽い権限。**「テスト」のままだと、合鍵が 7 日で切れる**)。クライアント ID と秘密は、環境変数 `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET`(本番の Secret)。**両方が空なら、Drive は無効**(webhook は使える)。
 
 ## 取りこぼしの限界(正直に)
 
-- exporter が送る前に、**ログの保存の上限(ingress ごとに 5000 行、24 時間)で消える**と、そのログは送れない。アクセスが多い ingress(1 秒に 8 件以上が、5 分続くなど)や、長く止まっていたとき(失敗が続いて、24 時間を過ぎたとき)に、起こる。
-- 対策: (1) 送る間隔を短くする(webhook は 1 分)。(2) `ACCESS_LOG_MAX_ROWS` と `ACCESS_LOG_RETENTION` を、増やせる。(3) 画面で、「失敗が続くと、ログが失われる」ことを、警告する。(4) **段階 2 の候補**: accessstats の削除が、有効な送り先の、送り済みの位置より新しい行を、消さない(上限は、3 倍までなど、守る)。
+- exporter が送る前に、**ログの保存の上限(ingress ごとに 5000 行、24 時間)で消える**と、そのログは送れない。アクセスが多い ingress や、長く止まっていたとき(失敗が続いて、24 時間を過ぎたとき)に、起こる。
+- Drive は 1 時間ごとなので、**1 つの ingress が 1 時間に 5000 行(約 1.4 件/秒)を超えるとき**は、上の「3000 行で前倒し」で拾えるが、それでも間に合わないほどの量(数十件/秒)では、取りこぼす。
+- 対策: (1) 送る間隔を短くする(webhook は 1 分。Drive は、行数での前倒し)。(2) `ACCESS_LOG_MAX_ROWS` と `ACCESS_LOG_RETENTION` を、増やせる。(3) 画面で、「失敗が続くと、ログが失われる」ことを、警告する。(4) **段階 2 の候補**: accessstats の削除が、有効な送り先の、送り済みの位置より新しい行を、消さない(上限は、3 倍までなど、守る)。
 - `id` は、書き込む順に増えるが、accessstats(1 つだけ書く)が、1 回の取り込みを 1 つのトランザクションで書くので、**カーソルが、後から確定した行を、飛ばすことは、ほぼ無い**(飛ばしたとしても、24 時間の中の話)。
 
 ## API(案。すべて、プロジェクトの持ち主だけ。他人のものは 404)
@@ -107,8 +108,8 @@ backend ── 送り先の登録・確認・OAuth ──▶ export_destinations
 ## コンテナ `exporter/`
 
 - 構成は、`accessstats/` と同じ(`dockerfile`、`src/main.go`、`src/config`、`src/deliver`(webhook と Drive の送り手)、`.air.toml`)。
-- 動き: 10 秒ごとに、`enabled` で、`next_attempt_at` を過ぎた送り先を数え、**送り先ごとに順番に**(送り先どうしは、最大 4 つまで、並行して)送る。1 回の取り込みは、`id > last_cursor` かつ、そのプロジェクトの ingress の行を、`id` の昇順で 1000 行まで。
-- 設定(環境変数): `DATABASE_URL`、`EXPORT_CREDENTIAL_KEY`、`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`、`EXPORT_DRIVE_FLUSH_INTERVAL`(既定 5m)、`EXPORT_ALLOW_HTTP`(開発用。既定 false)、`LOG_LEVEL`。
+- 動き: 10 秒ごとに(Drive は、1 時間ごと、または、行数の前倒しのとき。webhook は、1 分ごと)、`enabled` で、`next_attempt_at` を過ぎた送り先を数え、**送り先ごとに順番に**(送り先どうしは、最大 4 つまで、並行して)送る。1 回の取り込みは、`id > last_cursor` かつ、そのプロジェクトの ingress の行を、`id` の昇順で 1000 行まで。
+- 設定(環境変数): `DATABASE_URL`、`EXPORT_CREDENTIAL_KEY`、`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`、`EXPORT_DRIVE_FLUSH_INTERVAL`(既定 1h)、`EXPORT_DRIVE_FLUSH_ROWS`(既定 3000。これだけたまったら前倒し)、`EXPORT_ALLOW_HTTP`(開発用。既定 false)、`LOG_LEVEL`。
 - 本番(`deploy/`): `exporter.yaml`(Deployment。watcher と同じ形)と、`release.yml` のイメージ一覧への追加。Secret に `EXPORT_CREDENTIAL_KEY`、`GOOGLE_OAUTH_*` を足す。**本番への適用は、別に、許可を取ってから行う**。
 
 ## 作る順番
