@@ -199,5 +199,23 @@ done
 
 - **`EXPORT_CREDENTIAL_KEY` は、変えない**。変えると、保存済みの秘密を復号できなくなり、Google の再接続と、webhook の作り直しが、全員に要ります。バックアップして、保管してください。
 - Google Cloud 側: OAuth クライアントのリダイレクト URI に `https://<LAUNCHS_HOST>/api/v1/export/google/callback` を登録します。同意の画面は**「本番」に公開**します(「テスト」のままだと、合鍵が **7 日で切れます**。`drive.file` は審査の軽い権限です)。戻り先を変えるときは、`GOOGLE_OAUTH_REDIRECT_URL`(ConfigMap か Secret)。
+### Google Cloud 側の準備(Google Drive を使うとき)
+
+1. Google Cloud コンソールで、プロジェクトを選ぶ(なければ作る)。
+2. 「API とサービス」→「ライブラリ」で、**Google Drive API を有効にする**(有効にしないと、ファイルを作る呼び出しが 403 になります)。
+3. 「OAuth 同意画面」を作る。ユーザーの種類は「外部」。アプリ名、サポートのメール、**承認済みドメインに launchs のドメイン(`LAUNCHS_HOST` の親、例: `launchs.org`)**を入れる。
+4. 同意画面の「スコープ」に、次を足す(**これだけ。これより広い権限は要りません**)。
+
+   | スコープ | 用途 |
+   |---|---|
+   | `https://www.googleapis.com/auth/drive.file` | launchs が作ったフォルダとファイルだけを読み書きする(利用者の他のファイルには触れない。「機密性の高くない」権限で、審査が軽い) |
+   | `openid`、`email` | 接続中のアカウント(メールアドレス)を、画面に出すためだけ |
+
+5. 同意画面を「**本番環境に公開**」にする(「テスト」のままだと、合鍵が 7 日で切れ、テストユーザー以外はつなげません)。`drive.file` だけなら、Google の審査は、通常は要りません(ロゴなどを付けると、審査が要ることがあります。付けなければ、未確認のアプリの注意が出ることがあります)。
+6. 「認証情報」→「OAuth クライアント ID」を作る。種類は **ウェブ アプリケーション**。「承認済みのリダイレクト URI」に `https://<LAUNCHS_HOST>/api/v1/export/google/callback` を入れる(**一文字でも違うと、`redirect_uri_mismatch` になります**)。
+7. 出来たクライアント ID とクライアント シークレットを、Secret の `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET` に入れる。
+
+設定(ConfigMap `launchs-config`)は、**変えなくて足ります**。戻り先は、`LAUNCHS_HOST` から自動で作られます。`LAUNCHS_HOST` と違うホスト名で公開しているときだけ、`GOOGLE_OAUTH_REDIRECT_URL` を足してください。Secret を足したあと、`kubectl -n launchs rollout restart deploy/backend deploy/exporter` で再起動します。
+
 - exporter は、外向きの HTTPS(webhook の宛先と、Google の API)に接続します。`launchs` の namespace から、外へ出られることを確認してください。
 - 確認: `kubectl -n launchs logs deploy/exporter` に「exporter を起動する」と出て、リーダーになったものが 1 つあること。`EXPORT_CREDENTIAL_KEY` が空だと、「エクスポートは無効です」と出て、待機します。
