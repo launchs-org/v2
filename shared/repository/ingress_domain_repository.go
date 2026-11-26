@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 
 	"launchs/shared/apperror"
 	"launchs/shared/model"
@@ -12,10 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ErrIngressDomainTaken は、確認しようとしたドメインが、すでに別の ingress で確認済みのときのエラー。
-var ErrIngressDomainTaken = errors.New("このドメインは、すでに別の ingress で使われています")
-
-// IngressDomainRepository は、ingress のカスタムドメイン(ingress_domains)を読み書きする。
+// IngressDomainRepository は、ingress の追加のホスト名(ingress_domains)を読み書きする。
 type IngressDomainRepository struct {
 	// database は、Gorm のデータベース接続。
 	database *gorm.DB
@@ -62,7 +58,7 @@ func lockOwnedIngress(transaction *gorm.DB, userID string, projectID string, ing
 	return nil
 }
 
-// Create は、ingress にカスタムドメインを(確認待ちで)付ける。
+// Create は、ingress に追加のホスト名を付ける。
 //
 // 引数:
 //   - requestContext: キャンセルや期限を伝える context。
@@ -88,12 +84,20 @@ func (ingressDomainRepository *IngressDomainRepository) Create(requestContext co
 			return apperror.Wrap(apperror.KindInternal, "ドメインを数えられませんでした", countError)
 		}
 		if count >= model.MaxIngressDomains {
-			return apperror.New(apperror.KindConflict, "1 つの ingress に付けられるドメインは、5 つまでです")
+			return apperror.New(apperror.KindConflict, "1 つの ingress に付けられるホスト名は、5 つまでです")
 		}
-		// 保存する。同じ ingress に同じドメインがあれば、重複として拒否する。
+		// 払い出されたホスト名(ingresses.host)と同じ名前は、使えない(同じ Host で、2 つのルートができるため)。
+		var assignedCount int64
+		if assignedError := transaction.Model(&model.Ingress{}).Where("host = ?", domain.Hostname).Count(&assignedCount).Error; assignedError != nil {
+			return apperror.Wrap(apperror.KindInternal, "ホスト名を確かめられませんでした", assignedError)
+		}
+		if assignedCount > 0 {
+			return apperror.New(apperror.KindConflict, "この名前は、すでに使われています")
+		}
+		// 保存する。確認済みのホスト名は全体で 1 つ(部分一意インデックス)なので、重なったら、すでに使われている。
 		createError := transaction.Create(domain).Error
 		if errors.Is(createError, gorm.ErrDuplicatedKey) {
-			return apperror.New(apperror.KindConflict, "このドメインは、すでに追加されています")
+			return apperror.New(apperror.KindConflict, "この名前は、すでに使われています")
 		}
 		if createError != nil {
 			return apperror.Wrap(apperror.KindInternal, "ドメインを保存できませんでした", createError)
@@ -133,63 +137,6 @@ func (ingressDomainRepository *IngressDomainRepository) List(requestContext cont
 		return nil, apperror.Wrap(apperror.KindInternal, "ドメインを取得できませんでした", findError)
 	}
 	return domains, nil
-}
-
-// Find は、ingress に付いているカスタムドメインを 1 件取得する。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - userID: 持ち主のユーザー ID。
-//   - projectID: プロジェクトの ID。
-//   - ingressID: ingress の ID。
-//   - domainID: ドメインの ID。
-//
-// 戻り値:
-//   - ドメイン。無い(他人のものを含む)ときは not_found。
-func (ingressDomainRepository *IngressDomainRepository) Find(requestContext context.Context, userID string, projectID string, ingressID string, domainID string) (model.IngressDomain, error) {
-	// 値が空だと、意図しない行が対象になるので、先に拒否する。
-	if hasEmpty(userID, projectID, ingressID, domainID) {
-		return model.IngressDomain{}, apperror.New(apperror.KindNotFound, "ドメインが見つかりません")
-	}
-	// 持ち主の ingress に付いているドメインだけを、取得する。
-	var domain model.IngressDomain
-	findError := ingressDomainRepository.database.WithContext(requestContext).
-		Joins("JOIN ingresses ON ingresses.id = ingress_domains.ingress_id").
-		Where("ingress_domains.id = ? AND ingress_domains.ingress_id = ? AND ingresses.project_id = ? AND ingresses.user_id = ?", domainID, ingressID, projectID, userID).
-		Take(&domain).Error
-	if errors.Is(findError, gorm.ErrRecordNotFound) {
-		return model.IngressDomain{}, apperror.Wrap(apperror.KindNotFound, "ドメインが見つかりません", findError)
-	}
-	if findError != nil {
-		return model.IngressDomain{}, apperror.Wrap(apperror.KindInternal, "ドメインを取得できませんでした", findError)
-	}
-	return domain, nil
-}
-
-// MarkVerified は、ドメインを確認済みにする(すでに確認済みなら、何もしない)。
-//
-// 引数:
-//   - requestContext: キャンセルや期限を伝える context。
-//   - domainID: ドメインの ID。
-//
-// 戻り値:
-//   - すでに別の ingress が、同じドメインを確認済みなら ErrIngressDomainTaken。
-func (ingressDomainRepository *IngressDomainRepository) MarkVerified(requestContext context.Context, domainID string) error {
-	// 値が空だと、意図しない行が対象になるので、先に拒否する。
-	if hasEmpty(domainID) {
-		return newEmptyConditionError()
-	}
-	// 確認待ちの行だけに、確認した日時を入れる。
-	updateError := ingressDomainRepository.database.WithContext(requestContext).Model(&model.IngressDomain{}).
-		Where("id = ? AND verified_at IS NULL", domainID).Update("verified_at", time.Now()).Error
-	// 確認済みのドメインは全体で 1 つなので、重なったときは専用のエラーにする。
-	if errors.Is(updateError, gorm.ErrDuplicatedKey) {
-		return ErrIngressDomainTaken
-	}
-	if updateError != nil {
-		return apperror.Wrap(apperror.KindInternal, "ドメインを更新できませんでした", updateError)
-	}
-	return nil
 }
 
 // Delete は、ingress からカスタムドメインを外す。

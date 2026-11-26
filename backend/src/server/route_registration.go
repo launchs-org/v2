@@ -137,17 +137,13 @@ func registerRoutes(echoServer *echo.Echo, dependencies Dependencies) {
 	apiGroup.PATCH("/projects/:projectId/ingresses/:ingressId", ingressController.UpdateAccessStats)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/apply", ingressController.ApplyRules)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/discard", ingressController.DiscardRules)
-	// ingress のカスタムドメイン(利用者のドメインを、DNS で所有を確かめてから、ルーティングに加える)。
-	// ベースドメインは、払い出しのホスト名を作るものから取る(取れなければ、空で、ベースドメインの検査をしない)。
-	baseDomain := ""
-	if baseDomainProvider, ok := dependencies.IngressHostGenerator.(interface{ BaseDomain() string }); ok {
-		baseDomain = baseDomainProvider.BaseDomain()
-	}
+	// ingress の追加のホスト名(利用者が選ぶサブドメイン。<名前>.<ベースドメイン>)。
+	// ベースドメインと予約語は、払い出しのホスト名を作るものから取る(取れなければ、追加を断る)。
+	subdomainPolicy, _ := dependencies.IngressHostGenerator.(service.IngressSubdomainPolicy)
 	ingressDomainController := controller.NewIngressDomainController(service.NewIngressDomainService(
-		ingressRepository, repository.NewIngressDomainRepository(dependencies.Database), service.NewDNSDomainVerifier(), dependencies.IngressWorkflowStarter, baseDomain))
+		ingressRepository, repository.NewIngressDomainRepository(dependencies.Database), dependencies.IngressWorkflowStarter, subdomainPolicy))
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.List)
 	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/domains", ingressDomainController.Add)
-	apiGroup.POST("/projects/:projectId/ingresses/:ingressId/domains/:domainId/verify", ingressDomainController.Verify)
 	apiGroup.DELETE("/projects/:projectId/ingresses/:ingressId/domains/:domainId", ingressDomainController.Remove)
 	accessStatsController := controller.NewAccessStatsController(service.NewAccessStatsService(ingressRepository, repository.NewAccessStatsRepository(dependencies.Database)))
 	apiGroup.GET("/projects/:projectId/ingresses/:ingressId/access-stats", accessStatsController.Get)
