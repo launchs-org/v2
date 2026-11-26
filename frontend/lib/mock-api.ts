@@ -136,8 +136,9 @@ let volumesByProject: Record<string, Volume[]> = {
   ],
 }
 
-/** 見せかけの、カスタムドメイン(ingress の ID ごと)。確認は、1 回目は DNS が合わない扱い、2 回目で通る。 */
-const mockDomainsByIngress: Record<string, (IngressDomain & { attempts: number })[]> = {}
+/** 見せかけの、追加のホスト名(ingress の ID ごと)。追加するとすぐに有効になる。 */
+const mockDomainsByIngress: Record<string, IngressDomain[]> = {}
+const MOCK_BASE_DOMAIN = "launchs.org"
 let ingressesByProject: Record<string, IngressDetail[]> = {
   prj_northstar: [
     {
@@ -546,27 +547,20 @@ export async function mockRequest<T>(path: string, method: string, body?: unknow
             result = clone(ingress)
           } else if (segments[6] === "domains") {
             const domains = (mockDomainsByIngress[ingress.ingressId] ??= [])
-            const view = ({ attempts: _attempts, ...domain }: IngressDomain & { attempts: number }): IngressDomain => domain
-            if (segments.length === 7 && method === "GET") result = { domains: clone(domains.map(view)) }
+            if (segments.length === 7 && method === "GET") result = { baseDomain: MOCK_BASE_DOMAIN, domains: clone(domains) }
             else if (segments.length === 7 && method === "POST") {
-              const hostname = String(payload.hostname ?? "").trim().toLowerCase()
-              if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(hostname)) throw new Error("ドメイン名は、小文字の英数字とハイフンを、ドットで区切った形で入力してください")
-              if (domains.some((item) => item.hostname === hostname)) throw new Error("このドメインは、すでに追加されています")
-              if (domains.length >= 5) throw new Error("1 つの ingress に付けられるドメインは、5 つまでです")
-              const domain = { domainId: newId("domain"), hostname, status: "pending" as const, verifiedAt: null, attempts: 0, challenge: { txtName: `_launchs-challenge.${hostname}`, txtValue: `launchs-verify=${newId("t")}`, cnameValue: ingress.host } }
+              const subdomain = String(payload.subdomain ?? "").trim().toLowerCase().replace(new RegExp(`(-run)?\\.${MOCK_BASE_DOMAIN.replace(".", "\\.")}$`), "")
+              if (subdomain.length < 3 || subdomain.length > 59 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomain)) throw new Error("名前は、3 文字以上 59 文字以内の、小文字の英数字とハイフン(先頭と末尾はハイフン以外)で入力してください")
+              const hostname = `${subdomain}-run.${MOCK_BASE_DOMAIN}`
+              if (hostname === ingress.host || Object.values(mockDomainsByIngress).some((list) => list.some((item) => item.hostname === hostname))) throw new Error("この名前は、すでに使われています")
+              if (domains.length >= 5) throw new Error("1 つの ingress に付けられるホスト名は、5 つまでです")
+              const domain: IngressDomain = { domainId: newId("domain"), hostname, status: "verified", verifiedAt: now() }
               domains.push(domain)
-              result = view(domain)
-            } else {
-              const domain = domains.find((item) => item.domainId === segments[7])
-              if (!domain) throw new Error("ドメインが見つかりません")
-              if (segments[8] === "verify" && method === "POST") {
-                domain.attempts += 1
-                if (domain.attempts >= 2) { domain.status = "verified"; domain.verifiedAt = now() }
-                result = { verified: domain.status === "verified", reason: domain.status === "verified" ? "" : `TXT レコード(_launchs-challenge.${domain.hostname})にも、CNAME(${ingress.host})にも、確認できる設定が見つかりませんでした。DNS の反映には、数分から数時間かかることがあります。`, domain: clone(view(domain)) }
-              } else if (segments.length === 8 && method === "DELETE") {
-                mockDomainsByIngress[ingress.ingressId] = domains.filter((item) => item.domainId !== domain.domainId)
-                result = {}
-              }
+              result = clone(domain)
+            } else if (segments.length === 8 && method === "DELETE") {
+              if (!domains.some((item) => item.domainId === segments[7])) throw new Error("ホスト名が見つかりません")
+              mockDomainsByIngress[ingress.ingressId] = domains.filter((item) => item.domainId !== segments[7])
+              result = {}
             }
           } else if (segments[6] === "access-logs" && method === "GET") {
             result = mockAccessLogs(url.searchParams)

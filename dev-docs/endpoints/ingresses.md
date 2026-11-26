@@ -275,3 +275,42 @@
 - Note: 保存は、保存期間(既定 24 時間。`ACCESS_LOG_RETENTION`)と、ingress ごとの行数の上限(既定 5000。`ACCESS_LOG_MAX_ROWS`)の、どちらか早い方まで。リクエストが多いときは、プラグインが 10 秒ごとに出す記録に上限(200 件)があり、超えた分は、記録されない(集計の件数には入る)。`ACCESS_STATS_KEEP_CLIENTS=false` では `clientIp` は空
 - Note: 他のユーザーの ingress は 404
 
+### 好きな名前のホスト名(サブドメイン)の一覧
+- Get: /projects/:projectId/ingresses/:ingressId/domains
+- Header
+```json
+{"Authorization": "Bearer <accessToken>"}
+```
+- Response (200)
+```json
+{
+  "baseDomain": "launchs.org",
+  "domains": [
+    {"domainId": "domain-<uuid>", "hostname": "myapp-run.launchs.org", "status": "verified", "verifiedAt": "2026-11-24T05:00:00Z"}
+  ]
+}
+```
+- Note: 追加した順。`baseDomain` は、画面が入力欄の後ろに出す。他のユーザーの ingress は 404
+- Note: 払い出されたホスト名(`host`)は、ここには出ない(`host` は、そのまま使える)
+
+### 好きな名前のホスト名の追加
+- Post: /projects/:projectId/ingresses/:ingressId/domains
+- Header
+```json
+{"Authorization": "Bearer <accessToken>", "Content-Type": "application/json"}
+```
+- Body
+```json
+{"subdomain": "myapp"}
+```
+- Response (201): 一覧の 1 件と同じ形。`hostname` は `<subdomain>-run.<baseDomain>`
+- Note: `subdomain` は、前後の空白と大文字を整える。ホスト名ごと貼り付けられたとき(`.<baseDomain>` で終わるとき)は、`.<baseDomain>` と、後ろの `-run` を取り除く。3〜59 文字の、小文字の英数字とハイフン(先頭と末尾はハイフン以外。`xn--` で始まるものは不可)。ドットを含む(外部のドメインを含む)ものは 400。**保存するホスト名は、必ず `<subdomain>-run.<baseDomain>`**(定数 `model.CustomSubdomainSuffix`)。自分たちが使う名前(`api`、`www`、`auth` など)や、払い出しの名前(形容詞-色-動物)は、`-run` で終わらないので、決して重ならない。このため、予約語の検査は無い
+- Note: **追加すると、すぐに有効**(DNS の確認は無い。`*.<baseDomain>` のワイルドカードが、すでに Traefik に届くため)。反映済みのルールがあれば、IngressRoute の作り直し(`StartRouteReapply`)を始める。始められなければ 500 で、追加は取り消す
+- Note: 他の ingress(払い出された `host` を含む)が使っている名前は 409。1 つの ingress に 5 つまで(超えると 409)。削除中の ingress は 409
+- Note: IngressRoute の match は `(Host(払い出された名前) || Host(追加した名前)) && PathPrefix(...)` になる(追加した名前が無ければ、従来どおり)
+
+### 好きな名前のホスト名の削除
+- Delete: /projects/:projectId/ingresses/:ingressId/domains/:domainId
+- Response (200): `{}`
+- Note: 反映済みのルールがあれば、IngressRoute を作り直して、ルーティングからも外す。無ければ 404。他のユーザーのものも 404
+- Note: 外部のドメイン(CNAME で向けるもの)は、まだ扱わない。Cloudflare の側で、ホスト名ごとの登録(Cloudflare for SaaS か、トンネルの Public Hostname)が要るため。テーブル `ingress_domains` の `token`、`verified_at` は、そのときの所有の確認のために残してある

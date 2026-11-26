@@ -110,11 +110,8 @@ export type IngressDetail = {
   accessStats?: boolean
 }
 /** カスタムドメインの所有を確かめるために、DNS に設定してもらう内容。TXT か CNAME の、どちらかでよい。 */
-export type IngressDomainChallenge = { txtName: string; txtValue: string; cnameValue: string }
-/** ingress のカスタムドメイン 1 件。pending は確認待ち、verified は確認済み(ルーティングに入っている)。 */
-export type IngressDomain = { domainId: string; hostname: string; status: "pending" | "verified"; verifiedAt: string | null; challenge: IngressDomainChallenge }
-/** カスタムドメインの確認の結果。DNS が合わないときは、verified が false で、reason に理由が入る。 */
-export type IngressDomainVerifyResult = { verified: boolean; reason: string; domain: IngressDomain }
+/** ingress に追加したホスト名 1 件(<利用者が選んだ名前>.<ベースドメイン>)。追加するとすぐに有効(verified)になる。 */
+export type IngressDomain = { domainId: string; hostname: string; status: "pending" | "verified"; verifiedAt: string | null }
 /** プロジェクトのタスク(worker が記録した Workflow の履歴)。 */
 export type TaskStatus = "running" | "succeeded" | "failed" | "canceled" | "lost"
 /** タスクの手順(Activity)1 つの進み具合。extra は、後始末など、定義に無い手順。 */

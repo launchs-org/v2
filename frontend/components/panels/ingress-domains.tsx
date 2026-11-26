@@ -3,43 +3,20 @@
 import { useState } from "react"
 import useSWR from "swr"
 import { api, authenticatedFetcher } from "@/lib/api"
-import type { IngressDomain, IngressDomainVerifyResult } from "@/lib/types"
-import { CopyButton } from "@/components/api-token-section"
+import type { IngressDomain } from "@/lib/types"
 
-/** 1 つの ingress に付けられるカスタムドメインの数の上限(サーバーと同じ)。 */
+/** 1 つの ingress に付けられる、追加のホスト名の数の上限(サーバーと同じ)。 */
 const MAX_DOMAINS = 5
 
-/**
- * カスタムドメインの 1 行の下に出す、DNS の設定の案内(TXT か CNAME のどちらか)。
- *
- * @param props.domain 確認待ちのドメイン。
- */
-function DnsInstructions({ domain }: { domain: IngressDomain }) {
-  const { txtName, txtValue, cnameValue } = domain.challenge
-  return (
-    <div className="col" style={{ gap: 10, fontSize: 13 }}>
-      <div className="mut">ドメインを管理している場所(DNS)で、<b>次のどちらか 1 つ</b>を設定してから、「確認する」を押してください。</div>
-      <div className="col" style={{ gap: 4 }}>
-        <b>方法 1: TXT レコード(おすすめ。いまのサイトを止めずに確認できます)</b>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}><span className="faint">名前</span><code className="mono" style={{ overflowWrap: "anywhere" }}>{txtName}</code><CopyButton text={txtName} /></div>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}><span className="faint">値</span><code className="mono" style={{ overflowWrap: "anywhere" }}>{txtValue}</code><CopyButton text={txtValue} /></div>
-      </div>
-      <div className="col" style={{ gap: 4 }}>
-        <b>方法 2: CNAME レコード</b>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}><code className="mono" style={{ overflowWrap: "anywhere" }}>{domain.hostname}</code><span className="faint">→</span><code className="mono" style={{ overflowWrap: "anywhere" }}>{cnameValue}</code><CopyButton text={cnameValue} /></div>
-      </div>
-      <div className="faint">DNS の反映には、数分から数時間かかることがあります。</div>
-    </div>
-  )
-}
+/** 入力した名前の後ろに、必ず付く固定の文字列(サーバーと同じ。api、www など、こちらで使う名前と重ならないようにするため)。 */
+const NAME_SUFFIX = "-run"
 
 /**
- * ingress のカスタムドメインのカード(追加、確認待ちの案内、確認、削除)。
+ * ingress の「好きな名前のホスト名」のカード(追加、一覧、削除)。
  *
- * 処理の流れ:
- *  1. ドメインを追加すると、確認待ちになり、DNS に設定する内容(TXT または CNAME)が出る。
- *  2. DNS を設定して「確認する」を押すと、サーバーが DNS を引いて、持ち主であることを確かめる。
- *  3. 確認できたドメインは、公開のルーティングに入る(この ingress のルールが、そのドメインでも効く)。
+ * 払い出されたホスト名(例: sunny-jade-cat.launchs.org)のほかに、<好きな名前>-run.<ベースドメイン> でも、
+ * この ingress を開けるようにする。ベースドメインの下の名前は、すぐに有効になる(DNS の設定は要らない)。
+ * 自分のドメイン(外部のドメイン)は、まだ使えない。
  *
  * @param props.basePath この ingress の API のパス(`/api/v1/projects/.../ingresses/...`)。
  * @param props.locked 反映中・削除中などで、操作できないとき。
@@ -47,11 +24,11 @@ function DnsInstructions({ domain }: { domain: IngressDomain }) {
  */
 export function IngressDomains({ basePath, locked, notify }: { basePath: string; locked: boolean; notify: (message: string, isError?: boolean) => void }) {
   const domainsPath = `${basePath}/domains`
-  const { data, error, mutate } = useSWR<{ domains: IngressDomain[] }>(domainsPath, authenticatedFetcher, { revalidateOnFocus: true })
-  const [hostname, setHostname] = useState("")
+  const { data, error, mutate } = useSWR<{ baseDomain: string; domains: IngressDomain[] }>(domainsPath, authenticatedFetcher, { revalidateOnFocus: true })
+  const [subdomain, setSubdomain] = useState("")
   const [busy, setBusy] = useState("")
-  const [reasons, setReasons] = useState<Record<string, string>>({})
   const domains = data?.domains ?? []
+  const baseDomain = data?.baseDomain ?? ""
 
   /**
    * 操作を実行し、終わったら取り直す(失敗は通知する)。
@@ -65,31 +42,21 @@ export function IngressDomains({ basePath, locked, notify }: { basePath: string;
     try { await action(); await mutate() } catch (caught) { notify(caught instanceof Error ? caught.message : "操作に失敗しました", true) } finally { setBusy("") }
   }
 
-  /** ドメインを追加する(確認待ちになる)。 */
+  /** 入力した名前を追加する(すぐに有効になる)。 */
   async function add() {
     // 空なら何もしない。
-    if (!hostname.trim()) return
-    await run("add", async () => { await api.post(domainsPath, { hostname }); setHostname(""); notify("ドメインを追加しました。DNS を設定して、確認してください") })
-  }
-
-  /**
-   * DNS を見て、ドメインの持ち主であることを確かめる。
-   *
-   * @param domain 確認するドメイン。
-   */
-  async function verify(domain: IngressDomain) {
-    await run(domain.domainId, async () => {
-      const result = await api.post<IngressDomainVerifyResult>(`${domainsPath}/${encodeURIComponent(domain.domainId)}/verify`)
-      // 合わなかったときは、理由を、行の下に出す。
-      setReasons((current) => ({ ...current, [domain.domainId]: result.verified ? "" : result.reason }))
-      if (result.verified) notify(`${domain.hostname} を確認しました。公開に反映しています`)
+    if (!subdomain.trim()) return
+    await run("add", async () => {
+      const created = await api.post<IngressDomain>(domainsPath, { subdomain })
+      setSubdomain("")
+      notify(`${created.hostname} を追加しました`)
     })
   }
 
   /**
-   * ドメインを外す。
+   * ホスト名を外す。
    *
-   * @param domain 外すドメイン。
+   * @param domain 外すホスト名。
    */
   async function remove(domain: IngressDomain) {
     await run(domain.domainId, async () => { await api.delete(`${domainsPath}/${encodeURIComponent(domain.domainId)}`); notify(`${domain.hostname} を外しました`) })
@@ -97,28 +64,27 @@ export function IngressDomains({ basePath, locked, notify }: { basePath: string;
 
   return (
     <div className="card" style={{ overflow: "hidden" }}>
-      <div className="row pad" style={{ paddingBottom: 4 }}><h2 className="h2 grow">カスタムドメイン</h2><span className="faint" style={{ fontSize: 12.5 }}>{domains.length} / {MAX_DOMAINS}</span></div>
-      <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 10px" }}>自分のドメイン(例: app.example.com)でも、この ingress を開けるようにします。DNS で持ち主であることを確かめたドメインだけが、有効になります。</div>
-      {error && !data && <div className="tr mut" style={{ ["--cols" as string]: "1fr" }}>ドメインを取得できませんでした。</div>}
-      {data && domains.length === 0 && <div className="tr mut" style={{ ["--cols" as string]: "1fr" }}>カスタムドメインはありません。</div>}
+      <div className="row pad" style={{ paddingBottom: 4 }}><h2 className="h2 grow">好きな名前のホスト名</h2><span className="faint" style={{ fontSize: 12.5 }}>{domains.length} / {MAX_DOMAINS}</span></div>
+      <div className="mut" style={{ fontSize: 12.5, padding: "0 18px 10px" }}>
+        払い出されたホスト名のほかに、好きな名前({baseDomain ? `例: myapp${NAME_SUFFIX}.${baseDomain}` : "例: myapp"})でも、この ingress を開けるようにします。追加すると、すぐに使えます。
+        自分のドメイン(example.com など)は、まだ使えません。
+      </div>
+      {error && !data && <div className="tr mut" style={{ ["--cols" as string]: "1fr" }}>ホスト名を取得できませんでした。</div>}
+      {data && domains.length === 0 && <div className="tr mut" style={{ ["--cols" as string]: "1fr" }}>追加したホスト名はありません。</div>}
       {domains.map((domain) => (
-        <div key={domain.domainId} style={{ padding: "12px 18px", borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <a className="mono grow" style={{ fontWeight: 500, overflowWrap: "anywhere", color: domain.status === "verified" ? "var(--accent)" : "inherit" }} href={domain.status === "verified" ? `https://${domain.hostname}` : undefined} target="_blank" rel="noreferrer">{domain.hostname}</a>
-            <span className={`badge ${domain.status === "verified" ? "b-ok" : "b-warn"}`}><i />{domain.status === "verified" ? "確認済み" : "確認待ち"}</span>
-            {domain.status === "pending" && <button className="btn sm primary" type="button" disabled={locked || busy !== ""} onClick={() => void verify(domain)}>{busy === domain.domainId ? "確認中…" : "確認する"}</button>}
-            <button className="btn sm danger" type="button" disabled={busy !== ""} onClick={() => void remove(domain)}>外す</button>
-          </div>
-          {domain.status === "pending" && reasons[domain.domainId] && <div style={{ color: "var(--bad)", fontSize: 12.5 }}>{reasons[domain.domainId]}</div>}
-          {domain.status === "pending" && <DnsInstructions domain={domain} />}
-          {domain.status === "verified" && <div className="faint" style={{ fontSize: 12.5 }}>このドメインを、DNS で、この ingress のホスト名({domain.challenge.cnameValue})に向けると、開けます。</div>}
+        <div key={domain.domainId} className="row" style={{ padding: "12px 18px", borderTop: "1px solid var(--line)", gap: 8, flexWrap: "wrap" }}>
+          <a className="mono grow" style={{ fontWeight: 500, overflowWrap: "anywhere", color: "var(--accent)" }} href={`https://${domain.hostname}`} target="_blank" rel="noreferrer">{domain.hostname}</a>
+          <span className="badge b-ok"><i />有効</span>
+          <button className="btn sm danger" type="button" disabled={locked || busy !== ""} onClick={() => void remove(domain)}>外す</button>
         </div>
       ))}
       <div className="row" style={{ padding: "12px 18px 14px", borderTop: "1px solid var(--line)", gap: 8 }}>
-        <input className="inp mono grow" value={hostname} onChange={(event) => setHostname(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void add() }}
-          placeholder="app.example.com" aria-label="追加するドメイン" disabled={locked || domains.length >= MAX_DOMAINS} />
-        <button className="btn sm primary" type="button" disabled={locked || busy !== "" || !hostname.trim() || domains.length >= MAX_DOMAINS} onClick={() => void add()}>追加</button>
+        <input className="inp mono grow" value={subdomain} onChange={(event) => setSubdomain(event.target.value.toLowerCase())} onKeyDown={(event) => { if (event.key === "Enter") void add() }}
+          placeholder="myapp" aria-label="追加する名前" maxLength={59} disabled={locked || domains.length >= MAX_DOMAINS} />
+        <span className="mono mut" style={{ whiteSpace: "nowrap" }}>{NAME_SUFFIX}{baseDomain && `.${baseDomain}`}</span>
+        <button className="btn sm primary" type="button" disabled={locked || busy !== "" || !subdomain.trim() || domains.length >= MAX_DOMAINS} onClick={() => void add()}>追加</button>
       </div>
+      <div className="faint" style={{ fontSize: 12, padding: "0 18px 12px" }}>名前は、3〜59 文字の、小文字の英数字とハイフンです。後ろには、自動で「-run」が付きます。ほかの人が使っている名前は、使えません。</div>
     </div>
   )
 }

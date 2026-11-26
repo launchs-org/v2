@@ -77,6 +77,9 @@ func (generator *fakeHostGenerator) Generate() (string, error) {
 	return generator.hosts[index], nil
 }
 
+// BaseDomain は、テスト用のベースドメインを返す(利用者が選ぶサブドメインの試験に使う)。
+func (generator *fakeHostGenerator) BaseDomain() string { return "launchs.org" }
+
 // ingressTestEnvironment は、ingress の API のテストに必要なものの一式。
 type ingressTestEnvironment struct {
 	database    *gorm.DB
