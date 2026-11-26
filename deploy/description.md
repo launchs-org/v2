@@ -23,12 +23,13 @@ launchs の本番向けのマニフェスト(`deploy/`)の、中身と決まり�
 | watcher | Pod と Deployment を観測して、DB に書く(リーダーは 1 つ) | Pod、Deployment、イベントの読み取り |
 | logcollector | deploy のログを DB に保存(リーダーは 1 つ) | Pod の読み取りと、ログの取得 |
 | accessstats | Traefik のログから、アクセスログを DB に保存(リーダーは 1 つ) | **Traefik の namespace だけ**の Pod の読み取りと、ログの取得(Role) |
+| exporter | アクセスログを、利用者の送り先(webhook、Google Drive)に書き出す(リーダーは 1 つ。DB と外向きの HTTPS だけ。[dev-docs/log-export.md](../dev-docs/log-export.md)) | **なし**(k8s の API は使わない。ServiceAccount のトークンも、入れない) |
 | frontend | Next.js(standalone) | なし |
 
-watcher、logcollector、accessstats は、複数起動しても、advisory lock で、リーダーの 1 つだけが動く(残りは、待機で、リーダーが落ちたら、引き継ぐ)。
+watcher、logcollector、accessstats、exporter は、複数起動しても、advisory lock で、リーダーの 1 つだけが動く(残りは、待機で、リーダーが落ちたら、引き継ぐ)。
 
 ## 高可用性(3 つのノード)
-- **アプリ(auth、backend、worker、watcher、logcollector、accessstats、frontend)と Temporal は、3 つずつ**動かす(`kustomization.yaml` の `replicas`。数を変えるのは、ここだけ)。`topologySpreadConstraints` で、3 つのノードに、ばらけさせる(ノードが足りないときは、偏ってもよい)。`pdb.yaml` の PodDisruptionBudget で、ノードの入れ替え(drain)のときも、最低 2 つを、動かし続ける。
+- **アプリ(auth、backend、worker、watcher、logcollector、accessstats、exporter、frontend)と Temporal は、3 つずつ**動かす(`kustomization.yaml` の `replicas`。数を変えるのは、ここだけ)。`topologySpreadConstraints` で、3 つのノードに、ばらけさせる(ノードが足りないときは、偏ってもよい)。`pdb.yaml` の PodDisruptionBudget で、ノードの入れ替え(drain)のときも、最低 2 つを、動かし続ける。
 - **Temporal**: 各 Pod が、全てのサービス(frontend、history、matching、worker)を動かし、DB の `cluster_membership` で見つけ合って、1 つのクラスターになる(`broadcastAddress` は、各 Pod の IP)。1 つずつ入れ替える(RollingUpdate)。**`numHistoryShards`(512)は、最初に起動するときに決まり、後から変えられない**。
 - **PostgreSQL は、1 つのまま**。データは、Longhorn の PVC(既定の StorageClass は、3 複製)に置くので、ディスクやノードが 1 つ壊れても、データは残る。ただし、**PostgreSQL の Pod 自体は 1 つ**なので、そのノードが落ちると、別のノードで再起動するまで(数十秒〜数分)、DB が止まる。Pod を増やすだけでは、別々の DB になり、壊れる(複製の仕組みが要る)。ノードが落ちたとき、自動で別のノードに移るには、Longhorn の設定 `node-down-pod-deletion-policy` を、`delete-both-statefulset-and-deployment-pod` にする(既定の `do-nothing` では、Pod が Terminating のまま、手で消すまで、動かない)。より強い高可用性(自動フェイルオーバー)が要るなら、CloudNativePG などの、PostgreSQL のオペレーターに替える。
 - **接続数**: PostgreSQL の `max_connections` は 300(`postgres.yaml`)。アプリは、1 プロセスあたり最大 10 接続(`shared/database`)、Temporal は、Pod ごとに約 30 接続で、3 つずつ動かすと、約 250 になる。レプリカを増やすときは、`max_connections` も見直す。

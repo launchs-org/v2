@@ -34,3 +34,28 @@ func FormatMillis(moment time.Time) string {
 	// JST に直して、ミリ秒まで書く(ミリ秒より細かい部分は、切り捨てる)。
 	return moment.In(location).Format("2006-01-02T15:04:05.000Z07:00")
 }
+
+// DayStart は、時刻が属する日本時間の日の、始まり(0 時)を返す。
+//
+// 引数:
+//   - moment: 時刻。
+//
+// 戻り値:
+//   - その日の 0 時(JST)。
+func DayStart(moment time.Time) time.Time {
+	// JST に直して、年月日だけを残す。
+	local := moment.In(location)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+}
+
+// DayString は、時刻が属する日本時間の日を、2026-11-26 の形で返す(ファイル名に使う)。
+//
+// 引数:
+//   - moment: 時刻。
+//
+// 戻り値:
+//   - YYYY-MM-DD。
+func DayString(moment time.Time) string {
+	// JST に直して、日付だけを書く。
+	return moment.In(location).Format("2006-01-02")
+}

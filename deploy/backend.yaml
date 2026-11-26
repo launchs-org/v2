@@ -62,6 +62,16 @@ spec:
             - name: API_TOKEN_SECRET
               valueFrom:
                 secretKeyRef: {name: launchs-secret, key: API_TOKEN_SECRET}
+            # アクセスログの転送(dev-docs/log-export.md)。無ければ、その機能は無効(EXPORT_CREDENTIAL_KEY が無いと、全体が無効。GOOGLE_OAUTH_* が無いと、Google Drive だけが無効)。
+            - name: EXPORT_CREDENTIAL_KEY
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: EXPORT_CREDENTIAL_KEY, optional: true}
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: GOOGLE_OAUTH_CLIENT_ID, optional: true}
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: GOOGLE_OAUTH_CLIENT_SECRET, optional: true}
           envFrom:
             - configMapRef:
                 name: launchs-config

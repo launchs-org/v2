@@ -1,0 +1,60 @@
+# ingress のアクセスログを、利用者が設定した送り先(webhook と Google Drive)に書き出す(dev-docs/log-export.md)。同時に動くのは 1 つ(advisory lock)。
+# k8s には、つながない(DB と、外向きの HTTPS だけを使う)ので、ServiceAccount の権限は要らない。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exporter
+  namespace: launchs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: exporter
+        admission.datadoghq.com/enabled: "false"
+    spec:
+      # k8s の API を使わないので、トークンを、Pod に入れない。
+      automountServiceAccountToken: false
+      # 3 つのノードに、ばらけさせる(同じノードに偏らない。ノードが足りないときは、偏ってもよい)。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: exporter
+      containers:
+        - name: exporter
+          image: ghcr.io/launchs-org/v2/exporter:latest
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgres://postgres:$(POSTGRES_PASSWORD)@postgres:5432/app?sslmode=disable
+            # 秘密(Secret launchs-secret)。無ければ、その機能は無効(EXPORT_CREDENTIAL_KEY が無いと、エクスポート全体が無効。GOOGLE_OAUTH_* が無いと、Google Drive だけが無効)。
+            - name: EXPORT_CREDENTIAL_KEY
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: EXPORT_CREDENTIAL_KEY, optional: true}
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: GOOGLE_OAUTH_CLIENT_ID, optional: true}
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: launchs-secret, key: GOOGLE_OAUTH_CLIENT_SECRET, optional: true}
+          envFrom:
+            - configMapRef:
+                name: launchs-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 512Mi}
