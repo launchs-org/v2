@@ -15,6 +15,10 @@ declare global {
   }
 }
 
+/** 利用規約とプライバシーポリシーの URL(GitHub Pages)。 */
+const termsUrl = "https://launchs-org.github.io/docs/v2/terms.html"
+const privacyUrl = "https://launchs-org.github.io/docs/v2/privacy.html"
+
 /** ログインとサインアップの、入力。 */
 export type LoginInput = { mode: "login" | "signup"; userName: string; password: string; invitationCode?: string; turnstileToken?: string }
 
@@ -110,6 +114,10 @@ export function LoginScreen({ onSubmit, loading, error, adminOnly = false }: Log
             {turnstileEnabled && <div ref={captchaNode} />}
             {challengeUnavailable && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>人間であることの確認の設定を取得できません。管理者にご確認ください。</div>}
             {error && <div className="badge b-bad" role="alert" style={{ whiteSpace: "normal", borderRadius: 10, padding: "8px 12px" }}>{error}</div>}
+            {/* 規約への同意の案内(ログインまたはサインアップした時点で、同意したものとみなす)。管理画面では出さない。 */}
+            {!adminOnly && <p className="faint" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.7 }}>
+              {mode === "login" ? "ログインすると" : "アカウントを作成すると"}、<a href={termsUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline" }}>利用規約</a>と<a href={privacyUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline" }}>プライバシーポリシー</a>に、同意したものとみなします。
+            </p>}
             <button className="btn primary" type="submit" style={{ minHeight: 46 }} disabled={loading || challengeUnavailable || (turnstileEnabled && !turnstileToken)}>
               {loading ? "処理しています…" : mode === "login" ? "ログイン" : "アカウントを作成"}
             </button>
